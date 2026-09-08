@@ -1,0 +1,40 @@
+# Category config — source of truth checked into git.
+# `scripts/seed_config.py` upserts this into the `category_config` DB table on setup
+# (and whenever you want to reset the DB back to these defaults). Once seeded, the
+# *DB row* is what the pipeline actually reads at runtime — an operator can tune
+# thresholds/weights/models directly in Supabase without a redeploy; re-running the
+# seed script overwrites that with what's checked in here, so treat this file as the
+# versioned baseline, not something the pipeline re-reads every cycle.
+#
+# Per Section 0 of the spec: only one category is built end-to-end for the MVP.
+# More categories get appended here in Phase 2/3 (Section 16) — do not pre-fill
+# categories that have no collector yet, it invites config/code drift.
+
+defi_yields:
+  # Score weights must sum to 1.0. These are starting values — Section 7 of the spec
+  # says to recalibrate later against real accept/reject decisions, not to get them
+  # perfect now.
+  score_weights:
+    impact: 0.35        # size of the TVL/APY move, or absolute yield level for a new pool
+    novelty: 0.25        # new pool vs. one we've already surfaced recently (see cooldown)
+    credibility: 0.25    # protocol age, audit status, TVL floor (rules out unaudited micro-pools)
+    actionability: 0.15  # pool still open, chain/asset accessible, no obvious withdrawal gate
+
+  review_threshold: 50   # 0-100. Below this, an item never reaches an LLM at all (Section 7).
+  cooldown_hours: 6      # suppress re-surfacing the same pool/protocol within this window
+  soft_daily_cap: 6      # per spec's suggested 4-8 range for Crypto Notebook (Section 17)
+
+  triage_model: deepseek-v4-flash   # cheap one-line digest summary (Section 8, step 1)
+  write_model: deepseek-v4-flash    # final post writer, until the Sonnet benchmark settles it (Section 4.3)
+  write_benchmark_status: trial
+
+  label: "🌾 DEFI YIELDS"           # notification eyebrow line (Section 10)
+
+  voice: educational
+  # Fixed three-part structure (Section 8): what happened → why it matters → what to watch.
+  # Crypto Notebook's angle is explicitly educational — mechanics and risk, not hype.
+  prompt_notes: >
+    Frame every post as teaching the mechanic, not chasing the yield. Explain *why* the
+    APY is what it is (emissions vs. real fees, lockups, IL risk) before saying whether
+    it's worth watching. Never use language that could read as investment advice —
+    describe what the numbers show, not what the reader should do with their money.

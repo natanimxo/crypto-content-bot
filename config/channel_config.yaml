@@ -1,0 +1,16 @@
+# Channel config — source of truth checked into git, upserted into `channel_config`
+# by scripts/seed_config.py. See config/category_config.yaml for the same DB-vs-YAML
+# note: the DB row is what the pipeline reads at runtime; this file is the versioned
+# baseline you reset back to.
+#
+# telegram_chat_id is left as an env reference, never a literal value — the seed
+# script resolves TELEGRAM_CHAT_ID_CRYPTO_NOTEBOOK from the environment (GitHub
+# Actions Secrets in CI, .env locally) and writes the resolved id into the DB.
+# Nothing secret ever lives in this file or in git.
+
+crypto_notebook:
+  categories:
+    - defi_yields
+  region_profile: us
+  soft_daily_cap: 8   # combined cap across this channel's categories; per-category caps still apply
+  telegram_chat_id_env: TELEGRAM_CHAT_ID_CRYPTO_NOTEBOOK
