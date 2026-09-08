@@ -24,7 +24,10 @@ defi_yields:
   cooldown_hours: 6      # suppress re-surfacing the same pool/protocol within this window
   soft_daily_cap: 6      # per spec's suggested 4-8 range for Crypto Notebook (Section 17)
 
-  triage_model: deepseek-v4-flash   # cheap one-line digest summary (Section 8, step 1)
+  # Section 8 calls out "yield changes" by name as a structured category that
+  # should use a plain Python template instead of a real LLM call for the triage
+  # line — the numbers ARE the summary. See pipeline/llm_providers/template.py.
+  triage_model: template
   write_model: deepseek-v4-flash    # final post writer, until the Sonnet benchmark settles it (Section 4.3)
   write_benchmark_status: trial
 

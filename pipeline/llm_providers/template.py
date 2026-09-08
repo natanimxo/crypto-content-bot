@@ -1,0 +1,44 @@
+"""Zero-LLM triage rendering (Section 8): for categories whose source data is
+already structured numbers, the "summary" is just formatting those numbers well —
+no model call, no cost, no latency. Register one function per category; category
+config points `triage_model: template` at whichever categories qualify.
+"""
+
+TEMPLATES = {}
+
+
+def register_template(category: str):
+    def deco(fn):
+        TEMPLATES[category] = fn
+        return fn
+    return deco
+
+
+def render(category: str, raw_item: dict) -> str:
+    if category not in TEMPLATES:
+        raise RuntimeError(
+            f"No template registered for category '{category}' — either register one "
+            f"in pipeline/llm_providers/template.py or point its triage_model at a real model."
+        )
+    return TEMPLATES[category](raw_item)
+
+
+@register_template("defi_yields")
+def render_defi_yields(raw_item: dict) -> str:
+    p = raw_item["payload"]
+    apy = p.get("apy") or 0.0
+    apy_base = p.get("apy_base") or 0.0
+    apy_reward = p.get("apy_reward") or 0.0
+    tvl = p.get("tvl_usd") or 0.0
+    pct7d = p.get("apy_pct_7d")
+
+    parts = [f"{p.get('project')} {p.get('symbol')} on {p.get('chain')}: {apy:.2f}% APY"]
+    if apy_reward:
+        parts.append(f"({apy_base:.2f}% base + {apy_reward:.2f}% reward)")
+    parts.append(f"TVL ${tvl:,.0f}")
+    if pct7d is not None:
+        direction = "up" if pct7d >= 0 else "down"
+        parts.append(f"{direction} {abs(pct7d):.1f}pp over 7d")
+    if p.get("il_risk") == "yes" and not p.get("stablecoin"):
+        parts.append("IL risk flagged")
+    return " · ".join(parts)
