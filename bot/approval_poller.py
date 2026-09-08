@@ -52,6 +52,24 @@ def _operator_chat_id() -> str:
     return chat_id
 
 
+def _safe_ack(cq_id: str, text: str | None = None) -> None:
+    """answer_callback_query, but a failure here (almost always Telegram's
+    'query is too old' — live-observed 2026-09-09 to happen even on the FIRST
+    answer attempt for some taps, seemingly from delivery-latency variance in
+    Telegram's own getUpdates backend, not anything on our end) must never
+    propagate and abort the caller. The toast this shows the operator is purely
+    cosmetic; the DB state change and any deferred write are what actually
+    matter, and a real bug already happened here once: an unguarded
+    answer_callback_query() raising mid-_handle_approve silently dropped the
+    'return approval' that queues the deferred LLM write, leaving an item
+    marked approved with no post ever generated for it (raw_item_id=1902).
+    Every acknowledgment in this module goes through this wrapper now."""
+    try:
+        answer_callback_query(cq_id, text)
+    except Exception:
+        logger.warning("Failed to ack callback_query_id=%s (likely stale) — continuing anyway", cq_id)
+
+
 def _get_last_update_id(conn):
     with dict_cursor(conn) as cur:
         cur.execute("SELECT last_update_id FROM telegram_poll_state WHERE id = 1")
@@ -172,32 +190,32 @@ def _handle_approve(conn, raw_item_id: int, cq_id: str) -> dict | None:
     """
     approval = _fetch_pending_approval(conn, raw_item_id)
     if not approval:
-        answer_callback_query(cq_id, "Already handled.")
+        _safe_ack(cq_id, "Already handled.")
         return None
     with dict_cursor(conn) as cur:
         cur.execute("UPDATE approvals SET decision = 'approved', decided_at = now() WHERE id = %s",
                      (approval["approval_id"],))
     conn.commit()
-    answer_callback_query(cq_id, "Approved — writing post...")
+    _safe_ack(cq_id, "Approved — writing post...")
     return approval
 
 
 def _handle_reject(conn, raw_item_id: int, cq_id: str):
     approval = _fetch_pending_approval(conn, raw_item_id)
     if not approval:
-        answer_callback_query(cq_id, "Already handled.")
+        _safe_ack(cq_id, "Already handled.")
         return
     with dict_cursor(conn) as cur:
         cur.execute("UPDATE approvals SET decision = 'rejected', decided_at = now() WHERE id = %s",
                      (approval["approval_id"],))
     conn.commit()
-    answer_callback_query(cq_id, "Rejected.")
+    _safe_ack(cq_id, "Rejected.")
 
 
 def _handle_edit_prompt(conn, raw_item_id: int, cq_id: str):
     approval = _fetch_pending_approval(conn, raw_item_id)
     if not approval:
-        answer_callback_query(cq_id, "Already handled.")
+        _safe_ack(cq_id, "Already handled.")
         return
     result = send_message(
         _operator_chat_id(),
@@ -207,13 +225,13 @@ def _handle_edit_prompt(conn, raw_item_id: int, cq_id: str):
         cur.execute("UPDATE approvals SET prompt_message_id = %s WHERE id = %s",
                      (result["message_id"], approval["approval_id"]))
     conn.commit()
-    answer_callback_query(cq_id, "Send your edit as a reply to my message.")
+    _safe_ack(cq_id, "Send your edit as a reply to my message.")
 
 
 def _handle_publish(conn, preview_id: int, cq_id: str, variant: str):
     preview = _fetch_preview(conn, preview_id)
     if not preview or preview["status"] != "pending":
-        answer_callback_query(cq_id, "Already handled.")
+        _safe_ack(cq_id, "Already handled.")
         return
 
     text = preview["variant_a_text"] if variant == "a" else preview["variant_b_text"]
@@ -242,7 +260,7 @@ def _handle_publish(conn, preview_id: int, cq_id: str, variant: str):
             )
         conn.commit()
 
-    answer_callback_query(cq_id, f"Published ({model_used}).")
+    _safe_ack(cq_id, f"Published ({model_used}).")
 
 
 def _handle_cancel(conn, preview_id: int, cq_id: str):
@@ -253,7 +271,7 @@ def _handle_cancel(conn, preview_id: int, cq_id: str):
         )
         updated = cur.rowcount
     conn.commit()
-    answer_callback_query(cq_id, "Cancelled — not published." if updated else "Already handled.")
+    _safe_ack(cq_id, "Cancelled — not published." if updated else "Already handled.")
 
 
 def handle_callback_query(conn, cq: dict) -> dict | None:
@@ -263,18 +281,18 @@ def handle_callback_query(conn, cq: dict) -> dict | None:
     after every callback_query in the batch has already been acked."""
     user_id = cq.get("from", {}).get("id")
     if user_id not in _allowed_user_ids():
-        answer_callback_query(cq["id"], "Not authorized.")
+        _safe_ack(cq["id"], "Not authorized.")
         return None
 
     data = cq.get("data", "")
     if ":" not in data:
-        answer_callback_query(cq["id"], "Bad request.")
+        _safe_ack(cq["id"], "Bad request.")
         return None
     action, id_str = data.split(":", 1)
     try:
         target_id = int(id_str)
     except ValueError:
-        answer_callback_query(cq["id"], "Bad request.")
+        _safe_ack(cq["id"], "Bad request.")
         return None
 
     if action == "approve":
@@ -290,7 +308,7 @@ def handle_callback_query(conn, cq: dict) -> dict | None:
     elif action == "pub_cancel":
         _handle_cancel(conn, target_id, cq["id"])
     else:
-        answer_callback_query(cq["id"], "Unknown action.")
+        _safe_ack(cq["id"], "Unknown action.")
     return None
 
 
