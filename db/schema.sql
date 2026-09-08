@@ -134,6 +134,15 @@ CREATE TABLE IF NOT EXISTS channel_alternation (
     updated_at TIMESTAMPTZ DEFAULT now()
 );
 
+-- Extension beyond spec Section 6: getUpdates offset survives between poller runs.
+-- Each approval-poll.yml run is a fresh, stateless GitHub Actions job, so this one-
+-- row table is the only place "which updates have I already processed" can live.
+CREATE TABLE IF NOT EXISTS telegram_poll_state (
+    id INT PRIMARY KEY DEFAULT 1,
+    last_update_id BIGINT,
+    CHECK (id = 1)
+);
+
 CREATE INDEX IF NOT EXISTS idx_raw_items_category ON raw_items(category);
 CREATE INDEX IF NOT EXISTS idx_raw_items_collected_at ON raw_items(collected_at);
 CREATE INDEX IF NOT EXISTS idx_scores_raw_item_id ON scores(raw_item_id);
