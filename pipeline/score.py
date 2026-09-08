@@ -31,6 +31,15 @@ def load_category_config(conn, category: str) -> dict:
     return row
 
 
+def category_config_exists(conn, category: str) -> bool:
+    """Cheap existence check, so callers that iterate a channel's categories
+    (bot/notify.py) can skip categories that are listed for a future build phase
+    but don't have a collector/scorer/config wired up yet, instead of crashing."""
+    with dict_cursor(conn) as cur:
+        cur.execute("SELECT 1 FROM category_config WHERE category = %s", (category,))
+        return cur.fetchone() is not None
+
+
 def _clamp(value: float, lo: float = 0.0, hi: float = 100.0) -> float:
     return max(lo, min(hi, value))
 

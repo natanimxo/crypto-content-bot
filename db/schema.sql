@@ -43,8 +43,23 @@ CREATE TABLE IF NOT EXISTS channel_config (
     categories TEXT[] NOT NULL,
     region_profile TEXT DEFAULT 'default',
     soft_daily_cap INT,
-    telegram_chat_id TEXT
+    chat_id TEXT   -- Telegram chat id to publish to, e.g. "-1001234567890"
 );
+
+-- Migration for a DB that already has the old column name from an earlier apply
+-- of this schema (harmless no-op on a fresh database).
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'channel_config' AND column_name = 'telegram_chat_id'
+    ) AND NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'channel_config' AND column_name = 'chat_id'
+    ) THEN
+        ALTER TABLE channel_config RENAME COLUMN telegram_chat_id TO chat_id;
+    END IF;
+END $$;
 
 -- Score per item, per its OWN category — never cross-category
 CREATE TABLE IF NOT EXISTS scores (

@@ -68,27 +68,24 @@ def seed_channels(conn, path: str):
 
     with conn.cursor() as cur:
         for channel, cfg in channels.items():
-            chat_id = os.environ.get(cfg.get("telegram_chat_id_env", ""), "")
+            chat_id = cfg.get("chat_id")
             if not chat_id:
-                print(
-                    f"  WARNING: {cfg.get('telegram_chat_id_env')} is not set — "
-                    f"'{channel}' will be seeded with an empty telegram_chat_id "
-                    f"(publishing to it will fail until you set it)."
-                )
+                print(f"  WARNING: no chat_id set for '{channel}' in channel_config.yaml — "
+                      f"publishing to it will fail until you add one.")
             cur.execute(
-                """INSERT INTO channel_config (channel, categories, region_profile, soft_daily_cap, telegram_chat_id)
+                """INSERT INTO channel_config (channel, categories, region_profile, soft_daily_cap, chat_id)
                    VALUES (%s, %s, %s, %s, %s)
                    ON CONFLICT (channel) DO UPDATE SET
                        categories = EXCLUDED.categories,
                        region_profile = EXCLUDED.region_profile,
                        soft_daily_cap = EXCLUDED.soft_daily_cap,
-                       telegram_chat_id = EXCLUDED.telegram_chat_id""",
+                       chat_id = EXCLUDED.chat_id""",
                 (
                     channel,
                     cfg["categories"],
                     cfg.get("region_profile", "default"),
                     cfg.get("soft_daily_cap"),
-                    chat_id or None,
+                    chat_id,
                 ),
             )
             print(f"  channel_config: {channel}")

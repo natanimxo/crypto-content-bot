@@ -13,14 +13,14 @@ from pipeline.telegram_api import send_message
 
 def get_channel_chat_id(conn, channel: str) -> str:
     with dict_cursor(conn) as cur:
-        cur.execute("SELECT telegram_chat_id FROM channel_config WHERE channel = %s", (channel,))
+        cur.execute("SELECT chat_id FROM channel_config WHERE channel = %s", (channel,))
         row = cur.fetchone()
-    if not row or not row["telegram_chat_id"]:
+    if not row or not row["chat_id"]:
         raise RuntimeError(
-            f"channel_config.telegram_chat_id is not set for '{channel}' — check the "
-            f"TELEGRAM_CHAT_ID_* env var referenced in config/channel_config.yaml."
+            f"channel_config.chat_id is not set for '{channel}' — check config/channel_config.yaml "
+            f"and re-run scripts/seed_config.py."
         )
-    return row["telegram_chat_id"]
+    return row["chat_id"]
 
 
 def publish_post(conn, approval_id: int, channel: str, category: str, final_text: str,

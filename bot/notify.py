@@ -20,7 +20,7 @@ from pipeline.alerts import check_and_alert  # noqa: E402
 from pipeline.db import dict_cursor, get_conn  # noqa: E402
 from pipeline.llm import generate_triage  # noqa: E402
 from pipeline.run_log import run_log  # noqa: E402
-from pipeline.score import load_category_config  # noqa: E402
+from pipeline.score import category_config_exists, load_category_config  # noqa: E402
 from pipeline.select_candidates import get_new_candidates  # noqa: E402
 from pipeline.telegram_api import send_message  # noqa: E402
 
@@ -37,6 +37,15 @@ def _get_channels(conn) -> list[dict]:
 def notify_channel(conn, channel: str, categories: list[str]) -> int | None:
     all_candidates = []  # list of (category, row)
     for category in categories:
+        # channel_config can list categories from a future build phase (Section
+        # 16) before their collector/scorer/config exist — skip rather than
+        # crash the whole channel's notification for the categories that are live.
+        if not category_config_exists(conn, category):
+            logger.warning(
+                "channel=%s lists category=%s but it has no category_config row yet "
+                "(not built/seeded) — skipping.", channel, category,
+            )
+            continue
         for row in get_new_candidates(conn, category, channel):
             all_candidates.append((category, row))
 

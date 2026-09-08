@@ -54,10 +54,11 @@ the free plan.
 3. Your operator chat id (`TELEGRAM_OPERATOR_CHAT_ID`) is the same DM chat — hit
    `https://api.telegram.org/bot<token>/getUpdates` after DMing the bot and read
    `message.chat.id` off the response.
-4. Create (or reuse) the **Crypto Notebook** Telegram channel, add the bot as an
-   admin with post permissions, post anything in the channel, then read its
-   `chat.id` the same way via `getUpdates` (channel ids look like
-   `-100xxxxxxxxxx`) → `TELEGRAM_CHAT_ID_CRYPTO_NOTEBOOK`.
+4. For each channel, add the bot as an admin with post permissions, post
+   anything in it, then read its `chat.id` the same way via `getUpdates`
+   (channel ids look like `-100xxxxxxxxxx`). These go directly into the
+   `chat_id` field for that channel in `config/channel_config.yaml` — not env
+   vars — and reach the DB via `scripts/seed_config.py`.
 
 ### 3. LLM keys
 

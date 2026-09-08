@@ -3,14 +3,58 @@
 # note: the DB row is what the pipeline reads at runtime; this file is the versioned
 # baseline you reset back to.
 #
-# telegram_chat_id is left as an env reference, never a literal value — the seed
-# script resolves TELEGRAM_CHAT_ID_CRYPTO_NOTEBOOK from the environment (GitHub
-# Actions Secrets in CI, .env locally) and writes the resolved id into the DB.
-# Nothing secret ever lives in this file or in git.
+# chat_id is the Telegram chat id to publish to — not a secret (you need the bot
+# token too, which stays in .env/Actions Secrets, to actually post), but still
+# only ever the bot's own channel id, never a personal chat.
+#
+# All 5 channels from spec Section 3 are listed here so the chat_id mapping is
+# recorded in one place, but only crypto_notebook is "live" for this build phase
+# (Section 0/16) — its categories list has real entries with working collectors.
+# The other four list their spec'd categories for reference; bot/notify.py skips
+# any category that doesn't have a category_config row yet, so seeding these now
+# is safe and doesn't touch the live defi_yields -> crypto_notebook pipeline.
+#
+# ASSUMPTION TO VERIFY: chat_ids below are mapped to channels in the order given
+# (matching Section 3's table order: Crypto Wall Street, Crypto Notebook, Alpha
+# Edge Crypto, CoinCraft, Hustle to Million). Confirm each one actually points at
+# the channel it's named for before any of these categories go live.
+
+crypto_wall_street:
+  categories:
+    - news
+    - whale_movements
+  region_profile: default
+  soft_daily_cap: 12   # spec Section 17 suggestion: 8-15 for crypto channels
+  chat_id: "-1002704031424"
 
 crypto_notebook:
   categories:
     - defi_yields
   region_profile: us
-  soft_daily_cap: 8   # combined cap across this channel's categories; per-category caps still apply
-  telegram_chat_id_env: TELEGRAM_CHAT_ID_CRYPTO_NOTEBOOK
+  soft_daily_cap: 8
+  chat_id: "-1001200205264"
+
+alpha_edge_crypto:
+  categories:
+    - airdrops
+    - web3_jobs
+  region_profile: us
+  soft_daily_cap: 12
+  chat_id: "-1001992993907"
+
+coincraft:
+  categories:
+    - airdrops
+    - web3_jobs
+  region_profile: default
+  soft_daily_cap: 12
+  chat_id: "-1002905948541"
+
+hustle_to_million:
+  categories:
+    - tool_launches
+    - grants
+    - startup_jobs
+  region_profile: default
+  soft_daily_cap: 6
+  chat_id: "-1001897854375"
