@@ -32,7 +32,9 @@ CREATE TABLE IF NOT EXISTS category_config (
     triage_model TEXT DEFAULT 'deepseek-v4-flash',  -- or 'gemini-2.5-flash-lite', or 'template' for zero-LLM categories
     write_model TEXT DEFAULT 'deepseek-v4-flash',   -- or 'claude-sonnet-5' once benchmarked in for this category
     write_benchmark_status TEXT DEFAULT 'trial',    -- 'trial' | 'settled_deepseek' | 'settled_sonnet'
-    label TEXT                                     -- notification eyebrow, e.g. "🌾 DEFI YIELDS"
+    label TEXT,                                    -- notification eyebrow, e.g. "🌾 DEFI YIELDS"
+    voice TEXT,                                     -- e.g. 'educational', 'market_summary', 'opportunity_framed'
+    prompt_notes TEXT                                -- freeform voice/framing notes fed into the write prompt (Section 8)
 );
 
 -- Channel-level config
