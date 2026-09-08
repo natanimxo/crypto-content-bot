@@ -10,8 +10,6 @@ skipped, not marked as anything, so a later cycle (once the cooldown lapses, or
 tomorrow resets the cap) can pick it back up.
 """
 
-from datetime import datetime, timezone
-
 from pipeline.db import dict_cursor
 from pipeline.score import load_category_config
 

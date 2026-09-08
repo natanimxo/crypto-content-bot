@@ -12,7 +12,6 @@ Callback_data namespaces:
 """
 
 import html
-import json
 import logging
 import os
 import sys
