@@ -5,6 +5,8 @@ dedup rules live in exactly one place (Section 7 / Section 12)."""
 import difflib
 import json
 
+from psycopg2.extras import execute_values
+
 from pipeline.db import dict_cursor
 
 
@@ -49,6 +51,35 @@ def insert_raw_item(conn, source_id: int, category: str, external_id: str, paylo
         row = cur.fetchone()
         conn.commit()
         return row["id"] if row else None
+
+
+def insert_raw_items_batch(conn, source_id: int, category: str, items: list[tuple[str, dict]]) -> int:
+    """Bulk version of insert_raw_item — one round trip for the whole batch instead
+    of one per row. A category like defi_yields can easily produce several
+    thousand candidate rows per cycle; inserting those one at a time (each with
+    its own network round trip + commit to Supabase) is what actually risks
+    blowing collect.yml's job timeout, not the collector's own fetch/filter work
+    (Section 12). `items` is a list of (external_id, payload) pairs. Returns the
+    number of rows actually inserted (existing ones are silently skipped via the
+    same UNIQUE(source_id, external_id) ON CONFLICT DO NOTHING as insert_raw_item).
+    """
+    if not items:
+        return 0
+    values = [(source_id, category, external_id, json.dumps(payload)) for external_id, payload in items]
+    with conn.cursor() as cur:
+        inserted_rows = execute_values(
+            cur,
+            """INSERT INTO raw_items (source_id, category, external_id, payload)
+               VALUES %s
+               ON CONFLICT (source_id, external_id) DO NOTHING
+               RETURNING id""",
+            values,
+            template="(%s, %s, %s, %s)",
+            page_size=500,
+            fetch=True,
+        )
+    conn.commit()
+    return len(inserted_rows)
 
 
 def _normalize_title(title: str) -> str:

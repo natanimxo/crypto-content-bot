@@ -12,7 +12,7 @@ import sys
 from pipeline.db import get_conn
 from pipeline.http import get_json
 from pipeline.run_log import run_log
-from pipeline.store import get_or_create_source, insert_raw_item
+from pipeline.store import get_or_create_source, insert_raw_items_batch
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -55,6 +55,11 @@ def collect() -> int:
             pools = fetch_pools()
             state["details"]["fetched"] = len(pools)
 
+            # Build the whole batch in Python first, then one round trip to
+            # store it — thousands of individual INSERT+commit calls over the
+            # network is what actually risks blowing collect.yml's job timeout,
+            # not the fetch/filter work itself (Section 12).
+            items = []
             for pool in pools:
                 tvl = pool.get("tvlUsd") or 0
                 apy = pool.get("apy")
@@ -82,10 +87,9 @@ def collect() -> int:
                     "stablecoin": pool.get("stablecoin"),
                     "prediction": (pool.get("predictions") or {}).get("predictedClass"),
                 }
-                row_id = insert_raw_item(conn, source_id, CATEGORY, pool_id, payload)
-                if row_id:
-                    inserted += 1
+                items.append((pool_id, payload))
 
+            inserted = insert_raw_items_batch(conn, source_id, CATEGORY, items)
             state["details"]["inserted"] = inserted
             logger.info("defi_yields: fetched=%d inserted=%d", len(pools), inserted)
         return inserted

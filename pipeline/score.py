@@ -8,6 +8,8 @@ Adding a new category later means writing one function and registering it with
 
 import json
 
+from psycopg2.extras import execute_values
+
 from pipeline.db import dict_cursor
 
 SCORERS = {}
@@ -109,16 +111,26 @@ def score_new_items(conn, category: str) -> int:
         )
         unscored = cur.fetchall()
 
-    count = 0
-    with dict_cursor(conn) as cur:
-        for row in unscored:
-            breakdown = scorer(row["payload"])
-            total = sum(weights[k] * breakdown[k] for k in weights)
-            cur.execute(
-                """INSERT INTO scores (raw_item_id, category, score, score_breakdown)
-                   VALUES (%s, %s, %s, %s)""",
-                (row["id"], category, round(total, 1), json.dumps(breakdown)),
-            )
-            count += 1
+    if not unscored:
+        return 0
+
+    values = []
+    for row in unscored:
+        breakdown = scorer(row["payload"])
+        total = sum(weights[k] * breakdown[k] for k in weights)
+        values.append((row["id"], category, round(total, 1), json.dumps(breakdown)))
+
+    # One round trip for the whole batch, not one INSERT per row — a category
+    # with thousands of unscored items (e.g. defi_yields' first run) would
+    # otherwise take one network round trip per row against Supabase, which is
+    # what actually risks timing out collect.yml's job limit (Section 12).
+    with conn.cursor() as cur:
+        execute_values(
+            cur,
+            """INSERT INTO scores (raw_item_id, category, score, score_breakdown) VALUES %s""",
+            values,
+            template="(%s, %s, %s, %s)",
+            page_size=500,
+        )
     conn.commit()
-    return count
+    return len(values)
