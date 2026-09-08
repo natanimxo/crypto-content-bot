@@ -50,7 +50,22 @@ def _clamp(value: float, lo: float = 0.0, hi: float = 100.0) -> float:
 def score_defi_yields(payload: dict) -> dict:
     """Breakdown components, each 0-100. See config/category_config.yaml for the
     weights applied to these, and prompt_notes for how "impact" is meant to read
-    (mechanics, not hype)."""
+    (mechanics, not hype).
+
+    TODO(scoring): live-observed on 2026-09-09 — very high/spiking APY (e.g.
+    200%+ apy with 100+ percentage-point apy_pct_7d jumps, see raydium-amm
+    WSOL-USDC and pepeteam-swaves SWAVES in that run's real candidates) currently
+    scores as highly as a healthy, stable yield: `impact` saturates at 33%+ APY
+    with no ceiling-awareness, and `novelty` explicitly rewards a big 7d swing
+    with no sense of direction or plausibility. In practice this pattern usually
+    means unsustainable token emissions, not a real opportunity — the two should
+    probably be distinguished. Candidate fix: a penalty when apy is far above
+    the category's own rolling median/percentile (not a fixed cutoff, since
+    "high" is relative to market conditions) — needs a rolling stat over recent
+    raw_items, not just the single payload. Deliberately NOT implemented yet —
+    the MVP notify/approve/write/publish loop needs to be fully validated first
+    before touching scoring weights.
+    """
     apy = payload.get("apy") or 0.0
     apy_base = payload.get("apy_base") or 0.0
     apy_reward = payload.get("apy_reward") or 0.0
