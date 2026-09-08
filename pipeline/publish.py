@@ -4,6 +4,7 @@ button handler in bot/approval_poller.py, after an operator has seen the final
 text (Section 9 step 4).
 """
 
+import html
 from datetime import datetime, timezone
 
 from pipeline.db import dict_cursor
@@ -28,7 +29,12 @@ def publish_post(conn, approval_id: int, channel: str, category: str, final_text
     line, Section 10) and records the post. Returns the new posts.id."""
     chat_id = get_channel_chat_id(conn, channel)
 
-    body = f"<b>{label}</b>\n\n{final_text}" if label else final_text
+    # final_text is LLM- or operator-authored free text sent with parse_mode=HTML
+    # (Section 10's label styling) — escape it so a stray '<', '>', or '&' doesn't
+    # make Telegram reject the whole publish call. posts.final_text below stores
+    # the original, unescaped text; only the wire body is escaped.
+    escaped_text = html.escape(final_text)
+    body = f"<b>{html.escape(label)}</b>\n\n{escaped_text}" if label else escaped_text
     result = send_message(chat_id, body)
 
     with dict_cursor(conn) as cur:

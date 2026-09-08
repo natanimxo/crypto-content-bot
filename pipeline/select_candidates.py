@@ -21,7 +21,7 @@ def _already_notified_ids(conn, category: str) -> set[int]:
     re-notify the same item, independent of cooldown/topic logic)."""
     with dict_cursor(conn) as cur:
         cur.execute(
-            """SELECT DISTINCT unnest(candidate_raw_item_ids) AS raw_item_id
+            """SELECT DISTINCT r.id AS raw_item_id
                FROM notifications n
                JOIN raw_items r ON r.id = ANY(n.candidate_raw_item_ids)
                WHERE r.category = %s""",
