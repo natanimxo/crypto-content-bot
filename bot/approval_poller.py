@@ -5,8 +5,11 @@ we're up to, which approval is mid-edit, which preview is awaiting Publish/Cance
 lives in Postgres, never in memory between runs.
 
 Callback_data namespaces:
-  approve:<approval_id>  reject:<approval_id>  edit:<approval_id>   — from the
-      per-candidate digest buttons (bot/notify.py)
+  approve:<raw_item_id>  reject:<raw_item_id>  edit:<raw_item_id>   — from the
+      per-candidate digest buttons (bot/notify.py). Keyed by raw_item_id, not an
+      approval_id, because notify.py only creates the approvals row AFTER its
+      Telegram send succeeds — there's nothing to reference yet when the buttons
+      are built. Looked up here as "the pending approval for this raw_item_id".
   pub_a:<preview_id>  pub_b:<preview_id>  pub_cancel:<preview_id>   — from the
       post-write preview (this module), pub_b only present during a benchmark trial
 """
@@ -17,6 +20,8 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from dotenv import load_dotenv  # noqa: E402
 
 from pipeline.alerts import check_and_alert  # noqa: E402
 from pipeline.db import dict_cursor, get_conn  # noqa: E402
@@ -64,7 +69,10 @@ def _set_last_update_id(conn, update_id: int):
     conn.commit()
 
 
-def _fetch_approval(conn, approval_id: int):
+def _fetch_pending_approval(conn, raw_item_id: int):
+    """The 'pending' approval for this raw_item_id, if any — there's at most one,
+    since a raw_item only ever appears in one notification (Section 7's
+    already-notified check) and therefore only ever gets one approvals row."""
     with dict_cursor(conn) as cur:
         cur.execute(
             """SELECT a.id AS approval_id, a.decision, a.raw_item_id, a.prompt_message_id,
@@ -73,8 +81,8 @@ def _fetch_approval(conn, approval_id: int):
                JOIN raw_items r ON r.id = a.raw_item_id
                JOIN scores s ON s.raw_item_id = r.id AND s.category = r.category
                JOIN notifications n ON n.id = a.notification_id
-               WHERE a.id = %s""",
-            (approval_id,),
+               WHERE a.raw_item_id = %s AND a.decision = 'pending'""",
+            (raw_item_id,),
         )
         return cur.fetchone()
 
@@ -148,40 +156,43 @@ def _generate_and_preview(conn, approval: dict):
         _send_preview_and_store(conn, approval["approval_id"], channel, category, cfg["write_model"], text)
 
 
-def _handle_approve(conn, approval_id: int, cq_id: str):
-    approval = _fetch_approval(conn, approval_id)
-    if not approval or approval["decision"] != "pending":
+def _handle_approve(conn, raw_item_id: int, cq_id: str):
+    approval = _fetch_pending_approval(conn, raw_item_id)
+    if not approval:
         answer_callback_query(cq_id, "Already handled.")
         return
     with dict_cursor(conn) as cur:
-        cur.execute("UPDATE approvals SET decision = 'approved', decided_at = now() WHERE id = %s", (approval_id,))
+        cur.execute("UPDATE approvals SET decision = 'approved', decided_at = now() WHERE id = %s",
+                     (approval["approval_id"],))
     conn.commit()
     answer_callback_query(cq_id, "Approved — writing post...")
     _generate_and_preview(conn, approval)
 
 
-def _handle_reject(conn, approval_id: int, cq_id: str):
+def _handle_reject(conn, raw_item_id: int, cq_id: str):
+    approval = _fetch_pending_approval(conn, raw_item_id)
+    if not approval:
+        answer_callback_query(cq_id, "Already handled.")
+        return
     with dict_cursor(conn) as cur:
-        cur.execute(
-            "UPDATE approvals SET decision = 'rejected', decided_at = now() WHERE id = %s AND decision = 'pending'",
-            (approval_id,),
-        )
-        updated = cur.rowcount
+        cur.execute("UPDATE approvals SET decision = 'rejected', decided_at = now() WHERE id = %s",
+                     (approval["approval_id"],))
     conn.commit()
-    answer_callback_query(cq_id, "Rejected." if updated else "Already handled.")
+    answer_callback_query(cq_id, "Rejected.")
 
 
-def _handle_edit_prompt(conn, approval_id: int, cq_id: str):
-    approval = _fetch_approval(conn, approval_id)
-    if not approval or approval["decision"] != "pending":
+def _handle_edit_prompt(conn, raw_item_id: int, cq_id: str):
+    approval = _fetch_pending_approval(conn, raw_item_id)
+    if not approval:
         answer_callback_query(cq_id, "Already handled.")
         return
     result = send_message(
         _operator_chat_id(),
-        f"Reply to THIS message with the final post text for approval #{approval_id}.",
+        f"Reply to THIS message with the final post text for approval #{approval['approval_id']}.",
     )
     with dict_cursor(conn) as cur:
-        cur.execute("UPDATE approvals SET prompt_message_id = %s WHERE id = %s", (result["message_id"], approval_id))
+        cur.execute("UPDATE approvals SET prompt_message_id = %s WHERE id = %s",
+                     (result["message_id"], approval["approval_id"]))
     conn.commit()
     answer_callback_query(cq_id, "Send your edit as a reply to my message.")
 
@@ -307,6 +318,7 @@ def process_update(conn, update: dict):
 
 
 def run() -> None:
+    load_dotenv()  # no-op in CI (no .env there); picks up local .env when run directly
     conn = get_conn()
     try:
         with run_log(conn, "approval_poll") as state:

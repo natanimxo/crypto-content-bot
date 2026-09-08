@@ -16,6 +16,8 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from dotenv import load_dotenv  # noqa: E402
+
 from pipeline.alerts import check_and_alert  # noqa: E402
 from pipeline.db import dict_cursor, get_conn  # noqa: E402
 from pipeline.llm import generate_triage  # noqa: E402
@@ -52,14 +54,13 @@ def notify_channel(conn, channel: str, categories: list[str]) -> int | None:
     if not all_candidates:
         return None
 
-    with dict_cursor(conn) as cur:
-        cur.execute(
-            "INSERT INTO notifications (channel, candidate_raw_item_ids) VALUES (%s, %s) RETURNING id",
-            (channel, [row["raw_item_id"] for _, row in all_candidates]),
-        )
-        notification_id = cur.fetchone()["id"]
-    conn.commit()
-
+    # Build the whole message and keyboard BEFORE writing anything to the DB.
+    # Buttons reference raw_item_id (not an approval_id) precisely so nothing
+    # needs to exist in the DB yet to build them — notifications/approvals rows
+    # are only ever written after send_message succeeds, further down. If the
+    # send fails (rate limit, chat-not-found, transient network), NOTHING is
+    # persisted, so these candidates remain "new" and get retried next cycle
+    # instead of being silently and permanently marked as already-notified.
     lines = [f"🆕 <b>{len(all_candidates)} new candidate(s)</b> cleared threshold for <b>{channel}</b>\n"]
     keyboard_rows = []
 
@@ -67,23 +68,14 @@ def notify_channel(conn, channel: str, categories: list[str]) -> int | None:
         cfg = load_category_config(conn, category)
         triage_line = generate_triage(conn, category, row)
 
-        with dict_cursor(conn) as cur:
-            cur.execute(
-                """INSERT INTO approvals (notification_id, raw_item_id, decision)
-                   VALUES (%s, %s, 'pending') RETURNING id""",
-                (notification_id, row["raw_item_id"]),
-            )
-            approval_id = cur.fetchone()["id"]
-        conn.commit()
-
         label = cfg.get("label") or category
         lines.append(
             f"<b>{html.escape(label)}</b> — score {row['score']}/100\n{html.escape(triage_line)}\n"
         )
         keyboard_rows.append([
-            {"text": "✅ Approve", "callback_data": f"approve:{approval_id}"},
-            {"text": "✏️ Edit", "callback_data": f"edit:{approval_id}"},
-            {"text": "❌ Reject", "callback_data": f"reject:{approval_id}"},
+            {"text": "✅ Approve", "callback_data": f"approve:{row['raw_item_id']}"},
+            {"text": "✏️ Edit", "callback_data": f"edit:{row['raw_item_id']}"},
+            {"text": "❌ Reject", "callback_data": f"reject:{row['raw_item_id']}"},
         ])
 
     text = "\n".join(lines)
@@ -93,11 +85,22 @@ def notify_channel(conn, channel: str, categories: list[str]) -> int | None:
 
     result = send_message(operator_chat_id, text, reply_markup={"inline_keyboard": keyboard_rows})
 
+    # Only now, with a real telegram_message_id in hand, persist the notification
+    # and one 'pending' approval per candidate (approval_poller.py looks these up
+    # by raw_item_id + decision='pending' when a button is tapped).
     with dict_cursor(conn) as cur:
         cur.execute(
-            "UPDATE notifications SET telegram_message_id = %s WHERE id = %s",
-            (result["message_id"], notification_id),
+            """INSERT INTO notifications (channel, candidate_raw_item_ids, telegram_message_id)
+               VALUES (%s, %s, %s) RETURNING id""",
+            (channel, [row["raw_item_id"] for _, row in all_candidates], result["message_id"]),
         )
+        notification_id = cur.fetchone()["id"]
+        for _, row in all_candidates:
+            cur.execute(
+                """INSERT INTO approvals (notification_id, raw_item_id, decision)
+                   VALUES (%s, %s, 'pending')""",
+                (notification_id, row["raw_item_id"]),
+            )
     conn.commit()
 
     logger.info("notify: channel=%s candidates=%d notification_id=%s", channel, len(all_candidates), notification_id)
@@ -105,6 +108,7 @@ def notify_channel(conn, channel: str, categories: list[str]) -> int | None:
 
 
 def run() -> None:
+    load_dotenv()  # no-op in CI (no .env there); picks up local .env when run directly
     conn = get_conn()
     try:
         with run_log(conn, "notify") as state:

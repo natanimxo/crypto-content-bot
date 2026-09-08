@@ -9,6 +9,8 @@ collector does no scoring itself, just fetch → filter obvious noise → store.
 import logging
 import sys
 
+from dotenv import load_dotenv
+
 from pipeline.db import get_conn
 from pipeline.http import get_json
 from pipeline.run_log import run_log
@@ -45,6 +47,7 @@ def fetch_pools() -> list[dict]:
 
 
 def collect() -> int:
+    load_dotenv()  # no-op in CI (no .env there); picks up local .env when run directly
     conn = get_conn()
     inserted = 0
     try:
