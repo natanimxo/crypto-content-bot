@@ -156,17 +156,30 @@ def _generate_and_preview(conn, approval: dict):
         _send_preview_and_store(conn, approval["approval_id"], channel, category, cfg["write_model"], text)
 
 
-def _handle_approve(conn, raw_item_id: int, cq_id: str):
+def _handle_approve(conn, raw_item_id: int, cq_id: str) -> dict | None:
+    """Fast phase only: mark approved and ack the tap. Returns the approval row
+    if the caller (run()) should now do the slow LLM write for it, else None.
+
+    Deliberately does NOT call _generate_and_preview() here — see the "why
+    two-phase" note on run(). A live bug (2026-09-09): when this used to
+    generate-and-send inline, a 3-tap batch (approve+reject+edit landing in the
+    same poll) failed with 'query is too old and response timeout expired' on
+    the 2nd and 3rd taps, because the 1st tap's benchmark-trial dual LLM
+    generate (DeepSeek + Sonnet, both real API round trips) ran before the loop
+    ever reached the other two callback_query_ids — Telegram's callback
+    validity window doesn't wait for us. Every tap in a batch is now acked
+    before any tap's slow work begins.
+    """
     approval = _fetch_pending_approval(conn, raw_item_id)
     if not approval:
         answer_callback_query(cq_id, "Already handled.")
-        return
+        return None
     with dict_cursor(conn) as cur:
         cur.execute("UPDATE approvals SET decision = 'approved', decided_at = now() WHERE id = %s",
                      (approval["approval_id"],))
     conn.commit()
     answer_callback_query(cq_id, "Approved — writing post...")
-    _generate_and_preview(conn, approval)
+    return approval
 
 
 def _handle_reject(conn, raw_item_id: int, cq_id: str):
@@ -243,36 +256,42 @@ def _handle_cancel(conn, preview_id: int, cq_id: str):
     answer_callback_query(cq_id, "Cancelled — not published." if updated else "Already handled.")
 
 
-def handle_callback_query(conn, cq: dict):
+def handle_callback_query(conn, cq: dict) -> dict | None:
+    """Fast phase: ack the tap and do any cheap (non-LLM) state update. Returns
+    an approval row if slow LLM write work is still owed for it (only the
+    'approve' action ever returns non-None) — run() does that in a second pass,
+    after every callback_query in the batch has already been acked."""
     user_id = cq.get("from", {}).get("id")
     if user_id not in _allowed_user_ids():
         answer_callback_query(cq["id"], "Not authorized.")
-        return
+        return None
 
     data = cq.get("data", "")
     if ":" not in data:
         answer_callback_query(cq["id"], "Bad request.")
-        return
+        return None
     action, id_str = data.split(":", 1)
     try:
         target_id = int(id_str)
     except ValueError:
         answer_callback_query(cq["id"], "Bad request.")
-        return
+        return None
 
-    handlers = {
-        "approve": lambda: _handle_approve(conn, target_id, cq["id"]),
-        "reject": lambda: _handle_reject(conn, target_id, cq["id"]),
-        "edit": lambda: _handle_edit_prompt(conn, target_id, cq["id"]),
-        "pub_a": lambda: _handle_publish(conn, target_id, cq["id"], "a"),
-        "pub_b": lambda: _handle_publish(conn, target_id, cq["id"], "b"),
-        "pub_cancel": lambda: _handle_cancel(conn, target_id, cq["id"]),
-    }
-    handler = handlers.get(action)
-    if not handler:
+    if action == "approve":
+        return _handle_approve(conn, target_id, cq["id"])
+    elif action == "reject":
+        _handle_reject(conn, target_id, cq["id"])
+    elif action == "edit":
+        _handle_edit_prompt(conn, target_id, cq["id"])
+    elif action == "pub_a":
+        _handle_publish(conn, target_id, cq["id"], "a")
+    elif action == "pub_b":
+        _handle_publish(conn, target_id, cq["id"], "b")
+    elif action == "pub_cancel":
+        _handle_cancel(conn, target_id, cq["id"])
+    else:
         answer_callback_query(cq["id"], "Unknown action.")
-        return
-    handler()
+    return None
 
 
 def handle_message(conn, msg: dict):
@@ -310,30 +329,69 @@ def handle_message(conn, msg: dict):
     _send_preview_and_store(conn, row["approval_id"], row["channel"], row["category"], "operator_edited", text)
 
 
-def process_update(conn, update: dict):
+def process_update(conn, update: dict) -> dict | None:
     if "callback_query" in update:
-        handle_callback_query(conn, update["callback_query"])
+        return handle_callback_query(conn, update["callback_query"])
     elif "message" in update:
         handle_message(conn, update["message"])
+    return None
 
 
 def run() -> None:
+    """Two-phase per poll, not one pass per update — see _handle_approve's
+    docstring for the live bug this fixes. Phase 1 acks every update in the
+    batch (fast: DB state checks + answerCallbackQuery, no LLM calls), so a
+    slow write for one candidate can never cause another candidate's tap to go
+    stale waiting behind it. Phase 2 then does the actual (possibly slow) LLM
+    writes, one approval at a time, now that nothing is waiting on them."""
     load_dotenv()  # no-op in CI (no .env there); picks up local .env when run directly
     conn = get_conn()
     try:
         with run_log(conn, "approval_poll") as state:
             offset = _get_last_update_id(conn)
-            updates = get_updates(offset=(offset + 1) if offset else None)
+            requested_offset = (offset + 1) if offset else None
+            updates = get_updates(offset=requested_offset)
+
+            # Log exactly what this run saw, before doing anything with it — a
+            # 2026-09-09 live session spent a long manual DB/API investigation
+            # reconstructing which update_ids a run actually received after the
+            # fact, because success was silent and only failures were logged.
+            # This makes that reconstructible directly from run_logs next time.
+            update_summary = [
+                {
+                    "update_id": u["update_id"],
+                    "kind": "callback_query" if "callback_query" in u else ("message" if "message" in u else "other"),
+                    "data": u.get("callback_query", {}).get("data"),
+                }
+                for u in updates
+            ]
+            logger.info("poll: requested_offset=%s fetched=%d %s", requested_offset, len(updates), update_summary)
+
+            deferred_approvals = []
             processed = 0
             for update in updates:
                 try:
-                    process_update(conn, update)
+                    result = process_update(conn, update)
+                    if result:
+                        deferred_approvals.append(result)
+                    logger.info("poll: processed update_id=%s ok", update["update_id"])
                 except Exception:
                     logger.exception("Failed processing update %s", update.get("update_id"))
                 finally:
                     _set_last_update_id(conn, update["update_id"])
                     processed += 1
+
+            for approval in deferred_approvals:
+                try:
+                    _generate_and_preview(conn, approval)
+                    logger.info("poll: generated write for approval_id=%s", approval["approval_id"])
+                except Exception:
+                    logger.exception("Failed generating post for approval_id=%s", approval["approval_id"])
+
+            state["details"]["requested_offset"] = requested_offset
+            state["details"]["fetched_update_ids"] = [u["update_id"] for u in updates]
             state["details"]["updates_processed"] = processed
+            state["details"]["writes_generated"] = len(deferred_approvals)
         check_and_alert(conn, "approval_poll")
     except Exception:
         check_and_alert(conn, "approval_poll")
