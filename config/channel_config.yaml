@@ -14,10 +14,8 @@
 # any category that doesn't have a category_config row yet, so seeding these now
 # is safe and doesn't touch the live defi_yields -> crypto_notebook pipeline.
 #
-# ASSUMPTION TO VERIFY: chat_ids below are mapped to channels in the order given
-# (matching Section 3's table order: Crypto Wall Street, Crypto Notebook, Alpha
-# Edge Crypto, CoinCraft, Hustle to Million). Confirm each one actually points at
-# the channel it's named for before any of these categories go live.
+# chat_ids below were given explicitly by the operator (not inferred from any
+# ordering) — confirmed correct as of the mapping they provided.
 
 crypto_wall_street:
   categories:
@@ -25,14 +23,14 @@ crypto_wall_street:
     - whale_movements
   region_profile: default
   soft_daily_cap: 12   # spec Section 17 suggestion: 8-15 for crypto channels
-  chat_id: "-1002704031424"
+  chat_id: "-1001200205264"
 
 crypto_notebook:
   categories:
     - defi_yields
   region_profile: us
   soft_daily_cap: 8
-  chat_id: "-1001200205264"
+  chat_id: "-1002905948541"
 
 alpha_edge_crypto:
   categories:
@@ -48,7 +46,7 @@ coincraft:
     - web3_jobs
   region_profile: default
   soft_daily_cap: 12
-  chat_id: "-1002905948541"
+  chat_id: "-1002704031424"
 
 hustle_to_million:
   categories:
