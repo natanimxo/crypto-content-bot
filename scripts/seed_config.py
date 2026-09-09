@@ -68,24 +68,27 @@ def seed_channels(conn, path: str):
 
     with conn.cursor() as cur:
         for channel, cfg in channels.items():
-            chat_id = cfg.get("chat_id")
-            if not chat_id:
-                print(f"  WARNING: no chat_id set for '{channel}' in channel_config.yaml — "
-                      f"publishing to it will fail until you add one.")
+            display_name = cfg.get("display_name")
+            if not display_name:
+                print(f"  WARNING: no display_name set for '{channel}' — its label header "
+                      f"will fall back to the raw channel slug.")
             cur.execute(
-                """INSERT INTO channel_config (channel, categories, region_profile, soft_daily_cap, chat_id)
-                   VALUES (%s, %s, %s, %s, %s)
+                """INSERT INTO channel_config
+                       (channel, categories, region_profile, soft_daily_cap, chat_id, display_name)
+                   VALUES (%s, %s, %s, %s, %s, %s)
                    ON CONFLICT (channel) DO UPDATE SET
                        categories = EXCLUDED.categories,
                        region_profile = EXCLUDED.region_profile,
                        soft_daily_cap = EXCLUDED.soft_daily_cap,
-                       chat_id = EXCLUDED.chat_id""",
+                       chat_id = EXCLUDED.chat_id,
+                       display_name = EXCLUDED.display_name""",
                 (
                     channel,
                     cfg["categories"],
                     cfg.get("region_profile", "default"),
                     cfg.get("soft_daily_cap"),
-                    chat_id,
+                    cfg.get("chat_id"),
+                    display_name,
                 ),
             )
             print(f"  channel_config: {channel}")

@@ -10,8 +10,11 @@ Callback_data namespaces:
       approval_id, because notify.py only creates the approvals row AFTER its
       Telegram send succeeds — there's nothing to reference yet when the buttons
       are built. Looked up here as "the pending approval for this raw_item_id".
-  pub_a:<preview_id>  pub_b:<preview_id>  pub_cancel:<preview_id>   — from the
-      post-write preview (this module), pub_b only present during a benchmark trial
+  mark_sent_a:<preview_id>  mark_sent_b:<preview_id>  discard:<preview_id>   — from
+      the post-write preview (this module), mark_sent_b only present during a
+      benchmark trial. "Mark as sent" logs to `posts` for history/dedup — as of
+      2026-09-10 the bot never posts to a channel itself (see pipeline/publish.py);
+      the operator copies/forwards the labeled text themselves.
 """
 
 import html
@@ -25,7 +28,7 @@ from dotenv import load_dotenv  # noqa: E402
 
 from pipeline.alerts import check_and_alert  # noqa: E402
 from pipeline.db import dict_cursor, get_conn  # noqa: E402
-from pipeline.publish import publish_post  # noqa: E402
+from pipeline.publish import get_channel_display_name, mark_as_sent  # noqa: E402
 from pipeline.run_log import run_log  # noqa: E402
 from pipeline.score import load_category_config  # noqa: E402
 from pipeline.telegram_api import answer_callback_query, get_updates, send_message  # noqa: E402
@@ -33,11 +36,6 @@ from pipeline.write_post import generate_post, generate_post_variants  # noqa: E
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
-
-# Section 9 step 4: "Pick one; it's a one-line config flag." True = always show a
-# final Publish/Cancel confirm after writing (safer default). Flip to False to
-# publish immediately on Approve/Edit and skip the confirm step.
-REQUIRE_PUBLISH_CONFIRM = True
 
 
 def _allowed_user_ids() -> set:
@@ -111,6 +109,16 @@ def _fetch_preview(conn, preview_id: int):
         return cur.fetchone()
 
 
+def _label_header(conn, category: str, channel: str) -> str:
+    """'🌾 DEFI YIELDS → Crypto Notebook' — sits at the very top of what reaches
+    the operator, since (2026-09-10) they copy/forward this text themselves and
+    need to know at a glance which of the 5 channels it's for."""
+    cfg = load_category_config(conn, category)
+    label = cfg.get("label") or category
+    display_name = get_channel_display_name(conn, channel)
+    return f"{label} → {display_name}"
+
+
 def _send_preview_and_store(conn, approval_id: int, channel: str, category: str,
                              variant_a_model: str, variant_a_text: str,
                              variant_b_model: str | None = None, variant_b_text: str | None = None) -> int:
@@ -125,22 +133,30 @@ def _send_preview_and_store(conn, approval_id: int, channel: str, category: str,
         preview_id = cur.fetchone()["id"]
     conn.commit()
 
+    header = html.escape(_label_header(conn, category, channel))
+
     if variant_b_model:
+        # Both variants carry the SAME label — it's the post's own header, not
+        # per-model metadata — so it sits once at the top, above either version.
         text = (
+            f"<b>{header}</b>\n\n"
             f"<b>Version A</b> ({html.escape(variant_a_model)}):\n{html.escape(variant_a_text)}\n\n"
             f"<b>Version B</b> ({html.escape(variant_b_model)}):\n{html.escape(variant_b_text)}\n\n"
-            f"Publish which one?"
+            f"Copy whichever version you send, then mark it as sent."
         )
         keyboard = [
-            [{"text": "📤 Publish A", "callback_data": f"pub_a:{preview_id}"},
-             {"text": "📤 Publish B", "callback_data": f"pub_b:{preview_id}"}],
-            [{"text": "❌ Cancel", "callback_data": f"pub_cancel:{preview_id}"}],
+            [{"text": "✅ Mark A as sent", "callback_data": f"mark_sent_a:{preview_id}"},
+             {"text": "✅ Mark B as sent", "callback_data": f"mark_sent_b:{preview_id}"}],
+            [{"text": "❌ Discard", "callback_data": f"discard:{preview_id}"}],
         ]
     else:
-        text = f"{html.escape(variant_a_text)}\n\nPublish this?"
+        text = (
+            f"<b>{header}</b>\n\n{html.escape(variant_a_text)}\n\n"
+            f"Copy the text above and send it yourself, then mark it as sent."
+        )
         keyboard = [[
-            {"text": "📤 Publish", "callback_data": f"pub_a:{preview_id}"},
-            {"text": "❌ Cancel", "callback_data": f"pub_cancel:{preview_id}"},
+            {"text": "✅ Mark as sent", "callback_data": f"mark_sent_a:{preview_id}"},
+            {"text": "❌ Discard", "callback_data": f"discard:{preview_id}"},
         ]]
 
     result = send_message(_operator_chat_id(), text, reply_markup={"inline_keyboard": keyboard})
@@ -228,7 +244,9 @@ def _handle_edit_prompt(conn, raw_item_id: int, cq_id: str):
     _safe_ack(cq_id, "Send your edit as a reply to my message.")
 
 
-def _handle_publish(conn, preview_id: int, cq_id: str, variant: str):
+def _handle_mark_sent(conn, preview_id: int, cq_id: str, variant: str):
+    """No Telegram send here — the operator has already copied/forwarded the
+    text themselves. This just logs it to `posts` for history/dedup."""
     preview = _fetch_preview(conn, preview_id)
     if not preview or preview["status"] != "pending":
         _safe_ack(cq_id, "Already handled.")
@@ -236,9 +254,8 @@ def _handle_publish(conn, preview_id: int, cq_id: str, variant: str):
 
     text = preview["variant_a_text"] if variant == "a" else preview["variant_b_text"]
     model_used = preview["variant_a_model"] if variant == "a" else preview["variant_b_model"]
-    cfg = load_category_config(conn, preview["category"])
 
-    publish_post(conn, preview["approval_id"], preview["channel"], preview["category"], text, label=cfg.get("label"))
+    mark_as_sent(conn, preview["approval_id"], preview["channel"], preview["category"], text)
 
     with dict_cursor(conn) as cur:
         cur.execute(
@@ -260,10 +277,10 @@ def _handle_publish(conn, preview_id: int, cq_id: str, variant: str):
             )
         conn.commit()
 
-    _safe_ack(cq_id, f"Published ({model_used}).")
+    _safe_ack(cq_id, f"Marked as sent ({model_used}).")
 
 
-def _handle_cancel(conn, preview_id: int, cq_id: str):
+def _handle_discard(conn, preview_id: int, cq_id: str):
     with dict_cursor(conn) as cur:
         cur.execute(
             "UPDATE post_previews SET status = 'cancelled' WHERE id = %s AND status = 'pending'",
@@ -271,7 +288,7 @@ def _handle_cancel(conn, preview_id: int, cq_id: str):
         )
         updated = cur.rowcount
     conn.commit()
-    _safe_ack(cq_id, "Cancelled — not published." if updated else "Already handled.")
+    _safe_ack(cq_id, "Discarded." if updated else "Already handled.")
 
 
 def handle_callback_query(conn, cq: dict) -> dict | None:
@@ -301,12 +318,12 @@ def handle_callback_query(conn, cq: dict) -> dict | None:
         _handle_reject(conn, target_id, cq["id"])
     elif action == "edit":
         _handle_edit_prompt(conn, target_id, cq["id"])
-    elif action == "pub_a":
-        _handle_publish(conn, target_id, cq["id"], "a")
-    elif action == "pub_b":
-        _handle_publish(conn, target_id, cq["id"], "b")
-    elif action == "pub_cancel":
-        _handle_cancel(conn, target_id, cq["id"])
+    elif action == "mark_sent_a":
+        _handle_mark_sent(conn, target_id, cq["id"], "a")
+    elif action == "mark_sent_b":
+        _handle_mark_sent(conn, target_id, cq["id"], "b")
+    elif action == "discard":
+        _handle_discard(conn, target_id, cq["id"])
     else:
         _safe_ack(cq["id"], "Unknown action.")
     return None

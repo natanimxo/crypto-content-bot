@@ -43,7 +43,11 @@ CREATE TABLE IF NOT EXISTS channel_config (
     categories TEXT[] NOT NULL,
     region_profile TEXT DEFAULT 'default',
     soft_daily_cap INT,
-    chat_id TEXT   -- Telegram chat id to publish to, e.g. "-1001234567890"
+    -- Kept for potential future reactivation of direct publishing, but unused
+    -- as of 2026-09-10: the bot never posts to channels directly anymore (see
+    -- pipeline/publish.py) — the operator forwards the labeled text themselves.
+    chat_id TEXT,
+    display_name TEXT   -- human-readable name for the label header, e.g. "Crypto Notebook"
 );
 
 -- Migration for a DB that already has the old column name from an earlier apply
@@ -60,6 +64,11 @@ BEGIN
         ALTER TABLE channel_config RENAME COLUMN telegram_chat_id TO chat_id;
     END IF;
 END $$;
+
+-- Migration for a DB from before display_name existed (CREATE TABLE IF NOT
+-- EXISTS is a no-op on an existing table, so new columns need an explicit
+-- ALTER — harmless no-op on a fresh database via IF NOT EXISTS on the column).
+ALTER TABLE channel_config ADD COLUMN IF NOT EXISTS display_name TEXT;
 
 -- Score per item, per its OWN category — never cross-category
 CREATE TABLE IF NOT EXISTS scores (
@@ -117,8 +126,13 @@ CREATE TABLE IF NOT EXISTS posts (
     channel TEXT NOT NULL,
     category TEXT NOT NULL,
     final_text TEXT NOT NULL,
+    -- As of 2026-09-10: set when the operator taps "Mark as sent" (manual
+    -- forward), not when the bot posts anything — there is no bot-side send.
+    -- Column kept as published_at rather than renamed, since it's still "when
+    -- this became a real post" from the reader's perspective; see
+    -- pipeline/publish.py for the full rationale.
     published_at TIMESTAMPTZ,
-    telegram_message_id BIGINT
+    telegram_message_id BIGINT   -- always NULL now; kept for schema stability / future reactivation
 );
 
 CREATE TABLE IF NOT EXISTS run_logs (

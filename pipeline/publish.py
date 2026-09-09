@@ -1,47 +1,35 @@
-"""Publishing (Section 11): sendMessage to the channel's chat id, record the
-resulting telegram_message_id in `posts`. Only ever called from the Publish
-button handler in bot/approval_poller.py, after an operator has seen the final
-text (Section 9 step 4).
+"""Post finalization. Originally (Section 11) this sendMessage'd straight to the
+target channel's chat_id. Changed 2026-09-10 per explicit operator direction:
+the bot never posts to channels directly. The operator copies/forwards the
+final text themselves; this module's job is just to record that decision in
+`posts` for history/dedup (the "memory" differentiator, Section 1 #1, still
+needs a real record of what was actually sent, regardless of how it got
+there). No Telegram send happens here — channel_config.chat_id stays in the DB
+for potential future reactivation but nothing in this module reads it anymore.
 """
 
-import html
 from datetime import datetime, timezone
 
 from pipeline.db import dict_cursor
-from pipeline.telegram_api import send_message
 
 
-def get_channel_chat_id(conn, channel: str) -> str:
+def get_channel_display_name(conn, channel: str) -> str:
+    """Human-readable name for the label header (e.g. "Crypto Notebook") —
+    falls back to the raw channel slug if display_name was never seeded."""
     with dict_cursor(conn) as cur:
-        cur.execute("SELECT chat_id FROM channel_config WHERE channel = %s", (channel,))
+        cur.execute("SELECT display_name FROM channel_config WHERE channel = %s", (channel,))
         row = cur.fetchone()
-    if not row or not row["chat_id"]:
-        raise RuntimeError(
-            f"channel_config.chat_id is not set for '{channel}' — check config/channel_config.yaml "
-            f"and re-run scripts/seed_config.py."
-        )
-    return row["chat_id"]
+    return (row["display_name"] if row and row["display_name"] else channel)
 
 
-def publish_post(conn, approval_id: int, channel: str, category: str, final_text: str,
-                  label: str | None = None) -> int:
-    """Sends final_text to the channel (with its notification label as an eyebrow
-    line, Section 10) and records the post. Returns the new posts.id."""
-    chat_id = get_channel_chat_id(conn, channel)
-
-    # final_text is LLM- or operator-authored free text sent with parse_mode=HTML
-    # (Section 10's label styling) — escape it so a stray '<', '>', or '&' doesn't
-    # make Telegram reject the whole publish call. posts.final_text below stores
-    # the original, unescaped text; only the wire body is escaped.
-    escaped_text = html.escape(final_text)
-    body = f"<b>{html.escape(label)}</b>\n\n{escaped_text}" if label else escaped_text
-    result = send_message(chat_id, body)
-
+def mark_as_sent(conn, approval_id: int, channel: str, category: str, final_text: str) -> int:
+    """Records that the operator has taken this text and sent it themselves.
+    Returns the new posts.id. No network call, no telegram_message_id."""
     with dict_cursor(conn) as cur:
         cur.execute(
             """INSERT INTO posts (approval_id, channel, category, final_text, published_at, telegram_message_id)
-               VALUES (%s, %s, %s, %s, %s, %s) RETURNING id""",
-            (approval_id, channel, category, final_text, datetime.now(timezone.utc), result["message_id"]),
+               VALUES (%s, %s, %s, %s, %s, NULL) RETURNING id""",
+            (approval_id, channel, category, final_text, datetime.now(timezone.utc)),
         )
         post_id = cur.fetchone()["id"]
     conn.commit()

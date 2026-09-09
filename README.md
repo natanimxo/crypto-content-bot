@@ -22,13 +22,19 @@ collect (GitHub Actions, every 4h)
   -> notify (only if new candidates cleared threshold — Telegram message w/ inline buttons)
 approve (operator taps a button; GitHub Actions polls every 5 min)
   -> write (LLM, only on approved items)
-  -> publish confirm (operator taps Publish/Cancel)
-  -> publish (Telegram Bot API sendMessage to the public channel)
+  -> labeled delivery (operator taps Mark as sent / Discard)
 ```
 
 No server, no VPS. GitHub Actions runners are the only compute, and the
 repo **must stay public** for scheduled (`cron`) triggers to run reliably on
 the free plan.
+
+**The bot never posts to a channel itself** (changed 2026-09-10, per operator
+direction). The final message the operator receives has a label at the very
+top — e.g. `🌾 DEFI YIELDS → Crypto Notebook` — so it's clear at a glance which
+of the 5 channels it's for; the operator copies/forwards it themselves, then
+taps "Mark as sent" to log it in `posts` for history/dedup. `pipeline/publish.py`
+still exists but only records that decision — no Telegram send happens there.
 
 ## One-time setup
 
@@ -54,11 +60,11 @@ the free plan.
 3. Your operator chat id (`TELEGRAM_OPERATOR_CHAT_ID`) is the same DM chat — hit
    `https://api.telegram.org/bot<token>/getUpdates` after DMing the bot and read
    `message.chat.id` off the response.
-4. For each channel, add the bot as an admin with post permissions, post
-   anything in it, then read its `chat.id` the same way via `getUpdates`
-   (channel ids look like `-100xxxxxxxxxx`). These go directly into the
-   `chat_id` field for that channel in `config/channel_config.yaml` — not env
-   vars — and reach the DB via `scripts/seed_config.py`.
+4. The bot doesn't need to be a channel admin or post anywhere itself (as of
+   2026-09-10 — see Architecture above) — you forward the final labeled text
+   yourself. `config/channel_config.yaml` still has a `chat_id` field per
+   channel (kept for potential future reactivation) and a `display_name` field
+   that's actively used in the label header every post arrives with.
 
 ### 3. LLM keys
 
@@ -112,12 +118,12 @@ pipeline/          shared, category-agnostic machinery
   llm.py            provider-agnostic dispatch (Section 4.4)
   llm_providers/    deepseek.py, gemini.py, anthropic.py, template.py (zero-LLM)
   write_post.py     final post writer, one prompt builder per category
-  publish.py         Telegram sendMessage + posts bookkeeping
-  telegram_api.py    thin Bot API wrapper shared by publish/notify/poller
+  publish.py         posts bookkeeping only — no Telegram send (2026-09-10, see Architecture)
+  telegram_api.py    thin Bot API wrapper shared by notify/poller
   alerts.py          "N consecutive failures" operator alert
 bot/
   notify.py          per-cycle operator digest (Section 9)
-  approval_poller.py approve/edit/reject + publish confirm + benchmark A/B state machine
+  approval_poller.py approve/edit/reject + labeled delivery confirm + benchmark A/B state machine
 config/            category_config.yaml, channel_config.yaml — versioned baseline (DB is live copy)
 db/schema.sql      full schema, safe to re-run (IF NOT EXISTS throughout)
 scripts/           setup + orchestration entry points

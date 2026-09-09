@@ -3,21 +3,26 @@
 # note: the DB row is what the pipeline reads at runtime; this file is the versioned
 # baseline you reset back to.
 #
-# chat_id is the Telegram chat id to publish to — not a secret (you need the bot
-# token too, which stays in .env/Actions Secrets, to actually post), but still
-# only ever the bot's own channel id, never a personal chat.
+# chat_id is kept for potential future reactivation of direct publishing, but is
+# NOT used as of 2026-09-10 — the bot never posts to a channel itself anymore
+# (see pipeline/publish.py); the operator copies/forwards the labeled text
+# themselves after tapping "Mark as sent". display_name IS actively used — it's
+# the human-readable half of the label header every post arrives with (e.g.
+# "🌾 DEFI YIELDS → Crypto Notebook"), since the operator needs to know at a
+# glance which channel a post is for when copying it themselves.
 #
-# All 5 channels from spec Section 3 are listed here so the chat_id mapping is
-# recorded in one place, but only crypto_notebook is "live" for this build phase
-# (Section 0/16) — its categories list has real entries with working collectors.
-# The other four list their spec'd categories for reference; bot/notify.py skips
-# any category that doesn't have a category_config row yet, so seeding these now
-# is safe and doesn't touch the live defi_yields -> crypto_notebook pipeline.
+# All 5 channels from spec Section 3 are listed here so the mapping is recorded
+# in one place, but only crypto_notebook is "live" for this build phase
+# (Section 0/16) — its categories list has a real entry with a working
+# collector. The other four list their spec'd categories for reference;
+# bot/notify.py skips any category that doesn't have a category_config row yet,
+# so seeding these now is safe and doesn't touch the live defi_yields pipeline.
 #
 # chat_ids below were given explicitly by the operator (not inferred from any
 # ordering) — confirmed correct as of the mapping they provided.
 
 crypto_wall_street:
+  display_name: "Crypto Wall Street"
   categories:
     - news
     - whale_movements
@@ -26,6 +31,7 @@ crypto_wall_street:
   chat_id: "-1001200205264"
 
 crypto_notebook:
+  display_name: "Crypto Notebook"
   categories:
     - defi_yields
   region_profile: us
@@ -33,22 +39,28 @@ crypto_notebook:
   chat_id: "-1002905948541"
 
 alpha_edge_crypto:
+  display_name: "Alpha Edge Crypto"
   categories:
-    - airdrops
+    # airdrops deliberately paused 2026-09-10 (operator direction) — not built
+    # yet anyway (no collector/scorer), left out entirely rather than listed-
+    # but-skipped so it's not silently doing nothing. Add it back here once
+    # Section 16 Phase 2 actually builds the airdrops category.
     - web3_jobs
   region_profile: us
   soft_daily_cap: 12
   chat_id: "-1001992993907"
 
 coincraft:
+  display_name: "CoinCraft"
   categories:
-    - airdrops
+    # airdrops paused — see alpha_edge_crypto's note above, same reasoning.
     - web3_jobs
   region_profile: default
   soft_daily_cap: 12
   chat_id: "-1002704031424"
 
 hustle_to_million:
+  display_name: "Hustle to Million"
   categories:
     - tool_launches
     - grants
