@@ -29,7 +29,14 @@ defi_yields:
   # line — the numbers ARE the summary. See pipeline/llm_providers/template.py.
   triage_model: template
   write_model: deepseek-v4-flash    # final post writer, until the Sonnet benchmark settles it (Section 4.3)
-  write_benchmark_status: trial
+  # Deliberately NOT 'trial' — the operator wants to evaluate DeepSeek's writing
+  # quality on its own first before spending on Anthropic credit, rather than
+  # buying in upfront under pressure to use it. 'settled_deepseek' means "single-
+  # variant write, no A/B" without claiming the benchmark question is actually
+  # settled — this is a real config value from the Section 6 schema, not a hack.
+  # Flip back to 'trial' once ANTHROPIC_API_KEY is added and a real comparison
+  # period is wanted (Section 4.3).
+  write_benchmark_status: settled_deepseek
 
   label: "🌾 DEFI YIELDS"           # notification eyebrow line (Section 10)
 
