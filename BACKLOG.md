@@ -24,6 +24,38 @@ the one place to check.
   (Validated 2026-09-10 — loop confirmed working; still not implemented, now
   just genuinely next-up rather than blocked on validation.)
 
+- **web3_jobs scores are near-constant; category currently has no real
+  prioritization.** Surfaced 2026-09-11 while investigating why
+  `alpha_edge_crypto` had never received a candidate: fixed a real logic bug
+  in the actionability component (commit `0ac61f7` — the location-
+  restriction heuristic was treating any populated `location` field as
+  restrictive, when only 6% of location-labeled listings actually are).
+  That fix was correct and stays.
+  But applying it exposed a second, separate problem: with the bug gone,
+  **13/13 of the current live candidates clear `review_threshold=50`**, and
+  12 of those 13 land on exactly two values (55.5 or 51.0) — a threshold
+  that passes 100% of candidates isn't filtering anything, and two-value
+  bucketing means the score isn't discriminating between listings, it's
+  just sorting them into two buckets. Root cause, component by component:
+  `impact` is floored at 30 for ~98% of listings (undisclosed salary —
+  genuinely representative of the feed, not a bug), `novelty` is 0 for
+  most (median listing age ~84 days — also genuinely representative), and
+  `credibility` only ever lands on 55 or 70 right now (the +30 logo bonus
+  is unreachable — 0/55 live listings currently have a `company_logo`
+  field populated at all). That leaves `actionability` (now correctly 90
+  for almost everyone post-fix) and small credibility variation as
+  basically the only things still varying — nowhere near enough signal
+  across 4 weighted components for a real 0-100 spread.
+  **Deliberately not touched further** — operator direction 2026-09-11:
+  don't lower `review_threshold` to route around this (would hide the
+  problem, not fix it) and don't touch `impact`/`novelty`/`credibility`
+  either (they correctly reflect genuine, current properties of this feed,
+  not scoring flaws). `config/category_config.yaml`'s own top-of-file note
+  says weights are starting values meant to be "recalibrate[d] later
+  against real accept/reject decisions" — there aren't enough of those yet
+  for `web3_jobs` to do that honestly. Revisit once there's a real body of
+  operator accept/reject history to calibrate against, per that same note.
+
 ## Whale movements (Phase 2, built 2026-09-10)
 
 **Resolved same-day, after the first live collect run surfaced real problems:**
