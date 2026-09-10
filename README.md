@@ -1,18 +1,22 @@
 # Multi-Channel Intelligence & Content Bot
 
 Selective, memory-aware crypto/business content pipeline for Telegram. Full design
-in the technical spec (kept alongside this repo, not checked in here — ask the
-project owner for it if you need the full rationale/section numbers referenced
-in code comments throughout this repo).
+in [intelligence-bot-spec-v2.md](intelligence-bot-spec-v2.md) — checked into this
+repo as of 2026-09-11 (an earlier draft lived outside the repo and had drifted
+badly; this version reflects the actual implementation and is now the source of
+truth for the section numbers referenced in code comments throughout this repo).
+See [HANDOFF.md](HANDOFF.md) for a fresh-session-oriented summary of current
+state, known bugs/fixes, and open issues.
 
 **Build status (Section 16):** Phase 1 (MVP) complete and validated end-to-end —
 DeFi yields (DefiLlama, free/keyless) → Crypto Notebook. Phase 2 is underway,
 one category at a time per Section 0's discipline: whale movements (Etherscan,
-watches known exchange hot wallets) → Crypto Wall Street is live as of
-2026-09-10. Airdrops stays deliberately paused (no reliable free source for
-individual wallet-level "whale" tracking either, hence whale_movements'
-exchange-watchlist design — see `config/category_config.yaml`'s
-whale_movements section for the full rationale).
+watches known exchange hot wallets) → Crypto Wall Street, and web3 jobs
+(RemoteOK) → Alpha Edge Crypto / CoinCraft, are both live as of 2026-09-10/11.
+Airdrops stays deliberately paused (no reliable free source for individual
+wallet-level "whale" tracking either, hence whale_movements' exchange-watchlist
+design — see `config/category_config.yaml`'s whale_movements section for the
+full rationale).
 
 Everything is config-driven, so each new category is mostly config + one new
 collector/scorer/prompt-builder, not new architecture — see `pipeline/score.py`,
@@ -97,8 +101,14 @@ want to reset DB-side tuning back to what's checked into git.
 1. Repo must be **public** (Section 4.1 — free scheduled Actions requirement).
 2. Settings → Secrets and variables → Actions → New repository secret, one per:
    `DATABASE_URL`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_OPERATOR_CHAT_ID`,
-   `TELEGRAM_ALLOWED_USER_IDS`, `DEEPSEEK_API_KEY`, and optionally
-   `GEMINI_API_KEY` / `ANTHROPIC_API_KEY`.
+   `TELEGRAM_ALLOWED_USER_IDS`, `DEEPSEEK_API_KEY`, `ETHERSCAN_API_KEY`
+   (required now that `whale_movements` is live — both workflows reference it
+   even though only `collect.yml` actually calls Etherscan directly, since
+   `approval-poll.yml`'s write step can also trigger a history backfill on
+   approve), and optionally `GEMINI_API_KEY` / `ANTHROPIC_API_KEY`. See
+   [HANDOFF.md](HANDOFF.md) for exactly where to get each value. As of
+   2026-09-11 **no secrets are configured yet** — both workflows are crash-
+   looping on a missing `DATABASE_URL` until this step is done.
 3. Actions tab → enable workflows if prompted.
 4. Run `Collect` once manually (Actions → Collect → Run workflow) to confirm the
    full collect → score → notify path works before waiting for the cron.
