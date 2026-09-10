@@ -33,11 +33,37 @@ API_URL = "https://remoteok.com/api"
 REQUEST_HEADERS = {"User-Agent": "Mozilla/5.0"}
 
 
+def _fix_mojibake(value):
+    """RemoteOK has a server-side encoding bug (live-confirmed 2026-09-10 on
+    a real listing's `location` field): non-ASCII text comes back with each
+    UTF-8 byte reinterpreted as its own Latin-1 codepoint before JSON-
+    escaping — e.g. Arabic 'م' (2 UTF-8 bytes) arrives as two separate
+    mojibake characters instead of one real one. The fix (re-encode as
+    Latin-1 to recover the original bytes, decode as UTF-8) is applied
+    unconditionally to every string field pulled from this API, but is safe
+    to run on already-correct text too: pure ASCII round-trips unchanged,
+    and genuinely-correct non-ASCII text either round-trips unchanged or
+    fails the Latin-1 encode/UTF-8 decode step outright (codepoints beyond
+    Latin-1's 0-255 range, or an incomplete multi-byte sequence) — in which
+    case this returns the original value rather than risk corrupting it.
+    """
+    if not isinstance(value, str):
+        return value
+    try:
+        return value.encode("latin-1").decode("utf-8")
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        return value
+
+
 def fetch_listings() -> list[dict]:
     body = get_json(API_URL, params={"tags": "crypto"}, headers=REQUEST_HEADERS)
     # First element is RemoteOK's own legal/attribution notice, not a job —
     # verified live (has 'legal' key, no 'id'/'position').
-    return [item for item in body if item.get("id") and item.get("position")]
+    listings = [item for item in body if item.get("id") and item.get("position")]
+    return [
+        {k: (_fix_mojibake(v) if k != "tags" else [_fix_mojibake(t) for t in v]) for k, v in listing.items()}
+        for listing in listings
+    ]
 
 
 def _title(listing: dict) -> str:
