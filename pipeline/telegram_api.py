@@ -18,13 +18,23 @@ def _base_url() -> str:
 
 
 def send_message(chat_id: str, text: str, reply_markup: dict | None = None,
-                  reply_to_message_id: int | None = None) -> dict:
-    """Returns the Telegram `result` object (includes message_id)."""
+                  reply_to_message_id: int | None = None,
+                  disable_web_page_preview: bool = False) -> dict:
+    """Returns the Telegram `result` object (includes message_id).
+
+    disable_web_page_preview should be True for every actual post/content
+    message (2026-09-10, operator direction: no hyperlinks in posts, and this
+    is a defensive belt-and-suspenders measure even though post_format.py no
+    longer emits any <a> tags — it can't guarantee an LLM's free-form prose
+    never happens to contain something URL-shaped).
+    """
     body = {"chat_id": chat_id, "text": text, "parse_mode": "HTML"}
     if reply_markup:
         body["reply_markup"] = reply_markup
     if reply_to_message_id:
         body["reply_to_message_id"] = reply_to_message_id
+    if disable_web_page_preview:
+        body["disable_web_page_preview"] = True
     resp = post_json(f"{_base_url()}/sendMessage", json_body=body)
     if not resp.get("ok"):
         raise RuntimeError(f"Telegram sendMessage failed: {resp}")

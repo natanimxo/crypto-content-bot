@@ -38,13 +38,31 @@ defi_yields:
   # period is wanted (Section 4.3).
   write_benchmark_status: settled_deepseek
 
-  label: "🌾 DEFI YIELDS"           # notification eyebrow line (Section 10)
+  label: "🌾 DEFI YIELDS"           # operator routing header / digest eyebrow (Section 10)
+
+  # Subscriber-facing post template fields (2026-09-10 delivery/formatting
+  # overhaul, Section 8). emoji is the ONE leading emoji on the post's title
+  # line — nothing else in the post gets an emoji except an optional ⚠️ risk
+  # flag. display_label/hashtags are metadata, not rendered in the post body
+  # (titles must be item-specific, never a category label) — display_label is
+  # here for config clarity and future use (e.g. cross-posting elsewhere).
+  emoji: "🌾"
+  display_label: "DeFi Yields"
+  hashtags:
+    - "#DeFi"
+    - "#Yield"
 
   voice: educational
-  # Fixed three-part structure (Section 8): what happened → why it matters → what to watch.
-  # Crypto Notebook's angle is explicitly educational — mechanics and risk, not hype.
+  # Structure is now fixed in code (pipeline/post_format.py), not prose
+  # instructions here — the LLM only writes title/narrative/why_it_matters as
+  # JSON; history/risk/source/hashtags are assembled deterministically. These
+  # notes shape ONLY the prose the model is asked to write.
   prompt_notes: >
     Frame every post as teaching the mechanic, not chasing the yield. Explain *why* the
     APY is what it is (emissions vs. real fees, lockups, IL risk) before saying whether
     it's worth watching. Never use language that could read as investment advice —
     describe what the numbers show, not what the reader should do with their money.
+    Measured tone throughout: no hype language, no "🚀 MOONING", no manufactured
+    urgency, no emoji beyond what the template itself adds. This channel is
+    region_profile 'us' — keep financial framing conservative and factual,
+    never anything that could read as a recommendation to deposit funds.

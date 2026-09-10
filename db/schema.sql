@@ -32,9 +32,20 @@ CREATE TABLE IF NOT EXISTS category_config (
     triage_model TEXT DEFAULT 'deepseek-v4-flash',  -- or 'gemini-2.5-flash-lite', or 'template' for zero-LLM categories
     write_model TEXT DEFAULT 'deepseek-v4-flash',   -- or 'claude-sonnet-5' once benchmarked in for this category
     write_benchmark_status TEXT DEFAULT 'trial',    -- 'trial' | 'settled_deepseek' | 'settled_sonnet'
-    label TEXT,                                    -- notification eyebrow, e.g. "🌾 DEFI YIELDS"
+    label TEXT,                                    -- notification eyebrow / routing header, e.g. "🌾 DEFI YIELDS"
     voice TEXT,                                     -- e.g. 'educational', 'market_summary', 'opportunity_framed'
-    prompt_notes TEXT                                -- freeform voice/framing notes fed into the write prompt (Section 8)
+    prompt_notes TEXT,                               -- freeform voice/framing notes fed into the write prompt (Section 8)
+    -- Subscriber-facing post template fields (2026-09-10 delivery/formatting
+    -- overhaul). emoji is the single leading emoji on every post's title line
+    -- (Section 8's one-emoji budget). display_label/hashtags are config, not
+    -- hardcoded, so wording can change without a redeploy — display_label is
+    -- metadata (may differ from the internal `category` key, which stays
+    -- unchanged so scoring/dedup/history are unaffected) rather than rendered
+    -- in the post body itself, since post titles must be item-specific, never
+    -- a category label.
+    emoji TEXT,
+    display_label TEXT,
+    hashtags TEXT[]
 );
 
 -- Channel-level config
@@ -69,6 +80,16 @@ END $$;
 -- EXISTS is a no-op on an existing table, so new columns need an explicit
 -- ALTER — harmless no-op on a fresh database via IF NOT EXISTS on the column).
 ALTER TABLE channel_config ADD COLUMN IF NOT EXISTS display_name TEXT;
+
+-- Migration for a DB from before the post-template fields existed on
+-- category_config (same reasoning as display_name above).
+ALTER TABLE category_config ADD COLUMN IF NOT EXISTS emoji TEXT;
+ALTER TABLE category_config ADD COLUMN IF NOT EXISTS display_label TEXT;
+ALTER TABLE category_config ADD COLUMN IF NOT EXISTS hashtags TEXT[];
+
+-- Migration for a DB from before the header/content message split existed.
+ALTER TABLE post_previews ADD COLUMN IF NOT EXISTS content_message_id BIGINT;
+ALTER TABLE post_previews ADD COLUMN IF NOT EXISTS content_b_message_id BIGINT;
 
 -- Score per item, per its OWN category — never cross-category
 CREATE TABLE IF NOT EXISTS scores (
@@ -114,9 +135,16 @@ CREATE TABLE IF NOT EXISTS post_previews (
     variant_a_text TEXT NOT NULL,
     variant_b_model TEXT,             -- NULL outside a benchmark trial (single-variant write)
     variant_b_text TEXT,
-    telegram_message_id BIGINT,       -- the preview message carrying Publish/Cancel buttons
+    -- Split into two Telegram messages (2026-09-10, delivery/formatting
+    -- overhaul): telegram_message_id is the operator-only routing header
+    -- (category/channel/score + Mark as sent/Discard buttons); content_*
+    -- are the clean, button-free post(s) the operator forwards unedited.
+    -- content_b_message_id is NULL outside a benchmark trial.
+    telegram_message_id BIGINT,
+    content_message_id BIGINT,
+    content_b_message_id BIGINT,
     status TEXT NOT NULL DEFAULT 'pending',  -- 'pending', 'published', 'cancelled'
-    chosen_variant TEXT,              -- 'a' or 'b', set on publish
+    chosen_variant TEXT,              -- 'a' or 'b', set on mark-as-sent
     created_at TIMESTAMPTZ DEFAULT now()
 );
 

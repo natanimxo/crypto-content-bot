@@ -92,7 +92,7 @@ def _fetch_pending_approval(conn, raw_item_id: int):
     with dict_cursor(conn) as cur:
         cur.execute(
             """SELECT a.id AS approval_id, a.decision, a.raw_item_id, a.prompt_message_id,
-                      r.category, r.payload, s.score, s.score_breakdown, n.channel
+                      r.category, r.payload, r.collected_at, s.score, s.score_breakdown, n.channel
                FROM approvals a
                JOIN raw_items r ON r.id = a.raw_item_id
                JOIN scores s ON s.raw_item_id = r.id AND s.category = r.category
@@ -119,9 +119,19 @@ def _label_header(conn, category: str, channel: str) -> str:
     return f"{label} → {display_name}"
 
 
-def _send_preview_and_store(conn, approval_id: int, channel: str, category: str,
+def _send_preview_and_store(conn, approval_id: int, channel: str, category: str, score,
                              variant_a_model: str, variant_a_text: str,
                              variant_b_model: str | None = None, variant_b_text: str | None = None) -> int:
+    """Sends TWO (or three, in a benchmark trial) separate Telegram messages
+    (2026-09-10, STEP 1 of the delivery/formatting overhaul):
+      1. A routing header — operator-only: label, channel, score, and the
+         Mark as sent/Discard buttons. Never forwarded.
+      2. (+3.) The actual post(s) — already fully-formed HTML from
+         pipeline.write_post (real <b>/<blockquote> tags baked in by
+         post_format.assemble_post, NOT re-escaped here — escaping already-
+         valid HTML again would corrupt it). No buttons, so it forwards
+         cleanly; the operator sends this exact message unedited.
+    """
     with dict_cursor(conn) as cur:
         cur.execute(
             """INSERT INTO post_previews
@@ -133,16 +143,14 @@ def _send_preview_and_store(conn, approval_id: int, channel: str, category: str,
         preview_id = cur.fetchone()["id"]
     conn.commit()
 
-    header = html.escape(_label_header(conn, category, channel))
+    label_line = html.escape(_label_header(conn, category, channel))
+    score_line = f"Score {score}/100" if score is not None else ""
 
     if variant_b_model:
-        # Both variants carry the SAME label — it's the post's own header, not
-        # per-model metadata — so it sits once at the top, above either version.
-        text = (
-            f"<b>{header}</b>\n\n"
-            f"<b>Version A</b> ({html.escape(variant_a_model)}):\n{html.escape(variant_a_text)}\n\n"
-            f"<b>Version B</b> ({html.escape(variant_b_model)}):\n{html.escape(variant_b_text)}\n\n"
-            f"Copy whichever version you send, then mark it as sent."
+        header_text = (
+            f"<b>{label_line}</b>\n{score_line}\n\n"
+            f"Benchmark trial — Version A ({html.escape(variant_a_model)}) is the next message below, "
+            f"Version B ({html.escape(variant_b_model)}) the one after. Mark whichever you send."
         )
         keyboard = [
             [{"text": "✅ Mark A as sent", "callback_data": f"mark_sent_a:{preview_id}"},
@@ -150,19 +158,26 @@ def _send_preview_and_store(conn, approval_id: int, channel: str, category: str,
             [{"text": "❌ Discard", "callback_data": f"discard:{preview_id}"}],
         ]
     else:
-        text = (
-            f"<b>{header}</b>\n\n{html.escape(variant_a_text)}\n\n"
-            f"Copy the text above and send it yourself, then mark it as sent."
-        )
+        header_text = f"<b>{label_line}</b>\n{score_line}"
         keyboard = [[
             {"text": "✅ Mark as sent", "callback_data": f"mark_sent_a:{preview_id}"},
             {"text": "❌ Discard", "callback_data": f"discard:{preview_id}"},
         ]]
 
-    result = send_message(_operator_chat_id(), text, reply_markup={"inline_keyboard": keyboard})
+    header_result = send_message(_operator_chat_id(), header_text, reply_markup={"inline_keyboard": keyboard})
+    content_a_result = send_message(_operator_chat_id(), variant_a_text, disable_web_page_preview=True)
+    content_b_message_id = None
+    if variant_b_model:
+        content_b_result = send_message(_operator_chat_id(), variant_b_text, disable_web_page_preview=True)
+        content_b_message_id = content_b_result["message_id"]
+
     with dict_cursor(conn) as cur:
-        cur.execute("UPDATE post_previews SET telegram_message_id = %s WHERE id = %s",
-                    (result["message_id"], preview_id))
+        cur.execute(
+            """UPDATE post_previews
+               SET telegram_message_id = %s, content_message_id = %s, content_b_message_id = %s
+               WHERE id = %s""",
+            (header_result["message_id"], content_a_result["message_id"], content_b_message_id, preview_id),
+        )
     conn.commit()
     return preview_id
 
@@ -174,20 +189,22 @@ def _generate_and_preview(conn, approval: dict):
     raw_item = {
         "raw_item_id": approval["raw_item_id"],
         "payload": approval["payload"],
+        "collected_at": approval["collected_at"],
         "score": approval["score"],
         "score_breakdown": approval["score_breakdown"],
     }
 
     if cfg["write_benchmark_status"] == "trial":
-        variants = generate_post_variants(conn, category, raw_item)
+        variants = generate_post_variants(conn, category, channel, raw_item)
         _send_preview_and_store(
-            conn, approval["approval_id"], channel, category,
+            conn, approval["approval_id"], channel, category, approval["score"],
             "deepseek-v4-flash", variants["deepseek-v4-flash"],
             "claude-sonnet-5", variants["claude-sonnet-5"],
         )
     else:
-        text = generate_post(conn, category, raw_item)
-        _send_preview_and_store(conn, approval["approval_id"], channel, category, cfg["write_model"], text)
+        text = generate_post(conn, category, channel, raw_item)
+        _send_preview_and_store(conn, approval["approval_id"], channel, category, approval["score"],
+                                 cfg["write_model"], text)
 
 
 def _handle_approve(conn, raw_item_id: int, cq_id: str) -> dict | None:
@@ -340,9 +357,10 @@ def handle_message(conn, msg: dict):
 
     with dict_cursor(conn) as cur:
         cur.execute(
-            """SELECT a.id AS approval_id, r.category, n.channel
+            """SELECT a.id AS approval_id, r.category, n.channel, s.score
                FROM approvals a
                JOIN raw_items r ON r.id = a.raw_item_id
+               JOIN scores s ON s.raw_item_id = r.id AND s.category = r.category
                JOIN notifications n ON n.id = a.notification_id
                WHERE a.prompt_message_id = %s AND a.decision = 'pending'""",
             (reply_to["message_id"],),
@@ -360,8 +378,14 @@ def handle_message(conn, msg: dict):
 
     # Edited text IS the final post (Section 9 step 5: "the next poll picks it up
     # as the final version") — no LLM call, straight to the same preview/confirm
-    # step as an approved+written post.
-    _send_preview_and_store(conn, row["approval_id"], row["channel"], row["category"], "operator_edited", text)
+    # step as an approved+written post. Unlike LLM-generated posts (already
+    # valid HTML from post_format.assemble_post), this is the operator's raw
+    # typed text — it must be escaped here, once, so _send_preview_and_store's
+    # invariant ("variant text is always ready-to-send HTML") holds for every
+    # caller. approvals.edited_text above keeps the raw, unescaped original.
+    content_html = html.escape(text, quote=False)
+    _send_preview_and_store(conn, row["approval_id"], row["channel"], row["category"], row["score"],
+                             "operator_edited", content_html)
 
 
 def process_update(conn, update: dict) -> dict | None:
