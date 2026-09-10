@@ -67,6 +67,19 @@ WATCHLIST_BY_ADDRESS = {w["address"]: w for w in WATCHLIST}
 TXLIST_PAGE_SIZE = 100
 DEFAULT_MIN_USD = 2_000_000  # fallback if category_config.collect_min_usd is unset
 
+# Live bug, 2026-09-10: fetching "the most recent 100 transactions" from
+# Etherscan has NO implicit recency guarantee for a low-activity address — a
+# wallet with under 100 total (or under-100-since) transactions can have that
+# window reach back YEARS. Confirmed live: two OKX withdrawals from
+# 2023-06-21 got collected today as if they'd just happened (the wallet's
+# real recent activity was almost entirely dust/spam-token noise, so its
+# actual top-100 by index still reached back three years for the last
+# "real" transfer). 24h is generous over the 4h collection cadence — a
+# single missed/delayed cycle still won't lose anything — while still
+# enforcing genuine freshness for what's meant to be a live monitor, not a
+# historical archive.
+WHALE_MAX_AGE_HOURS = 24
+
 
 def _etherscan_get(params: dict) -> dict:
     api_key = os.environ.get("ETHERSCAN_API_KEY")
@@ -74,8 +87,19 @@ def _etherscan_get(params: dict) -> dict:
         raise RuntimeError("ETHERSCAN_API_KEY is not set")
     time.sleep(ETHERSCAN_CALL_DELAY_SECONDS)
     body = get_json(ETHERSCAN_URL, params={**params, "chainid": ETHERSCAN_CHAIN_ID, "apikey": api_key})
-    # Etherscan returns status="0" for BOTH real errors and "no results" —
-    # message is what actually distinguishes them.
+    if params.get("module") == "proxy":
+        # Live bug, 2026-09-10: proxy-module calls (eth_getTransactionCount
+        # etc.) are plain JSON-RPC responses ({"jsonrpc":...,"result":...}) —
+        # no "status"/"message" fields at all. The account-module check below
+        # was flagging every single one as a false-alarm "non-OK response:
+        # None", pure log noise (the actual result was always fine — verified
+        # by cross-checking real counterparty_sent_tx_count values landed
+        # correctly in stored payloads despite the spurious warnings).
+        if "error" in body:
+            logger.warning("Etherscan proxy error for action=%s: %s", params.get("action"), body["error"])
+        return body
+    # Etherscan (account module) returns status="0" for BOTH real errors and
+    # "no results" — message is what actually distinguishes them.
     if body.get("status") not in ("1", 1) and body.get("message") != "No transactions found":
         logger.warning("Etherscan non-OK response for action=%s: %s", params.get("action"), body.get("message"))
     return body
@@ -133,6 +157,14 @@ def _counterparty_establishment(address: str) -> dict:
     sent_tx_count = int(nonce_hex, 16) if nonce_hex else None
 
     return {"first_tx_ts": first_tx_ts, "sent_tx_count": sent_tx_count}
+
+
+def _is_recent(tx: dict, now_ts: int) -> bool:
+    try:
+        tx_ts = int(tx.get("timeStamp", 0))
+    except (TypeError, ValueError):
+        return False
+    return (now_ts - tx_ts) <= WHALE_MAX_AGE_HOURS * 3600
 
 
 def _title(exchange: str, direction: str, amount: float, symbol: str, value_usd: float) -> str:
@@ -206,6 +238,8 @@ def collect() -> int:
 
             items = []
             fetched_count = 0
+            stale_skipped = 0
+            now_ts = int(time.time())
 
             for entry in WATCHLIST:
                 address = entry["address"]
@@ -213,6 +247,9 @@ def collect() -> int:
 
                 for tx in _fetch_native_txs(address):
                     fetched_count += 1
+                    if not _is_recent(tx, now_ts):
+                        stale_skipped += 1
+                        continue
                     try:
                         value_eth = int(tx["value"]) / 1e18
                     except (KeyError, ValueError):
@@ -226,6 +263,9 @@ def collect() -> int:
 
                 for tx in _fetch_token_txs(address):
                     fetched_count += 1
+                    if not _is_recent(tx, now_ts):
+                        stale_skipped += 1
+                        continue
                     try:
                         decimals = int(tx.get("tokenDecimal") or 18)
                         raw_value = int(tx["value"])
@@ -249,6 +289,7 @@ def collect() -> int:
                         items.append(item)
 
             state["details"]["fetched"] = fetched_count
+            state["details"]["stale_skipped"] = stale_skipped
             state["details"]["notable"] = len(items)
 
             inserted = insert_raw_items_batch(conn, source_id, CATEGORY, items)
