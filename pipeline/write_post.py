@@ -205,10 +205,22 @@ def compute_defi_yields_elements(conn, raw_item: dict, history: list) -> dict:
 def build_whale_movements_prompt(cfg: dict, region_profile: str, raw_item: dict, history: list) -> str:
     p = raw_item["payload"]
     verb = "withdrew" if p.get("direction") == "outflow" else "deposited"
-    counterparty_note = (
-        f"the counterparty is another exchange ({p.get('counterparty_exchange_name')})"
-        if p.get("counterparty_is_exchange") else "the counterparty is an external wallet"
-    )
+    # 3-way, not binary (2026-09-10 — live bug: an unlabeled-but-clearly-not-
+    # retail counterparty was being described to the LLM as "an external
+    # wallet," and it wrote posts calling it exactly that, when it's very
+    # likely institutional infrastructure we just haven't identified by name).
+    if p.get("counterparty_is_exchange"):
+        counterparty_note = f"the counterparty is another exchange ({p.get('counterparty_exchange_name')})"
+    elif p.get("counterparty_likely_institutional"):
+        counterparty_note = (
+            "the counterparty is a high-activity wallet with an enormous on-chain "
+            "transaction history — almost certainly institutional or automated "
+            "infrastructure, not an individual holder, even though we haven't identified "
+            "exactly which entity it is. Do NOT call it 'an external wallet' or imply it's "
+            "a retail/individual holder."
+        )
+    else:
+        counterparty_note = "the counterparty is an external wallet"
 
     us_note = (
         "\nThis is a US-audience channel — keep financial framing conservative and "
@@ -247,7 +259,7 @@ separately, not by you) targets roughly 400-700 characters.
 """
 
 
-WHALE_BACKFILL_SCAN_LIMIT = 20  # prior native-ETH txs to check on a wallet's FIRST flagged move
+WHALE_BACKFILL_SCAN_LIMIT = 20  # prior txs to check EACH of native-ETH and ERC-20 (40 total) on a wallet's FIRST flagged move
 WHALE_DORMANCY_DAYS = 14         # matches the plan's dormancy-vs-repeat-mover framing threshold
 # V2: same deprecation fix as collectors/whale_movements.py — see that file's
 # ETHERSCAN_URL comment for the discovery story.
@@ -289,6 +301,13 @@ def _get_eth_price_historical(timestamp: int) -> float | None:
     return coin["price"] if coin else None
 
 
+def _get_token_price_historical(contract_address: str, timestamp: int) -> float | None:
+    key = f"ethereum:{contract_address.lower()}"
+    resp = get_json(f"{DEFILLAMA_HISTORICAL_PRICE_URL}{timestamp}/{key}")
+    coin = resp.get("coins", {}).get(key)
+    return coin["price"] if coin else None
+
+
 def _backfill_whale_history(conn, raw_item: dict) -> str | None:
     """Real on-chain lookup for this wallet's actual prior large transfer,
     even from before we started tracking it — operator direction 2026-09-10:
@@ -298,8 +317,15 @@ def _backfill_whale_history(conn, raw_item: dict) -> str | None:
     accumulated raw_items history yet, i.e. this is the first time we've
     flagged it) — every subsequent move for the same wallet reuses the
     cheaper, already-accumulated history via _compute_whale_own_history_line
-    instead. Native-ETH history only for now (not historical ERC-20 tokentx)
-    — narrower scope, still covers the common case; could extend later.
+    instead.
+
+    Scans BOTH native-ETH and ERC-20 history (extended 2026-09-10 — live
+    evidence settled it: a real watched Binance wallet's native-ETH activity
+    turned out to be 100% zero-value dust, with its actual economic activity
+    entirely in tokens; an ETH-only backfill was completely blind to it, not
+    just incomplete). Candidates from both are merged and checked in true
+    chronological order, most recent first, so the first qualifying hit is
+    genuinely the most recent real prior move regardless of which type it was.
     """
     p = raw_item["payload"]
     watched_address = p.get("watched_address")
@@ -315,7 +341,7 @@ def _backfill_whale_history(conn, raw_item: dict) -> str | None:
     try:
         cfg = load_category_config(conn, "whale_movements")
         min_usd = float(cfg.get("collect_min_usd") or 2_000_000)
-        resp = get_json(
+        native_resp = get_json(
             ETHERSCAN_URL,
             params={
                 "chainid": ETHERSCAN_CHAIN_ID,
@@ -325,24 +351,55 @@ def _backfill_whale_history(conn, raw_item: dict) -> str | None:
                 "apikey": api_key,
             },
         )
+        token_resp = get_json(
+            ETHERSCAN_URL,
+            params={
+                "chainid": ETHERSCAN_CHAIN_ID,
+                "module": "account", "action": "tokentx", "address": watched_address,
+                "page": 1, "offset": WHALE_BACKFILL_SCAN_LIMIT, "sort": "desc",
+                "apikey": api_key,
+            },
+        )
     except Exception:
-        logger.warning("Backfill txlist lookup failed for %s -- omitting history", watched_address)
+        logger.warning("Backfill lookup failed for %s -- omitting history", watched_address)
         return None
 
-    for tx in resp.get("result") or []:
+    # (tx, is_token) pairs from both sources, merged into true chronological
+    # order so the first qualifying candidate really is the most recent one.
+    candidates = [(tx, False) for tx in (native_resp.get("result") or [])]
+    candidates += [(tx, True) for tx in (token_resp.get("result") or [])]
+    candidates.sort(key=lambda pair: int(pair[0].get("timeStamp", 0) or 0), reverse=True)
+
+    for tx, is_token in candidates:
         if tx.get("hash") == current_tx_hash:
             continue  # skip the transfer we're writing about
         try:
             ts = int(tx.get("timeStamp", 0))
-            value_eth = int(tx["value"]) / 1e18
-        except (KeyError, ValueError):
+        except (TypeError, ValueError):
             continue
         if ts >= current_ts:
             continue  # only genuinely PRIOR transactions
-        price = _get_eth_price_historical(ts)
+
+        if is_token:
+            try:
+                decimals = int(tx.get("tokenDecimal") or 18)
+                amount = int(tx["value"]) / (10 ** decimals)
+            except (KeyError, ValueError):
+                continue
+            contract = tx.get("contractAddress")
+            if not contract:
+                continue
+            price = _get_token_price_historical(contract, ts)
+        else:
+            try:
+                amount = int(tx["value"]) / 1e18
+            except (KeyError, ValueError):
+                continue
+            price = _get_eth_price_historical(ts)
+
         if price is None:
-            continue
-        value_usd = value_eth * price
+            continue  # can't value it reliably -- skip rather than guess
+        value_usd = amount * price
         if value_usd < min_usd:
             continue
 

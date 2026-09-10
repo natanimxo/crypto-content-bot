@@ -26,16 +26,34 @@ the one place to check.
 
 ## Whale movements (Phase 2, built 2026-09-10)
 
-Known scope limitations from the initial build, not bugs — flagging so they
-don't get rediscovered as surprises:
+**Resolved same-day, after the first live collect run surfaced real problems:**
 
-- **Backfill (`write_post.py::_backfill_whale_history`) only scans native-ETH
-  history, not historical ERC-20 `tokentx`.** A wallet whose only prior large
-  move was a token transfer (not ETH) won't get real memory on its first
-  flagged move — falls back to no blockquote, same as if it were genuinely
-  new. Native-ETH-only was a deliberate scope cut to ship the core mechanism
-  now rather than not at all; extending to tokens means historical per-token
-  pricing (DefiLlama's historical endpoint supports it, just more calls).
+- ~~Backfill was native-ETH only~~ — **fixed.** Live evidence (a watched
+  Binance wallet whose native-ETH activity was 100% zero-value dust, real
+  activity 100% in tokens) confirmed this wasn't a minor gap but made memory
+  non-functional for token-heavy wallets. `_backfill_whale_history` now scans
+  both native-ETH and ERC-20 `tokentx`, merged into true chronological order,
+  using DefiLlama's historical per-contract pricing for tokens.
+- ~~"Not on our 8-address watchlist" was treated as "external/retail
+  wallet"~~ — **fixed structurally.** Live-confirmed real bug: `0xa9d1e08c...`
+  is Etherscan-labeled "Coinbase 10" but wasn't on the watchlist, so 7 posts
+  described transfers to it as going to "an external wallet" when it's almost
+  certainly Coinbase moving funds between its own wallets. Now two separate
+  sets: `WATCHLIST` (actively collected from, small) vs.
+  `KNOWN_EXCHANGE_ADDRESSES` (classification-only, ~17 addresses across 10
+  exchanges, WATCHLIST is a subset) — plus a self-maintaining fallback
+  (`INSTITUTIONAL_SENT_TX_THRESHOLD`) that deprioritizes unlabeled-but-
+  clearly-not-retail counterparties by transaction volume, since hand-
+  verifying "hundreds" of addresses isn't practical. See the block comment
+  above `WATCHLIST` in `collectors/whale_movements.py` for the full design
+  and maintenance approach.
+- **First live collect run also surfaced a data-freshness bug** (separate
+  from the two above, already fixed same day): no recency filter meant a
+  transaction from 2023-06-21 got collected as if it had just happened. Fixed
+  with a 24h window (`WHALE_MAX_AGE_HOURS`).
+
+**Still open:**
+
 - **Exchange-to-exchange transfers can generate two `raw_items`** — one from
   each watched wallet's own `txlist`/`tokentx` call, since the collector
   fetches per-address rather than per-transaction. `external_id` is scoped
@@ -46,10 +64,15 @@ don't get rediscovered as surprises:
   collection time if this proves to matter in practice (exchange<->exchange
   is already scored lower on actionability, so the practical impact of a
   double-surface may be small).
-- **Watchlist is 8 addresses across Binance/Coinbase/Kraken/OKX** — verified
-  individually via web search against Etherscan's own address-label metadata
-  (see `collectors/whale_movements.py`'s WATCHLIST comment), not exhaustive.
-  Easy to extend — add entries to the list, no code change needed elsewhere.
+- **$2M collect threshold not yet tuned off clean data** — operator direction
+  2026-09-10: the first live cycle's volume numbers were contaminated by the
+  counterparty-misclassification bug above (some of what cleared threshold
+  was likely internal exchange shuffling, not real signal). Run a few clean
+  cycles with the classification fix in place, then tune from real data.
+- **KNOWN_EXCHANGE_ADDRESSES is ~17 addresses across 10 exchanges** —
+  hand-verified the same way as WATCHLIST, not exhaustive (genuinely "hundreds"
+  exist). The `INSTITUTIONAL_SENT_TX_THRESHOLD` heuristic is the deliberate
+  safety net for what this list doesn't cover by name.
 
 ## Telegram / bot reliability
 

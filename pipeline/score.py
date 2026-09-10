@@ -211,10 +211,22 @@ def score_whale_movements(conn, raw_item_id: int, payload: dict) -> dict:
     novelty = _whale_novelty(conn, raw_item_id, payload)
     credibility = _whale_credibility(payload)
 
-    # Actionability: a single-exchange in/out is a clear directional signal
-    # (deposit = possible sell pressure, withdrawal = possible accumulation);
-    # exchange<->exchange is an ambiguous market read (internal rebalancing).
-    actionability = 40.0 if payload.get("counterparty_is_exchange") else 85.0
+    # Actionability, 3 tiers (2026-09-10 — was binary, missed the live bug
+    # where an unlabeled-but-clearly-institutional counterparty was scored
+    # exactly like a genuine retail wallet): a single-exchange in/out against
+    # a genuine external wallet is a clear directional signal (deposit =
+    # possible sell pressure, withdrawal = possible accumulation); a
+    # CONFIRMED exchange<->exchange transfer is an ambiguous market read
+    # (internal rebalancing); an unlabeled-but-clearly-not-retail counterparty
+    # (see collectors/whale_movements.py's INSTITUTIONAL_SENT_TX_THRESHOLD)
+    # sits between the two — probably not a real directional signal, but not
+    # confirmed internal reshuffling either.
+    if payload.get("counterparty_is_exchange"):
+        actionability = 40.0
+    elif payload.get("counterparty_likely_institutional"):
+        actionability = 55.0
+    else:
+        actionability = 85.0
 
     return {
         "impact": impact,

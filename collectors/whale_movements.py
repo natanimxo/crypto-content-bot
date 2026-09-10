@@ -52,6 +52,37 @@ ETHERSCAN_CALL_DELAY_SECONDS = 0.35
 # the wrong wallet). Easy to extend: add entries here, no code change needed
 # elsewhere. Lowercase — Etherscan's API returns addresses lowercase too, and
 # all comparisons in this module assume that.
+#
+# TWO SEPARATE SETS (2026-09-10, structural fix — operator direction):
+#
+#   WATCHLIST — wallets we actively COLLECT FROM (txlist/tokentx calls). Kept
+#   small deliberately: every address here costs real API calls every cycle.
+#
+#   KNOWN_EXCHANGE_ADDRESSES — a broader set used ONLY to CLASSIFY the far
+#   side of a transfer, never polled directly. WATCHLIST is a subset of this.
+#   Live bug this fixes: "counterparty not on our 8-address WATCHLIST" was
+#   being treated as equivalent to "external/retail wallet" — false for any
+#   of the hundreds of real labeled exchange addresses that simply weren't
+#   one of the 8 we happened to poll. Confirmed live: 0xa9d1e08c...fb81d3e43
+#   is Etherscan-labeled "Coinbase 10", but 7 "withdrawn from Coinbase to an
+#   external wallet" posts described transfers TO it as if it were a retail
+#   counterparty — it's almost certainly Coinbase moving funds between its
+#   own wallets.
+#
+#   MAINTENANCE: both sets are hand-verified Python data (reviewable via
+#   commit diffs, same rigor as WATCHLIST above), not auto-scraped — Etherscan
+#   doesn't expose address labels via its free API, only its website (which
+#   sits behind bot-detection we won't try to bypass). This can't practically
+#   cover "hundreds" of addresses by hand, so it's deliberately paired with a
+#   self-maintaining fallback that needs no list at all: any counterparty with
+#   an enormous `sent_tx_count` (see _counterparty_establishment) is almost
+#   certainly institutional/automated infrastructure regardless of whether
+#   we've identified WHICH entity it is — see INSTITUTIONAL_SENT_TX_THRESHOLD
+#   and _build_item's classification below. A natural future signal for
+#   growing KNOWN_EXCHANGE_ADDRESSES by hand: counterparties that recur often
+#   across raw_items AND clear that heuristic are good candidates to identify
+#   and add explicitly (not automated here — a simple ad-hoc query against
+#   existing data, not worth building a tracked feature for yet).
 WATCHLIST = [
     {"address": "0xf977814e90da44bfa03b6295a0616a897441acec", "exchange": "Binance"},
     {"address": "0x631fc1ea2270e98fbd9d92658ece0f5a269aa161", "exchange": "Binance"},
@@ -63,6 +94,30 @@ WATCHLIST = [
     {"address": "0x4e7b110335511f662fdbb01bf958a7844118c0d4", "exchange": "OKX"},
 ]
 WATCHLIST_BY_ADDRESS = {w["address"]: w for w in WATCHLIST}
+
+# Broader classification-only set (see block comment above) — verified
+# 2026-09-10 the same way as WATCHLIST. Deliberately not polled for collection.
+KNOWN_EXCHANGE_ADDRESSES = WATCHLIST + [
+    {"address": "0xa9d1e08c7793af67e9d92fe308d5697fb81d3e43", "exchange": "Coinbase"},  # Coinbase 10 -- the live bug that prompted this fix
+    {"address": "0xa7a93fd0a276fc1c0197a5b5623ed117786eed06", "exchange": "Bybit"},
+    {"address": "0xf89d7b9c864f589bbf53a82105107622b35eaa40", "exchange": "Bybit"},
+    {"address": "0x77134cbc06cb00b66f4c7e623d5fdbf6777635ec", "exchange": "Bitfinex"},
+    {"address": "0x7793cd85c11a924478d358d49b05b37e91b5810f", "exchange": "Gate.io"},
+    {"address": "0xfdb16996831753d5331ff813c29a93c76834a0ad", "exchange": "HTX"},
+    {"address": "0xeee28d484628d41a82d01e21d12e2e78d69920da", "exchange": "HTX"},
+    {"address": "0x53f78a071d04224b8e254e243fffc6d9f2f3fa23", "exchange": "KuCoin"},
+    {"address": "0x2b5634c42055806a59e9107ed44d43c426e58258", "exchange": "KuCoin"},
+    {"address": "0x46340b20830761efd32832a74d7169b29feb9758", "exchange": "Crypto.com"},
+]
+KNOWN_EXCHANGE_BY_ADDRESS = {w["address"]: w for w in KNOWN_EXCHANGE_ADDRESSES}
+
+# Self-maintaining fallback (operator direction 2026-09-10): an address with
+# enormous transaction volume is very unlikely to be a retail whale even if
+# it's unlabeled. Calibrated against real data: confirmed exchange-linked
+# counterparties we've seen have sent_tx_count in the millions (2.7M, 18.2M);
+# genuine external-looking wallets had 1-1,331. 10,000 sits comfortably below
+# the former and above plausible high-activity retail use.
+INSTITUTIONAL_SENT_TX_THRESHOLD = 10_000
 
 TXLIST_PAGE_SIZE = 100
 DEFAULT_MIN_USD = 2_000_000  # fallback if category_config.collect_min_usd is unset
@@ -188,8 +243,18 @@ def _build_item(tx: dict, watched_address: str, exchange: str, symbol: str,
     if not counterparty:
         return None
 
-    counterparty_entry = WATCHLIST_BY_ADDRESS.get(counterparty)
+    # Classify against the BROADER known-exchange set, not just WATCHLIST —
+    # see the block comment above WATCHLIST for the live bug this fixes.
+    counterparty_entry = KNOWN_EXCHANGE_BY_ADDRESS.get(counterparty)
     establishment = _counterparty_establishment(counterparty)
+
+    sent_count = establishment["sent_tx_count"]
+    # Unlabeled but clearly not-retail (self-maintaining fallback — see
+    # INSTITUTIONAL_SENT_TX_THRESHOLD comment): don't claim we know WHO it is,
+    # but don't describe it as a plain external/retail wallet either.
+    likely_institutional = (
+        counterparty_entry is None and sent_count is not None and sent_count >= INSTITUTIONAL_SENT_TX_THRESHOLD
+    )
 
     tx_hash = tx.get("hash")
     if not tx_hash:
@@ -210,8 +275,9 @@ def _build_item(tx: dict, watched_address: str, exchange: str, symbol: str,
         "counterparty": counterparty,
         "counterparty_is_exchange": counterparty_entry is not None,
         "counterparty_exchange_name": counterparty_entry["exchange"] if counterparty_entry else None,
+        "counterparty_likely_institutional": likely_institutional,
         "counterparty_first_tx_ts": establishment["first_tx_ts"],
-        "counterparty_sent_tx_count": establishment["sent_tx_count"],
+        "counterparty_sent_tx_count": sent_count,
         "symbol": symbol,
         "amount": amount,
         "value_usd": value_usd,
