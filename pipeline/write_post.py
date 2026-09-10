@@ -261,6 +261,12 @@ separately, not by you) targets roughly 400-700 characters.
 
 WHALE_BACKFILL_SCAN_LIMIT = 20  # prior txs to check EACH of native-ETH and ERC-20 (40 total) on a wallet's FIRST flagged move
 WHALE_DORMANCY_DAYS = 14         # matches the plan's dormancy-vs-repeat-mover framing threshold
+# Same price-confidence gate as collectors/whale_movements.py — kept as a
+# duplicate constant rather than a cross-module import, matching how the
+# rest of this category's shared reasoning already lives in per-module
+# comments (e.g. the V2 API deprecation note) rather than a shared config.
+MIN_PRICE_CONFIDENCE = 0.8
+MAX_PRICE_AGE_HOURS = 24
 # V2: same deprecation fix as collectors/whale_movements.py — see that file's
 # ETHERSCAN_URL comment for the discovery story.
 ETHERSCAN_URL = "https://api.etherscan.io/v2/api"
@@ -302,10 +308,33 @@ def _get_eth_price_historical(timestamp: int) -> float | None:
 
 
 def _get_token_price_historical(contract_address: str, timestamp: int) -> float | None:
+    """None means 'don't trust this enough to publish a dollar figure' — see
+    collectors/whale_movements.py's _get_token_price_usd for the same check on
+    the live-collection path and the reasoning (operator direction 2026-09-10).
+    For a historical lookup, staleness is measured differently: DefiLlama's
+    own `timestamp` on the returned point tells us how far its NEAREST actual
+    data is from the timestamp we asked for — a large gap means it's
+    extrapolating for a thinly-traded token, not truly pricing that moment."""
     key = f"ethereum:{contract_address.lower()}"
     resp = get_json(f"{DEFILLAMA_HISTORICAL_PRICE_URL}{timestamp}/{key}")
     coin = resp.get("coins", {}).get(key)
-    return coin["price"] if coin else None
+    if not coin or coin.get("price") is None:
+        return None
+
+    confidence = coin.get("confidence")
+    if confidence is not None and confidence < MIN_PRICE_CONFIDENCE:
+        logger.info("Skipping historical %s@%d -- low DefiLlama confidence (%.2f < %.2f)",
+                    contract_address, timestamp, confidence, MIN_PRICE_CONFIDENCE)
+        return None
+
+    point_ts = coin.get("timestamp")
+    if point_ts is not None and abs(point_ts - timestamp) > MAX_PRICE_AGE_HOURS * 3600:
+        gap_h = abs(point_ts - timestamp) / 3600
+        logger.info("Skipping historical %s@%d -- nearest DefiLlama data point is %.1fh away (> %dh)",
+                    contract_address, timestamp, gap_h, MAX_PRICE_AGE_HOURS)
+        return None
+
+    return coin["price"]
 
 
 def _backfill_whale_history(conn, raw_item: dict) -> str | None:

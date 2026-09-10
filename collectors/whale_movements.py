@@ -119,6 +119,15 @@ KNOWN_EXCHANGE_BY_ADDRESS = {w["address"]: w for w in KNOWN_EXCHANGE_ADDRESSES}
 # the former and above plausible high-activity retail use.
 INSTITUTIONAL_SENT_TX_THRESHOLD = 10_000
 
+# Price-confidence gate (operator direction 2026-09-10, after live-verifying
+# two real prices against CoinGecko and finding both correct at confidence
+# 0.99): DefiLlama exposes its own reliability score per price point — a
+# long-tail/thin-liquidity token is exactly the case where a low-confidence
+# or stale cached price could silently misprice a routine transfer as a
+# false whale move. See _get_token_price_usd for how these are applied.
+MIN_PRICE_CONFIDENCE = 0.8
+MAX_PRICE_AGE_HOURS = 24
+
 TXLIST_PAGE_SIZE = 100
 DEFAULT_MIN_USD = 2_000_000  # fallback if category_config.collect_min_usd is unset
 
@@ -166,10 +175,38 @@ def _get_eth_price_usd() -> float:
 
 
 def _get_token_price_usd(contract_address: str) -> float | None:
+    """None means 'don't trust this enough to publish a dollar figure' — either
+    no price at all, or DefiLlama's own reliability signals say not to.
+    Operator direction 2026-09-10, after live-verifying two real prices
+    (PROM, SPK) against CoinGecko and finding both correct: DefiLlama's
+    /prices/current/ response carries `confidence` (0-1, DefiLlama's own
+    reliability score) and `timestamp` (when that price point was actually
+    recorded) — neither was being checked before. A long-tail token with thin
+    liquidity is exactly the case where a cached/stale/low-confidence price
+    could silently turn a routine transfer into a false $2M+ 'whale move'.
+    Skipping here (at collection time) means the item is never even stored,
+    same class of decision as the existing 'can't value it -- skip rather
+    than guess' handling in collect()."""
     key = f"ethereum:{contract_address.lower()}"
     resp = get_json(f"{DEFILLAMA_PRICE_URL}{key}")
     coin = resp.get("coins", {}).get(key)
-    return coin["price"] if coin else None
+    if not coin or coin.get("price") is None:
+        return None
+
+    confidence = coin.get("confidence")
+    if confidence is not None and confidence < MIN_PRICE_CONFIDENCE:
+        logger.info("Skipping %s -- low DefiLlama price confidence (%.2f < %.2f)",
+                    contract_address, confidence, MIN_PRICE_CONFIDENCE)
+        return None
+
+    price_ts = coin.get("timestamp")
+    if price_ts is not None and (time.time() - price_ts) > MAX_PRICE_AGE_HOURS * 3600:
+        age_h = (time.time() - price_ts) / 3600
+        logger.info("Skipping %s -- stale DefiLlama price (%.1fh old > %dh)",
+                    contract_address, age_h, MAX_PRICE_AGE_HOURS)
+        return None
+
+    return coin["price"]
 
 
 def _fetch_native_txs(address: str) -> list[dict]:
