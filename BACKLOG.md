@@ -98,35 +98,48 @@ the one place to check.
 
 ## Telegram / bot reliability
 
-- **Unresolved: Telegram callback_query taps sometimes don't appear in the next
-  `getUpdates` poll at all, or appear with significant delay, and — once they
-  do appear — often fail `answerCallbackQuery` with "query is too old and
-  response timeout expired" even on the very first answer attempt (not just
-  after a slow write delays it).** Live-observed repeatedly 2026-09-09 across
-  Approve, Reject, Edit, and (briefly, before that flow was removed) Publish
-  taps — e.g. a tap visible in one manual `getUpdates` peek was simply absent
-  from the very next call moments later with the same offset; on other taps,
-  the state change succeeded but the acknowledgment still came back stale
-  immediately. No root cause identified — ruled out: our offset math (verified
-  correct via direct API calls), the bot token mismatch, the allow-list, and
-  (per a later, cleaner comparison) our own manual diagnostic polling being the
-  cause of the very first instances, though that doesn't explain the pattern
-  recurring on fresh, never-peeked-at taps later in the same session. Current
-  mitigations only manage the *symptoms*, not the cause:
-    - `bot/approval_poller.py`'s two-phase run() (ack every tap in a batch
-      before any tap's slow LLM write) prevents one tap's latency from starving
-      another's acknowledgment.
-    - `_safe_ack()` ensures a failed acknowledgment never blocks or drops the
-      actual state change / deferred work — this is why the pattern is no
-      longer *functionally* blocking, but the underlying Telegram-side
-      flakiness is unexplained and could still cause a tap to be silently lost
-      if it never arrives in any poll before GitHub Actions' cron naturally
-      moves the offset forward. Worth real investigation once this runs on the
-      live 5-minute cron instead of manual polling, where the pattern might
-      look completely different (or vanish, or worsen) under real timing.
-    - Since Publish/Cancel no longer exists (2026-09-10 — see below), this is
-      now scoped to Approve/Reject/Edit only, but the mechanism is identical
-      and there's no reason to assume it's specific to the removed flow.
+- ~~Unresolved: callback_query taps sometimes don't appear in getUpdates, or
+  fail answerCallbackQuery even immediately~~ — **root-caused and fixed
+  2026-09-11.** A deliberate controlled test (tap -> poll immediately vs. tap
+  -> poll after exactly 10 minutes untouched) proved it decisively: a tap
+  succeeds 2/2 when polled within seconds, and is completely absent from
+  getUpdates — not just unanswerable, genuinely gone — after 10 minutes
+  (confirmed twice). Root cause: Telegram drops an un-fetched callback_query
+  from the delivery queue well under its documented 24h retention for
+  ordinary updates, specific to callback_query's interactive nature. Separate
+  from the already-known answerCallbackQuery-expiry issue `_safe_ack` already
+  handled — this one meant the update never arrived at all, which no amount
+  of ack-handling could fix. Made short-polling on a 5-15 minute cron
+  fundamentally incompatible with catching most taps — a real design problem,
+  not a quirk.
+
+  Fixed by switching `bot/approval_poller.py` to long-polling
+  (`LONG_POLL_TIMEOUT_SECONDS=270`) instead of short-polling (`timeout=0`) —
+  Telegram delivers an update the instant it occurs while a long-poll
+  connection is open, rather than waiting for the timeout. No server added
+  (keeps Section 2's zero-infrastructure design): a GitHub Actions job long-
+  polling for most of the gap between 5-minute cron firings, back-to-back,
+  shrinks the blind window from "up to 15 minutes" to roughly 10-20 seconds.
+  `approval-poll.yml`'s job timeout raised to 6 minutes to match, with a
+  `concurrency` guard added (queue, don't overlap) since two runs long-
+  polling simultaneously against the same offset would race.
+
+  Verified live: a 2-minute long-poll window caught 3 real taps and returned
+  in 0.4 seconds — nowhere near the 120s timeout, proving instant delivery
+  while a connection is open. The real poller then processed all three
+  correctly (one against a still-live item — approved, write generated,
+  preview sent; two against already-deleted items — correctly no-opped as
+  "already handled" rather than erroring).
+
+  **Separate, still-open finding from the same investigation:** no GitHub
+  Actions Secrets are configured on the repo at all — the "Approval Poll"
+  cron has been crash-looping on a missing `DATABASE_URL` every ~5 minutes
+  since the repo went public (confirmed via `gh run list` / `gh run view
+  --log`), failing before it ever reaches the Telegram API call. Harmless to
+  this investigation (ruled out as a second consumer of updates, since it
+  never got that far), but means the production cron — long-polling fix or
+  not — cannot actually run yet. Needs the operator's go-ahead before secrets
+  are written into the repo's settings.
 
 ## Documentation
 
