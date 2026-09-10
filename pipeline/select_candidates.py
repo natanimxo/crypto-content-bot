@@ -8,6 +8,13 @@ because its topic was already surfaced within cooldown_hours, or because the
 channel already hit its soft_daily_cap for today — in both cases it's simply
 skipped, not marked as anything, so a later cycle (once the cooldown lapses, or
 tomorrow resets the cap) can pick it back up.
+
+A fourth gate, `raw_items.held` (2026-09-11), is the odd one out: it's never
+set by anything in collect/score, only by the operator (scripts/hold_candidates.py)
+choosing to pace a release -- e.g. "send me a few first so I can gauge write
+quality before the rest." Unlike the other three, releasing a held item
+doesn't happen automatically with time; it stays excluded until explicitly
+un-held.
 """
 
 from pipeline.db import dict_cursor
@@ -76,7 +83,7 @@ def get_new_candidates(conn, category: str, channel: str) -> list[dict]:
             """SELECT r.id AS raw_item_id, r.payload, s.score, s.score_breakdown
                FROM raw_items r
                JOIN scores s ON s.raw_item_id = r.id
-               WHERE r.category = %s AND s.score >= %s
+               WHERE r.category = %s AND s.score >= %s AND r.held = FALSE
                  AND (r.payload->>'assigned_channel' IS NULL OR r.payload->>'assigned_channel' = %s)
                ORDER BY s.score DESC""",
             (category, threshold, channel),

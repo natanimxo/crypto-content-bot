@@ -100,6 +100,21 @@ ALTER TABLE post_previews ADD COLUMN IF NOT EXISTS content_b_message_id BIGINT;
 -- Migration for a DB from before collect_min_usd existed.
 ALTER TABLE category_config ADD COLUMN IF NOT EXISTS collect_min_usd NUMERIC;
 
+-- Extension 2026-09-11: lets an operator explicitly hold specific candidates
+-- back from notification -- e.g. "send me 3-4 first so I can gauge write
+-- quality before releasing the rest" -- in a way that actually survives a
+-- real collect/notify cycle. A prior attempt at this pacing used a one-off
+-- local monkeypatch of get_new_candidates scoped to a single manual script
+-- invocation; the very next real notify() run (via a normal Collect
+-- workflow trigger) knew nothing about it and released everything at once.
+-- Lesson: anything that only exists in a manual invocation isn't real,
+-- since production only ever sees the DB. `held` is checked by
+-- select_candidates.get_new_candidates alongside the existing
+-- already-notified/cooldown/soft-cap gates; nothing in collect/score ever
+-- sets it automatically -- it's operator-only, toggled via
+-- scripts/hold_candidates.py (or directly in Supabase).
+ALTER TABLE raw_items ADD COLUMN IF NOT EXISTS held BOOLEAN NOT NULL DEFAULT FALSE;
+
 -- Score per item, per its OWN category — never cross-category
 CREATE TABLE IF NOT EXISTS scores (
     id SERIAL PRIMARY KEY,
