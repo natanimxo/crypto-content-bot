@@ -249,7 +249,10 @@ separately, not by you) targets roughly 400-700 characters.
 
 WHALE_BACKFILL_SCAN_LIMIT = 20  # prior native-ETH txs to check on a wallet's FIRST flagged move
 WHALE_DORMANCY_DAYS = 14         # matches the plan's dormancy-vs-repeat-mover framing threshold
-ETHERSCAN_URL = "https://api.etherscan.io/api"
+# V2: same deprecation fix as collectors/whale_movements.py — see that file's
+# ETHERSCAN_URL comment for the discovery story.
+ETHERSCAN_URL = "https://api.etherscan.io/v2/api"
+ETHERSCAN_CHAIN_ID = 1
 DEFILLAMA_HISTORICAL_PRICE_URL = "https://coins.llama.fi/prices/historical/"
 
 
@@ -315,6 +318,7 @@ def _backfill_whale_history(conn, raw_item: dict) -> str | None:
         resp = get_json(
             ETHERSCAN_URL,
             params={
+                "chainid": ETHERSCAN_CHAIN_ID,
                 "module": "account", "action": "txlist", "address": watched_address,
                 "startblock": 0, "endblock": 99999999,
                 "page": 1, "offset": WHALE_BACKFILL_SCAN_LIMIT, "sort": "desc",

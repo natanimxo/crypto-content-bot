@@ -33,7 +33,12 @@ logger = logging.getLogger(__name__)
 
 CATEGORY = "whale_movements"
 SOURCE_NAME = "etherscan_whale_watch"
-ETHERSCAN_URL = "https://api.etherscan.io/api"
+# Etherscan's V1 endpoint (api.etherscan.io/api) is deprecated — live-discovered
+# 2026-09-10, first real call against a funded key returned "You are using a
+# deprecated V1 endpoint, switch to Etherscan API V2". V2 is a unified multi-
+# chain endpoint requiring an explicit chainid param (1 = Ethereum mainnet).
+ETHERSCAN_URL = "https://api.etherscan.io/v2/api"
+ETHERSCAN_CHAIN_ID = 1
 DEFILLAMA_PRICE_URL = "https://coins.llama.fi/prices/current/"
 
 # Etherscan free tier is rate-limited to a few calls/sec — this is a floor
@@ -68,7 +73,7 @@ def _etherscan_get(params: dict) -> dict:
     if not api_key:
         raise RuntimeError("ETHERSCAN_API_KEY is not set")
     time.sleep(ETHERSCAN_CALL_DELAY_SECONDS)
-    body = get_json(ETHERSCAN_URL, params={**params, "apikey": api_key})
+    body = get_json(ETHERSCAN_URL, params={**params, "chainid": ETHERSCAN_CHAIN_ID, "apikey": api_key})
     # Etherscan returns status="0" for BOTH real errors and "no results" —
     # message is what actually distinguishes them.
     if body.get("status") not in ("1", 1) and body.get("message") != "No transactions found":
