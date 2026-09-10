@@ -137,6 +137,62 @@ LOCATION_RESTRICTION_PATTERNS = [
 
 _HTML_TAG_RE = re.compile(r"<[^>]+>")
 
+# Live-observed 2026-09-11: RemoteOK's `location` field frequently repeats a
+# word/segment back-to-back at the source -- confirmed by inspecting the raw
+# API response directly, before any of our own processing touches it: 'New
+# York, New York, New York, United States', 'Miami, Miami, Florida, United
+# States', and the same pattern in the Arabic listings once mojibake-corrected
+# ('دبي, دبي دبي الإمارات العربية المتحدة' -- literally 'Dubai, Dubai Dubai
+# United Arab Emirates'). This isn't something our mojibake fix introduces or
+# RemoteOK's tag system -- it's RemoteOK's own location string, duplicated
+# before it ever reaches us. `location` feeds both the digest triage line
+# (llm_providers/template.py) and the write-time prompt context
+# (write_post.py), so a dirty value here would show up in both the operator's
+# digest AND -- if the writer LLM echoes its prompt context verbatim, which it
+# sometimes does for factual fields -- the actual subscriber-facing post.
+# Fixed at the source (here, alongside the mojibake fix) so every downstream
+# consumer gets clean text automatically.
+#
+# Deliberately conservative: only collapses a word that repeats IMMEDIATELY
+# (comma or whitespace between, case-insensitive) -- never a "drop any word
+# seen anywhere in the string" global dedup, so a legitimate compound name
+# that happens to share a word with an unrelated, non-adjacent segment is
+# never touched. Verified against every duplication pattern actually observed
+# in the live feed; a global dedup would have been more aggressive than the
+# data actually requires and risked mangling a genuinely distinct segment.
+def _dedupe_location(value: str) -> str:
+    if not value:
+        return value
+    out_segments = []
+    prev_words: list[str] | None = None  # word list of the last segment actually KEPT
+    for segment in value.split(","):
+        # 1. Collapse a word immediately repeating itself WITHIN this segment
+        # (the 'دبي دبي' -> 'دبي' half of the Dubai case).
+        words = []
+        for word in segment.split():
+            if words and word.lower() == words[-1].lower():
+                continue
+            words.append(word)
+
+        # 2. Strip a leading run that exactly repeats the previous KEPT
+        # segment's words (case-insensitive) -- covers both a whole segment
+        # repeating verbatim ('New York, New York' -> segment 2 fully
+        # stripped, dropped) and a repeat that lands inside the next segment
+        # instead of getting its own comma ('دبي, دبي الإمارات...' -> the
+        # leading 'دبي' half of segment 2 stripped, leaving just the country).
+        # A dropped/empty segment intentionally leaves prev_words unchanged,
+        # so a chain of 3+ consecutive repeats all collapse against the same
+        # original segment.
+        if prev_words:
+            n = len(prev_words)
+            if len(words) >= n and [w.lower() for w in words[:n]] == [w.lower() for w in prev_words]:
+                words = words[n:]
+
+        if words:
+            out_segments.append(" ".join(words))
+            prev_words = words
+    return ", ".join(out_segments)
+
 
 def _is_location_restricted(listing: dict) -> bool:
     """True only if the listing's free-text description contains real
@@ -158,13 +214,24 @@ def _is_web3_relevant(payload: dict) -> bool:
     return any(kw in position_lower for kw in WEB3_TITLE_KEYWORDS)
 
 
+def _clean_field(key: str, value):
+    if key == "tags":
+        return [_fix_mojibake(t) for t in value]
+    value = _fix_mojibake(value)
+    if key == "location":
+        # Mojibake-fix first, then dedupe -- the Arabic duplication pattern
+        # only resolves into readable repeated words after decoding is fixed.
+        value = _dedupe_location(value)
+    return value
+
+
 def fetch_listings() -> list[dict]:
     body = get_json(API_URL, params={"tags": "crypto"}, headers=REQUEST_HEADERS)
     # First element is RemoteOK's own legal/attribution notice, not a job —
     # verified live (has 'legal' key, no 'id'/'position').
     listings = [item for item in body if item.get("id") and item.get("position")]
     return [
-        {k: (_fix_mojibake(v) if k != "tags" else [_fix_mojibake(t) for t in v]) for k, v in listing.items()}
+        {k: _clean_field(k, v) for k, v in listing.items()}
         for listing in listings
     ]
 
