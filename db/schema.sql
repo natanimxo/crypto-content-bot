@@ -45,7 +45,13 @@ CREATE TABLE IF NOT EXISTS category_config (
     -- a category label.
     emoji TEXT,
     display_label TEXT,
-    hashtags TEXT[]
+    hashtags TEXT[],
+    -- Raw-collection noise floor in USD, DB-tunable (2026-09-10, Phase 2 whale
+    -- movements) — unlike defi_yields' MIN_TVL_USD (a hardcoded module
+    -- constant), this lives in config specifically so it can be tuned without
+    -- a redeploy ("tune down if daily volume turns out too thin" — operator
+    -- direction). NULL for categories that don't need a dollar-value floor.
+    collect_min_usd NUMERIC
 );
 
 -- Channel-level config
@@ -90,6 +96,9 @@ ALTER TABLE category_config ADD COLUMN IF NOT EXISTS hashtags TEXT[];
 -- Migration for a DB from before the header/content message split existed.
 ALTER TABLE post_previews ADD COLUMN IF NOT EXISTS content_message_id BIGINT;
 ALTER TABLE post_previews ADD COLUMN IF NOT EXISTS content_b_message_id BIGINT;
+
+-- Migration for a DB from before collect_min_usd existed.
+ALTER TABLE category_config ADD COLUMN IF NOT EXISTS collect_min_usd NUMERIC;
 
 -- Score per item, per its OWN category — never cross-category
 CREATE TABLE IF NOT EXISTS scores (

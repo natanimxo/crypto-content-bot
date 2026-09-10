@@ -14,9 +14,15 @@ deterministic pipeline — history/risk/source/hashtags never differ between
 variants, only the writing does, so the comparison isolates writing quality.
 """
 
+import logging
+import os
+
 from pipeline import llm, post_format
 from pipeline.db import dict_cursor
+from pipeline.http import get_json
 from pipeline.score import load_category_config
+
+logger = logging.getLogger(__name__)
 
 HISTORY_LIMIT = 5
 
@@ -167,7 +173,7 @@ def _compute_defi_yields_history_line(raw_item: dict, history: list) -> str | No
 
 
 @register_post_computer("defi_yields")
-def compute_defi_yields_elements(raw_item: dict, history: list) -> dict:
+def compute_defi_yields_elements(conn, raw_item: dict, history: list) -> dict:
     """Everything here is a fact lookup or a fixed rule — never invented prose.
     See post_format.py's module docstring for why this is deliberately not
     the LLM's job."""
@@ -195,11 +201,183 @@ def compute_defi_yields_elements(raw_item: dict, history: list) -> dict:
     return {"history_line": history_line, "risk_line": risk_line, "source_name": source_name}
 
 
+@register_prompt_builder("whale_movements")
+def build_whale_movements_prompt(cfg: dict, region_profile: str, raw_item: dict, history: list) -> str:
+    p = raw_item["payload"]
+    verb = "withdrew" if p.get("direction") == "outflow" else "deposited"
+    counterparty_note = (
+        f"the counterparty is another exchange ({p.get('counterparty_exchange_name')})"
+        if p.get("counterparty_is_exchange") else "the counterparty is an external wallet"
+    )
+
+    us_note = (
+        "\nThis is a US-audience channel — keep financial framing conservative and "
+        "factual; never phrase anything as investment advice or a price prediction."
+        if region_profile == "us" else ""
+    )
+
+    return f"""You are writing prose for a crypto market-summary Telegram channel. Voice: {cfg.get('voice', 'market_summary')}.
+{cfg.get('prompt_notes', '')}{us_note}
+
+Facts about this transfer:
+- Exchange: {p.get('exchange')}
+- Direction: {verb} (relative to the exchange wallet)
+- Amount: {p.get('amount')} {p.get('symbol')}
+- USD value: ${p.get('value_usd', 0):,.0f}
+- Counterparty: {counterparty_note}
+
+Return ONLY a JSON object (no markdown fence, no commentary) with exactly these
+three string fields:
+{{
+  "title": "one specific, informative title naming the exchange and the
+    approximate dollar amount — NOT a generic label. E.g. '$4.2M USDC
+    withdrawn from Binance', never 'Whale Alert'. No emoji.",
+  "narrative": "1-2 sentences: what moved, with the key numbers inline.
+    Plain prose.",
+  "why_it_matters": "EXACTLY one sentence on the likely market read (e.g.
+    accumulation vs. distribution signal) — state it as a typical
+    interpretation, not a certainty or a directive."
+}}
+
+Do not mention scores or internal categorization. Never state a price
+prediction or tell the reader what to do with their own funds. No emoji
+anywhere in your output. Keep the combined narrative + why_it_matters under
+~60 words — the whole post (header/history/risk/source/hashtags added
+separately, not by you) targets roughly 400-700 characters.
+"""
+
+
+WHALE_BACKFILL_SCAN_LIMIT = 20  # prior native-ETH txs to check on a wallet's FIRST flagged move
+WHALE_DORMANCY_DAYS = 14         # matches the plan's dormancy-vs-repeat-mover framing threshold
+ETHERSCAN_URL = "https://api.etherscan.io/api"
+DEFILLAMA_HISTORICAL_PRICE_URL = "https://coins.llama.fi/prices/historical/"
+
+
+def _whale_history_frame(exchange: str, direction: str, value_usd: float, days_ago: float) -> str:
+    verb = "withdrew from" if direction == "outflow" else "deposited to"
+    if days_ago >= WHALE_DORMANCY_DAYS:
+        return f"Dormant since — this wallet's last comparable move was {days_ago:.0f}d ago, when it {verb} {exchange} (${value_usd:,.0f})."
+    return f"Also {verb} {exchange} {days_ago:.0f}d ago (${value_usd:,.0f}) — repeat activity from this wallet."
+
+
+def _compute_whale_own_history_line(raw_item: dict, history: list) -> str | None:
+    """Uses OUR OWN accumulated raw_items — cheap, no extra API calls. Unlike
+    defi_yields, there's no external N-day reference window to avoid
+    contradicting here, so any validated prior flagged move counts as real
+    memory regardless of recency (same null/zero defensive validation still
+    applies — never build a history line from a missing/malformed prior value)."""
+    if not history:
+        return None
+    prior = history[0]  # DESC order -> most recent prior flagged move
+    prior_p = prior["payload"]
+    prior_value = prior_p.get("value_usd")
+    if not prior_value or prior_value <= 0:
+        return None
+    if not (raw_item.get("collected_at") and prior.get("collected_at")):
+        return None
+
+    days_ago = (raw_item["collected_at"] - prior["collected_at"]).total_seconds() / 86400
+    return _whale_history_frame(prior_p.get("exchange"), prior_p.get("direction"), prior_value, days_ago)
+
+
+def _get_eth_price_historical(timestamp: int) -> float | None:
+    resp = get_json(f"{DEFILLAMA_HISTORICAL_PRICE_URL}{timestamp}/coingecko:ethereum")
+    coin = resp.get("coins", {}).get("coingecko:ethereum")
+    return coin["price"] if coin else None
+
+
+def _backfill_whale_history(conn, raw_item: dict) -> str | None:
+    """Real on-chain lookup for this wallet's actual prior large transfer,
+    even from before we started tracking it — operator direction 2026-09-10:
+    'this is the one category where real memory works on day one... Etherscan
+    can pull a wallet's actual prior large transfers even from before we
+    started collecting.' Runs ONCE per wallet (only when there's no
+    accumulated raw_items history yet, i.e. this is the first time we've
+    flagged it) — every subsequent move for the same wallet reuses the
+    cheaper, already-accumulated history via _compute_whale_own_history_line
+    instead. Native-ETH history only for now (not historical ERC-20 tokentx)
+    — narrower scope, still covers the common case; could extend later.
+    """
+    p = raw_item["payload"]
+    watched_address = p.get("watched_address")
+    current_ts = p.get("timestamp")
+    current_tx_hash = p.get("tx_hash")
+    if not watched_address or not current_ts:
+        return None
+
+    api_key = os.environ.get("ETHERSCAN_API_KEY")
+    if not api_key:
+        return None  # can't backfill without a live key -- omit rather than fail the whole post
+
+    try:
+        cfg = load_category_config(conn, "whale_movements")
+        min_usd = float(cfg.get("collect_min_usd") or 2_000_000)
+        resp = get_json(
+            ETHERSCAN_URL,
+            params={
+                "module": "account", "action": "txlist", "address": watched_address,
+                "startblock": 0, "endblock": 99999999,
+                "page": 1, "offset": WHALE_BACKFILL_SCAN_LIMIT, "sort": "desc",
+                "apikey": api_key,
+            },
+        )
+    except Exception:
+        logger.warning("Backfill txlist lookup failed for %s -- omitting history", watched_address)
+        return None
+
+    for tx in resp.get("result") or []:
+        if tx.get("hash") == current_tx_hash:
+            continue  # skip the transfer we're writing about
+        try:
+            ts = int(tx.get("timeStamp", 0))
+            value_eth = int(tx["value"]) / 1e18
+        except (KeyError, ValueError):
+            continue
+        if ts >= current_ts:
+            continue  # only genuinely PRIOR transactions
+        price = _get_eth_price_historical(ts)
+        if price is None:
+            continue
+        value_usd = value_eth * price
+        if value_usd < min_usd:
+            continue
+
+        days_ago = (current_ts - ts) / 86400
+        direction = "outflow" if (tx.get("from") or "").lower() == watched_address else "inflow"
+        return _whale_history_frame(p.get("exchange"), direction, value_usd, days_ago)
+
+    return None  # no qualifying prior move in the scanned window -- omit, don't overclaim
+
+
+@register_post_computer("whale_movements")
+def compute_whale_movements_elements(conn, raw_item: dict, history: list) -> dict:
+    """Everything here is a fact lookup or a fixed rule — never invented
+    prose. See post_format.py's module docstring for why this is
+    deliberately not the LLM's job."""
+    history_line = _compute_whale_own_history_line(raw_item, history)
+    if history_line is None and not history:
+        history_line = _backfill_whale_history(conn, raw_item)
+
+    p = raw_item["payload"]
+    risk_line = None
+    if not p.get("counterparty_is_exchange"):
+        sent_count = p.get("counterparty_sent_tx_count")
+        first_tx_ts = p.get("counterparty_first_tx_ts")
+        tx_ts = p.get("timestamp")
+        if sent_count is not None and sent_count < 5:
+            risk_line = "Counterparty wallet has very little on-chain history — treat as a lower-confidence signal."
+        elif first_tx_ts is not None and tx_ts is not None and (tx_ts - first_tx_ts) < 7 * 86400:
+            risk_line = "Counterparty wallet was created within the past week."
+
+    # No hyperlinks (2026-09-10, operator direction) — plain-text attribution only.
+    return {"history_line": history_line, "risk_line": risk_line, "source_name": "Etherscan"}
+
+
 def _assemble(conn, category: str, raw_item: dict, history: list, llm_raw_output: str) -> str:
     cfg = load_category_config(conn, category)
     parsed = post_format.parse_llm_json(llm_raw_output)
     computer = POST_COMPUTERS.get(category)
-    elements = computer(raw_item, history) if computer else {}
+    elements = computer(conn, raw_item, history) if computer else {}
 
     return post_format.assemble_post(
         emoji=cfg.get("emoji") or "",

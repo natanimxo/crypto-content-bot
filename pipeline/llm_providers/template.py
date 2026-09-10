@@ -42,3 +42,20 @@ def render_defi_yields(raw_item: dict) -> str:
     if p.get("il_risk") == "yes" and not p.get("stablecoin"):
         parts.append("IL risk flagged")
     return " · ".join(parts)
+
+
+@register_template("whale_movements")
+def render_whale_movements(raw_item: dict) -> str:
+    p = raw_item["payload"]
+    verb = "withdrawn from" if p.get("direction") == "outflow" else "deposited to"
+    parts = [
+        f"${p.get('value_usd', 0):,.0f} ({p.get('amount', 0):,.2f} {p.get('symbol', '?')}) "
+        f"{verb} {p.get('exchange')}"
+    ]
+    if p.get("counterparty_is_exchange"):
+        parts.append(f"counterparty: {p.get('counterparty_exchange_name')} (exchange)")
+    else:
+        sent = p.get("counterparty_sent_tx_count")
+        if sent is not None and sent < 5:
+            parts.append("counterparty: low-activity wallet")
+    return " · ".join(parts)

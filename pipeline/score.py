@@ -4,9 +4,17 @@ scorer function, and its own threshold in category_config.
 
 Adding a new category later means writing one function and registering it with
 @register_scorer("category_name") — nothing else in this file changes.
+
+Scorer signature: `scorer(conn, raw_item_id, payload) -> breakdown_dict`.
+"Deterministic" means same-inputs-in-same-outputs-out and zero LLM calls — it
+does NOT mean no DB access. whale_movements' novelty component (Phase 2,
+2026-09-10) needs to compare against this category's own recent history (a
+cooldown-style lookup), which payload alone can't answer — conn/raw_item_id
+are there for scorers that need that. defi_yields ignores both.
 """
 
 import json
+import math
 
 from psycopg2.extras import execute_values
 
@@ -46,8 +54,21 @@ def _clamp(value: float, lo: float = 0.0, hi: float = 100.0) -> float:
     return max(lo, min(hi, value))
 
 
+def _log_scale(value: float, floor: float, ceiling: float,
+                out_min: float = 0.0, out_max: float = 100.0) -> float:
+    """Maps value logarithmically from [floor, ceiling] to [out_min, out_max],
+    clamped outside that range. Useful for dollar-value-style impact scores
+    where a floor->10x move should matter a lot more than a 10x->11x one."""
+    if value <= floor:
+        return out_min
+    if value >= ceiling:
+        return out_max
+    frac = (math.log10(value) - math.log10(floor)) / (math.log10(ceiling) - math.log10(floor))
+    return out_min + frac * (out_max - out_min)
+
+
 @register_scorer("defi_yields")
-def score_defi_yields(payload: dict) -> dict:
+def score_defi_yields(conn, raw_item_id: int, payload: dict) -> dict:
     """Breakdown components, each 0-100. See config/category_config.yaml for the
     weights applied to these, and prompt_notes for how "impact" is meant to read
     (mechanics, not hype).
@@ -109,6 +130,100 @@ def score_defi_yields(payload: dict) -> dict:
     }
 
 
+# whale_movements impact scale: $2M (the collection floor, category_config.
+# collect_min_usd) reads as barely-impactful, $50M+ single transfers (rare but
+# real for major exchange wallets) saturate. Not DB-driven off collect_min_usd
+# itself — these are the scorer's own internal calibration constants, same as
+# defi_yields' "33%+ APY saturates impact" being a code constant, not config.
+WHALE_IMPACT_FLOOR_USD = 2_000_000
+WHALE_IMPACT_CEILING_USD = 50_000_000
+WHALE_NOVELTY_CEILING_HOURS = 72  # 3 days since a similar move -> full novelty
+
+
+def _whale_novelty(conn, raw_item_id: int, payload: dict) -> float:
+    """How long since we last flagged a move for this SAME exchange+direction
+    pair — a big Binance-inflow flagged yesterday makes another same-size
+    Binance-inflow today less novel; the first flagged move in days for a
+    given exchange/direction scores high. Requires a DB lookup (see module
+    docstring) since payload alone can't know about other raw_items."""
+    exchange = payload.get("exchange")
+    direction = payload.get("direction")
+    if not exchange or not direction:
+        return 50.0
+
+    with dict_cursor(conn) as cur:
+        cur.execute(
+            """SELECT r.collected_at,
+                      (SELECT MAX(r2.collected_at) FROM raw_items r2
+                       WHERE r2.category = r.category AND r2.id != r.id
+                         AND r2.payload->>'exchange' = r.payload->>'exchange'
+                         AND r2.payload->>'direction' = r.payload->>'direction'
+                      ) AS prior_collected_at
+               FROM raw_items r WHERE r.id = %s""",
+            (raw_item_id,),
+        )
+        row = cur.fetchone()
+
+    if not row or not row["prior_collected_at"]:
+        return 100.0  # first flagged move we've ever seen for this exchange+direction pair
+
+    hours_gap = (row["collected_at"] - row["prior_collected_at"]).total_seconds() / 3600
+    return round(_clamp(hours_gap / WHALE_NOVELTY_CEILING_HOURS * 100.0), 1)
+
+
+def _whale_credibility(payload: dict) -> float:
+    """Counterparty wallet establishment (age + sent-tx count), NOT the
+    exchange side — operator direction 2026-09-10: every watchlist address is
+    curated, so 'is the exchange side legitimate' would be a near-constant
+    that doesn't discriminate between items. The counterparty genuinely
+    varies: a transfer touching a long-lived, active wallet is a more
+    credible 'real economic activity' signal than one touching a brand-new,
+    one-off address (higher exploit/mixer/wash-trade risk)."""
+    if payload.get("counterparty_is_exchange"):
+        return 90.0  # another watchlisted, well-established entity
+
+    first_tx_ts = payload.get("counterparty_first_tx_ts")
+    tx_ts = payload.get("timestamp")
+    if first_tx_ts is not None and tx_ts is not None:
+        age_days = max(0.0, (tx_ts - first_tx_ts) / 86400)
+        age_score = min(age_days / 365.0, 1.0) * 100.0
+    else:
+        age_score = 20.0  # unknown age -- treat cautiously, not as an automatic zero
+
+    sent_tx_count = payload.get("counterparty_sent_tx_count")
+    count_score = min(sent_tx_count / 100.0, 1.0) * 100.0 if sent_tx_count is not None else 20.0
+
+    return round(age_score * 0.6 + count_score * 0.4, 1)
+
+
+@register_scorer("whale_movements")
+def score_whale_movements(conn, raw_item_id: int, payload: dict) -> dict:
+    """Breakdown components, each 0-100. See config/category_config.yaml's
+    whale_movements section for the full weighting rationale — this shape is
+    deliberately NOT copied from defi_yields (operator direction 2026-09-10):
+    impact/novelty are weighted equally (0.30 each, vs. defi_yields' 0.35/0.25)
+    since 'is this unusual' carries as much story as 'how big' for a whale
+    move, and credibility is redefined entirely (counterparty establishment,
+    not exchange-side legitimacy — see _whale_credibility)."""
+    value_usd = payload.get("value_usd") or 0.0
+
+    impact = round(_log_scale(value_usd, WHALE_IMPACT_FLOOR_USD, WHALE_IMPACT_CEILING_USD), 1)
+    novelty = _whale_novelty(conn, raw_item_id, payload)
+    credibility = _whale_credibility(payload)
+
+    # Actionability: a single-exchange in/out is a clear directional signal
+    # (deposit = possible sell pressure, withdrawal = possible accumulation);
+    # exchange<->exchange is an ambiguous market read (internal rebalancing).
+    actionability = 40.0 if payload.get("counterparty_is_exchange") else 85.0
+
+    return {
+        "impact": impact,
+        "novelty": novelty,
+        "credibility": credibility,
+        "actionability": round(actionability, 1),
+    }
+
+
 def score_new_items(conn, category: str) -> int:
     """Score every raw_item in this category that doesn't have a score row yet.
     Returns the number scored."""
@@ -131,7 +246,7 @@ def score_new_items(conn, category: str) -> int:
 
     values = []
     for row in unscored:
-        breakdown = scorer(row["payload"])
+        breakdown = scorer(conn, row["id"], row["payload"])
         total = sum(weights[k] * breakdown[k] for k in weights)
         values.append((row["id"], category, round(total, 1), json.dumps(breakdown)))
 

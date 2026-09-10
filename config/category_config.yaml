@@ -66,3 +66,69 @@ defi_yields:
     urgency, no emoji beyond what the template itself adds. This channel is
     region_profile 'us' — keep financial framing conservative and factual,
     never anything that could read as a recommendation to deposit funds.
+
+# Phase 2, category 2 of 2026-09-10 — whale_movements -> Crypto Wall Street.
+# Watches known exchange hot wallets (not speculative "whale" addresses — no
+# reliable free source for those) for large in/out transfers. See BACKLOG.md
+# / commit history for the full plan discussion and operator sign-off.
+whale_movements:
+  score_weights:
+    impact: 0.30          # transfer size in USD, log-scaled
+    novelty: 0.30          # raised vs. defi_yields' 0.25 — "is this unusual for
+                            # this wallet" carries as much story as "how big"
+                            # here; cooldown-adjusted against recent flagged
+                            # moves for the same exchange+direction pair
+    credibility: 0.20      # REDEFINED, not copied from defi_yields (operator
+                            # direction 2026-09-10): "every watchlist address is
+                            # curated" would make this a near-constant, so it's
+                            # not about the exchange side at all — it's the
+                            # COUNTERPARTY wallet's own establishment (age +
+                            # tx count). A transfer touching a long-lived,
+                            # active counterparty is a more credible "real
+                            # economic activity" signal than one touching a
+                            # brand-new, one-off address (higher exploit/mixer/
+                            # wash-trade risk) — this genuinely varies per item.
+    actionability: 0.20    # single-exchange in/out (clear directional signal:
+                            # deposit=possible sell pressure, withdrawal=possible
+                            # accumulation) scores higher than exchange<->exchange
+                            # (ambiguous market read)
+
+  review_threshold: 50
+  cooldown_hours: 6
+  soft_daily_cap: 12       # spec Section 17 suggestion: 8-15 for crypto channels
+
+  # $2M, not the originally-proposed $500k — operator direction 2026-09-10:
+  # exchange hot wallets move $500k as routine operations; at that floor this
+  # would surface noise, not signal. DB-tunable (category_config.collect_min_usd)
+  # specifically so it can come down later if real daily volume proves thin,
+  # without a redeploy.
+  collect_min_usd: 2000000
+
+  triage_model: template   # wallet/amount/direction/counterparty are fully
+                            # structured facts — no synthesis needed, same
+                            # reasoning as defi_yields' template triage.
+  write_model: deepseek-v4-flash
+  write_benchmark_status: settled_deepseek   # same reasoning as defi_yields —
+                                              # evaluate DeepSeek alone first
+
+  label: "🐋 WHALE MOVEMENTS"
+
+  emoji: "🐋"
+  display_label: "Whale Watch"
+  hashtags:
+    - "#WhaleAlert"
+    - "#OnChain"
+
+  voice: market_summary
+  # Crypto Wall Street's angle (spec Section 3: "Restores its market-summary
+  # identity") is tight and factual, not educational — a different register
+  # from Crypto Notebook. Structure is fixed in code (pipeline/post_format.py);
+  # these notes shape only the LLM's prose.
+  prompt_notes: >
+    Tight market-summary register: report the move, state the likely read
+    (accumulation vs. distribution signal), stop. No teaching, no mechanic
+    explainers — this is a faster, more direct voice than Crypto Notebook's.
+    Never state a price prediction or tell the reader what to do with their
+    own funds — describe what moved and what that typically signals, not
+    financial advice. Measured tone: no hype, no manufactured urgency, no
+    emoji beyond what the template itself adds.

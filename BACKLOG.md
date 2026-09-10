@@ -24,6 +24,33 @@ the one place to check.
   (Validated 2026-09-10 — loop confirmed working; still not implemented, now
   just genuinely next-up rather than blocked on validation.)
 
+## Whale movements (Phase 2, built 2026-09-10)
+
+Known scope limitations from the initial build, not bugs — flagging so they
+don't get rediscovered as surprises:
+
+- **Backfill (`write_post.py::_backfill_whale_history`) only scans native-ETH
+  history, not historical ERC-20 `tokentx`.** A wallet whose only prior large
+  move was a token transfer (not ETH) won't get real memory on its first
+  flagged move — falls back to no blockquote, same as if it were genuinely
+  new. Native-ETH-only was a deliberate scope cut to ship the core mechanism
+  now rather than not at all; extending to tokens means historical per-token
+  pricing (DefiLlama's historical endpoint supports it, just more calls).
+- **Exchange-to-exchange transfers can generate two `raw_items`** — one from
+  each watched wallet's own `txlist`/`tokentx` call, since the collector
+  fetches per-address rather than per-transaction. `external_id` is scoped
+  per (tx_hash, watched_address, direction) specifically to avoid a UNIQUE
+  collision here, which means both sides get stored and potentially both get
+  notified/scored independently for what's really one real-world event. Not
+  deduped across the two — a candidate for cross-checking `tx_hash` at
+  collection time if this proves to matter in practice (exchange<->exchange
+  is already scored lower on actionability, so the practical impact of a
+  double-surface may be small).
+- **Watchlist is 8 addresses across Binance/Coinbase/Kraken/OKX** — verified
+  individually via web search against Etherscan's own address-label metadata
+  (see `collectors/whale_movements.py`'s WATCHLIST comment), not exhaustive.
+  Easy to extend — add entries to the list, no code change needed elsewhere.
+
 ## Telegram / bot reliability
 
 - **Unresolved: Telegram callback_query taps sometimes don't appear in the next

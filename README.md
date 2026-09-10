@@ -5,13 +5,19 @@ in the technical spec (kept alongside this repo, not checked in here — ask the
 project owner for it if you need the full rationale/section numbers referenced
 in code comments throughout this repo).
 
-**Current build phase (Section 16, Phase 1 — MVP):** one category, one channel,
-full pipeline: DeFi yields (DefiLlama, free/keyless) → Crypto Notebook.
-Everything is config-driven, so Phase 2+ (more categories/channels) is mostly
-config + one new collector/scorer/prompt-builder per category, not new
-architecture — see `pipeline/score.py`, `pipeline/write_post.py`, and
-`pipeline/llm_providers/template.py` for the registry pattern each new category
-plugs into.
+**Build status (Section 16):** Phase 1 (MVP) complete and validated end-to-end —
+DeFi yields (DefiLlama, free/keyless) → Crypto Notebook. Phase 2 is underway,
+one category at a time per Section 0's discipline: whale movements (Etherscan,
+watches known exchange hot wallets) → Crypto Wall Street is live as of
+2026-09-10. Airdrops stays deliberately paused (no reliable free source for
+individual wallet-level "whale" tracking either, hence whale_movements'
+exchange-watchlist design — see `config/category_config.yaml`'s
+whale_movements section for the full rationale).
+
+Everything is config-driven, so each new category is mostly config + one new
+collector/scorer/prompt-builder, not new architecture — see `pipeline/score.py`,
+`pipeline/write_post.py`, and `pipeline/llm_providers/template.py` for the
+registry pattern each new category plugs into.
 
 ## Architecture
 

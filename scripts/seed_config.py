@@ -31,8 +31,8 @@ def seed_categories(conn, path: str):
                 """INSERT INTO category_config
                        (category, score_weights, review_threshold, cooldown_hours,
                         soft_daily_cap, triage_model, write_model, write_benchmark_status,
-                        label, voice, prompt_notes, emoji, display_label, hashtags)
-                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        label, voice, prompt_notes, emoji, display_label, hashtags, collect_min_usd)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                    ON CONFLICT (category) DO UPDATE SET
                        score_weights = EXCLUDED.score_weights,
                        review_threshold = EXCLUDED.review_threshold,
@@ -46,7 +46,8 @@ def seed_categories(conn, path: str):
                        prompt_notes = EXCLUDED.prompt_notes,
                        emoji = EXCLUDED.emoji,
                        display_label = EXCLUDED.display_label,
-                       hashtags = EXCLUDED.hashtags""",
+                       hashtags = EXCLUDED.hashtags,
+                       collect_min_usd = EXCLUDED.collect_min_usd""",
                 (
                     category,
                     json.dumps(cfg["score_weights"]),
@@ -62,6 +63,7 @@ def seed_categories(conn, path: str):
                     cfg.get("emoji"),
                     cfg.get("display_label"),
                     cfg.get("hashtags"),
+                    cfg.get("collect_min_usd"),
                 ),
             )
             print(f"  category_config: {category}")
