@@ -290,17 +290,28 @@ def score_web3_jobs(conn, raw_item_id: int, payload: dict) -> dict:
 
     # Actionability: RemoteOK listings are remote by definition, so the real
     # differentiator is whether the role is geographically OPEN (any global
-    # reader could apply) vs. region-restricted despite being "remote" (e.g.
-    # a GCC-only role requiring Arabic + local market knowledge -- live-
-    # observed in this feed) -- plus a basic apply-ability gate.
+    # reader could apply) vs. genuinely region-restricted despite being
+    # remote -- plus a basic apply-ability gate.
+    #
+    # FIXED 2026-09-11 (operator-identified logic error, not a calibration
+    # tweak): this used to treat ANY populated `location` field as
+    # restrictive. Live-checked against the full feed: 50/55 listings state
+    # a specific location, but only 3/50 (6%) actually restrict by
+    # residency in their description -- the other 94% just state an HQ/
+    # timezone with no real restriction. Treating "has a location string"
+    # as "restricted" was backwards for a remote-by-definition board and
+    # was penalizing the large majority for a signal that didn't mean what
+    # it looked like. `location_restricted` (collectors/web3_jobs.py) is
+    # computed from actual residency/eligibility language in the
+    # description instead, at collection time -- see that module's
+    # LOCATION_RESTRICTION_PATTERNS comment for the full validation.
     apply_url = payload.get("apply_url")
-    location = (payload.get("location") or "").strip().lower()
     if not apply_url:
         actionability = 10.0
-    elif not location or "world" in location or "anywhere" in location:
-        actionability = 90.0
-    else:
+    elif payload.get("location_restricted"):
         actionability = 60.0
+    else:
+        actionability = 90.0
 
     return {
         "impact": impact,

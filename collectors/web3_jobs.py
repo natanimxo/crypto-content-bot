@@ -11,7 +11,9 @@ every listing that has the basic required fields gets collected; scoring
 (pipeline/score.py) does the real quality filtering.
 """
 
+import html as html_lib
 import logging
+import re
 import sys
 
 from dotenv import load_dotenv
@@ -97,6 +99,54 @@ WEB3_TITLE_KEYWORDS = {
     "digital asset", "cryptocurrency",
 }
 
+# Genuine location-restriction signal for scoring's actionability component
+# (pipeline/score.py::score_web3_jobs) -- operator direction 2026-09-11,
+# fixing a logic error: the scorer used to treat ANY populated `location`
+# field as "region-restricted" (actionability 60 instead of 90), on a board
+# whose own premise is remote-by-definition. Live-checked 2026-09-11 against
+# the full crypto-tagged feed: 50/55 listings had a specific location
+# string, but only 3/50 (6%) actually contained real residency-restriction
+# language in the description -- the other 94% just stated a company
+# HQ/timezone with no actual restriction (confirmed by reading all 3 hits:
+# "Remote, must reside in the East Region", "Candidate must live in within
+# their county area", "Candidates must reside in MA, IL, NY/NJ, NC, or FL"
+# -- all real field/territory-sales roles, not the crypto-relevant listings
+# this category actually surfaces). `location` alone was penalizing the
+# 94% for a signal that doesn't mean what it looked like. Real restriction
+# is instead detected from explicit residency/eligibility language in the
+# free-text description; a bare location mention no longer suppresses
+# actionability on its own.
+LOCATION_RESTRICTION_PATTERNS = [
+    re.compile(p, re.IGNORECASE) for p in [
+        r"must (?:be )?(?:based|located|residing)",
+        r"must reside",
+        r"must live in",
+        r"only (?:accepting|considering|hiring)[^.]{0,30}(?:candidates|applicants)",
+        r"no visa sponsorship",
+        r"visa sponsorship (?:is )?not (?:available|provided|offered)",
+        r"eligib(?:le|ility) to work in",
+        r"authoriz(?:ed|ation) to work in",
+        r"\bus\s*citizens?\s*only\b",
+        r"\beu\s*citizens?\s*only\b",
+        r"overlap[^.]{0,20}timezone",
+        r"time ?zone[^.]{0,20}(?:required|overlap|must)",
+        r"restricted to",
+        r"candidates? (?:must|should) be (?:located|based)",
+    ]
+]
+
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
+
+
+def _is_location_restricted(listing: dict) -> bool:
+    """True only if the listing's free-text description contains real
+    residency/eligibility-restriction language -- NOT just because
+    `location` is populated (see the block comment above). Checked against
+    description, not the location field itself, since location is
+    frequently just HQ/timezone context with no actual restriction attached."""
+    description = html_lib.unescape(_HTML_TAG_RE.sub(" ", listing.get("description") or ""))
+    return any(pattern.search(description) for pattern in LOCATION_RESTRICTION_PATTERNS)
+
 
 def _is_web3_relevant(payload: dict) -> bool:
     """True if this listing has a real signal of being about web3/crypto
@@ -159,6 +209,7 @@ def collect() -> int:
                     "salary_min": listing.get("salary_min") or 0,
                     "salary_max": listing.get("salary_max") or 0,
                     "location": listing.get("location") or "",
+                    "location_restricted": _is_location_restricted(listing),
                     "company_logo": listing.get("company_logo") or listing.get("logo") or "",
                     "description_length": len(listing.get("description") or ""),
                     "apply_url": apply_url,
