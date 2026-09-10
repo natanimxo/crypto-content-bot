@@ -52,6 +52,30 @@ the one place to check.
   transaction from 2023-06-21 got collected as if it had just happened. Fixed
   with a 24h window (`WHALE_MAX_AGE_HOURS`).
 
+**Resolved via the first clean cycle (2026-09-10, post-fix):**
+
+- ~~Is the category fundamentally too dominated by internal exchange
+  plumbing?~~ — **validated no, works as designed.** First clean cycle (8
+  candidates): 3 confirmed-exchange, 1 likely-institutional, 4 genuine-
+  external. Raw collection is ~50% plumbing/institutional, but **none of the
+  3 confirmed-exchange items cleared review_threshold** (scored 36.6,
+  correctly suppressed by the actionability penalty) — what actually reaches
+  the operator was 2 genuine-external + 1 likely-institutional. The scoring
+  layer, not the collection floor, is what does the real separation, and it's
+  working. No category rethink needed — operator direction 2026-09-10.
+- **ERC-20 backfill: "unproven but not failing."** Deliberately stopped
+  chasing a live success case (operator direction 2026-09-10) — three
+  separate candidates across two cycles all rendered no history, and each
+  negative was individually verified correct against live Etherscan data
+  (including widening one scan from 20 to 100 transactions — still nothing
+  qualified). The logic itself is confirmed sound: real historical prices
+  computed correctly for 14 genuine token candidates in one of those checks,
+  none of which happened to clear $2M. It's a one-time per-wallet bootstrap,
+  not a recurring code path — most flagged moves use the cheaper, already-
+  proven-working own-history path instead (`_compute_whale_own_history_line`).
+  A live success case will show up naturally as new first-sighting wallets
+  come through; not worth further dedicated testing.
+
 **Still open:**
 
 - **Exchange-to-exchange transfers can generate two `raw_items`** — one from
@@ -64,11 +88,9 @@ the one place to check.
   collection time if this proves to matter in practice (exchange<->exchange
   is already scored lower on actionability, so the practical impact of a
   double-surface may be small).
-- **$2M collect threshold not yet tuned off clean data** — operator direction
-  2026-09-10: the first live cycle's volume numbers were contaminated by the
-  counterparty-misclassification bug above (some of what cleared threshold
-  was likely internal exchange shuffling, not real signal). Run a few clean
-  cycles with the classification fix in place, then tune from real data.
+- **$2M collect threshold not yet tuned.** First clean cycle ran 2026-09-10
+  post-fix: 8 collected, 3 cleared review_threshold. One data point — still
+  want a few more cycles before actually adjusting the $2M floor either way.
 - **KNOWN_EXCHANGE_ADDRESSES is ~17 addresses across 10 exchanges** —
   hand-verified the same way as WATCHLIST, not exhaustive (genuinely "hundreds"
   exist). The `INSTITUTIONAL_SENT_TX_THRESHOLD` heuristic is the deliberate
