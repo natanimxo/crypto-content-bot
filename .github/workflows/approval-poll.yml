@@ -7,10 +7,26 @@ on:
     - cron: "*/5 * * * *"
   workflow_dispatch: {}
 
+# Live-diagnosed 2026-09-10/11: a tapped button's callback_query can vanish
+# from Telegram's getUpdates queue well under 10 minutes if nothing is
+# actively listening (see bot/approval_poller.py's LONG_POLL_TIMEOUT_SECONDS
+# comment for the full deliberate-test writeup) — short-polling once every
+# 5-15 minutes was missing most taps. The fix is long-polling for most of the
+# gap between cron firings instead of returning immediately, which makes
+# overlapping runs a real risk if one run is still mid-long-poll when the
+# next is scheduled to start — `concurrency` here queues instead of
+# parallelizing, so two runs never call getUpdates against the same offset
+# at once.
+concurrency:
+  group: approval-poll
+  cancel-in-progress: false
+
 jobs:
   poll:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # Must comfortably exceed LONG_POLL_TIMEOUT_SECONDS (270s = 4m30s) plus
+    # setup/dependency-install/any-write overhead — keep these two in sync.
+    timeout-minutes: 6
     steps:
       - uses: actions/checkout@v4
 

@@ -37,6 +37,28 @@ from pipeline.write_post import generate_post, generate_post_variants  # noqa: E
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
+# Live-diagnosed 2026-09-10/11: a deliberate test (tap -> poll immediately vs.
+# tap -> poll after exactly 10 minutes, nothing else touching Telegram in
+# between) showed a tap succeeds 2/2 when polled within seconds and vanishes
+# entirely — not just unanswerable, genuinely absent from getUpdates — after
+# 10 minutes. This is separate from (and in addition to) the already-known
+# "answerCallbackQuery expires" issue _safe_ack handles; a callback_query can
+# disappear from the delivery queue itself well under Telegram's documented
+# 24h retention for ordinary updates. That makes short-polling (timeout=0,
+# "check once, return immediately") fundamentally incompatible with a 5-15
+# minute cron — most taps would need to land in the handful of seconds right
+# after a scheduled run happens to fire.
+#
+# Fix, without adding a server (keeping Section 2's zero-infrastructure
+# design): long-poll instead. Telegram delivers an update the INSTANT it
+# occurs while a getUpdates call with timeout>0 is open — it doesn't wait for
+# the timeout to elapse. Holding a long-poll open for most of the gap between
+# cron firings, back-to-back, shrinks the blind window from "up to 15
+# minutes" to roughly the 10-20s between one run ending and the next
+# starting. approval-poll.yml's job timeout and this value need to move
+# together — see that file's comment.
+LONG_POLL_TIMEOUT_SECONDS = 270  # 4m30s -- leaves headroom in a 6-minute job for setup + any writes
+
 
 def _allowed_user_ids() -> set:
     raw = os.environ.get("TELEGRAM_ALLOWED_USER_IDS", "")
@@ -409,7 +431,7 @@ def run() -> None:
         with run_log(conn, "approval_poll") as state:
             offset = _get_last_update_id(conn)
             requested_offset = (offset + 1) if offset else None
-            updates = get_updates(offset=requested_offset)
+            updates = get_updates(offset=requested_offset, timeout=LONG_POLL_TIMEOUT_SECONDS)
 
             # Log exactly what this run saw, before doing anything with it — a
             # 2026-09-09 live session spent a long manual DB/API investigation
