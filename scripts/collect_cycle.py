@@ -18,7 +18,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from dotenv import load_dotenv  # noqa: E402
 
 from bot import notify  # noqa: E402
-from collectors import defi_yields, whale_movements  # noqa: E402
+from collectors import defi_yields, web3_jobs, whale_movements  # noqa: E402
 from pipeline.db import get_conn  # noqa: E402
 from pipeline.score import score_new_items  # noqa: E402
 
@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 COLLECTORS = {
     "defi_yields": defi_yields.collect,
     "whale_movements": whale_movements.collect,
+    "web3_jobs": web3_jobs.collect,
 }
 
 

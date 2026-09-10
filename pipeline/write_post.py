@@ -463,6 +463,57 @@ def compute_whale_movements_elements(conn, raw_item: dict, history: list) -> dic
     return {"history_line": history_line, "risk_line": risk_line, "source_name": "Etherscan"}
 
 
+@register_prompt_builder("web3_jobs")
+def build_web3_jobs_prompt(cfg: dict, region_profile: str, raw_item: dict, history: list) -> str:
+    p = raw_item["payload"]
+    salary_max = p.get("salary_max") or 0
+    salary_note = (
+        f"${p.get('salary_min') or 0:,.0f}-${salary_max:,.0f}" if salary_max else "not disclosed"
+    )
+
+    return f"""You are writing prose for a web3/crypto jobs Telegram channel. Voice: {cfg.get('voice', 'opportunity_framed')}.
+{cfg.get('prompt_notes', '')}
+
+Facts about this listing:
+- Role: {p.get('position')}
+- Company: {p.get('company')}
+- Salary: {salary_note}
+- Location: {p.get('location') or 'remote (no geographic restriction stated)'}
+- Tags: {', '.join(p.get('tags') or [])}
+
+Return ONLY a JSON object (no markdown fence, no commentary) with exactly these
+three string fields:
+{{
+  "title": "one specific title naming the role and company — NOT a generic
+    label. E.g. 'Senior Solidity Engineer role open at Chainlink', never
+    'New Web3 Job'. No emoji.",
+  "narrative": "1-2 sentences: what the role is and who it's for. Plain prose.",
+  "why_it_matters": "EXACTLY one sentence on what makes this worth a second
+    look — the comp, the company, or the scope of the role. No hype."
+}}
+
+Do not mention scores or internal categorization. Never overstate or
+editorialize beyond what the facts above actually say — if salary isn't
+disclosed, say so plainly rather than guessing or hyping the opportunity. No
+emoji anywhere in your output. Keep the combined narrative + why_it_matters
+under ~60 words — the whole post targets roughly 400-700 characters.
+"""
+
+
+@register_post_computer("web3_jobs")
+def compute_web3_jobs_elements(conn, raw_item: dict, history: list) -> dict:
+    """No history_line, deliberately (operator direction 2026-09-10): a job
+    posting isn't a recurring signal the way a wallet's past moves or a
+    pool's yield trend are — "this company posted a job before" isn't
+    memory a reader benefits from, unlike "this wallet did X last month".
+    The honest answer for this category is "not much" and forcing a
+    blockquote here would be padding, exactly what Section 1's differentiator
+    is supposed to avoid. No risk_line either, for the same "don't force it"
+    reasoning — credibility concerns are already scored (pipeline/score.py),
+    not re-litigated in prose."""
+    return {"history_line": None, "risk_line": None, "source_name": "RemoteOK"}
+
+
 def _assemble(conn, category: str, raw_item: dict, history: list, llm_raw_output: str) -> str:
     cfg = load_category_config(conn, category)
     parsed = post_format.parse_llm_json(llm_raw_output)

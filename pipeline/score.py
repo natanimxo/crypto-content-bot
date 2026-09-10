@@ -15,6 +15,7 @@ are there for scorers that need that. defi_yields ignores both.
 
 import json
 import math
+import time
 
 from psycopg2.extras import execute_values
 
@@ -227,6 +228,79 @@ def score_whale_movements(conn, raw_item_id: int, payload: dict) -> dict:
         actionability = 55.0
     else:
         actionability = 85.0
+
+    return {
+        "impact": impact,
+        "novelty": novelty,
+        "credibility": credibility,
+        "actionability": round(actionability, 1),
+    }
+
+
+# web3_jobs weights are NOT copied from either prior category (operator
+# direction 2026-09-10) — "big number = important" doesn't apply to a job
+# listing. Each of the four components maps to one of the factors the
+# operator named: impact=compensation quality, novelty=freshness (a genuine
+# early opportunity vs. one that's been sitting for weeks), credibility=
+# listing legitimacy (web3 job boards see real scam volume), actionability=
+# remote-accessibility + apply-ability. credibility/actionability weighted
+# highest (0.30 each) since legitimacy and "can a global reader actually
+# take this" matter more here than compensation or freshness alone.
+WEB3_JOBS_SALARY_FLOOR = 30_000
+WEB3_JOBS_SALARY_CEILING = 150_000
+WEB3_JOBS_NOVELTY_DECAY_DAYS = 14  # full novelty at 0 days old, zero by this age
+
+
+@register_scorer("web3_jobs")
+def score_web3_jobs(conn, raw_item_id: int, payload: dict) -> dict:
+    """Breakdown components, each 0-100. Pure function of payload — no DB
+    lookup needed (unlike whale_movements' novelty), since RemoteOK already
+    hands us a real posting timestamp to score freshness from directly."""
+    salary_max = payload.get("salary_max") or 0
+    if salary_max <= 0:
+        # Undisclosed reads as moderate, not zero -- most legitimate listings
+        # on this feed don't disclose salary (live-verified: ~2% do), so
+        # treating silence as disqualifying would filter out most real jobs.
+        impact = 30.0
+    else:
+        impact = round(_log_scale(salary_max, WEB3_JOBS_SALARY_FLOOR, WEB3_JOBS_SALARY_CEILING), 1)
+
+    epoch = payload.get("epoch")
+    if epoch is None:
+        novelty = 50.0
+    else:
+        age_days = max(0.0, (time.time() - epoch) / 86400)
+        novelty = round(_clamp(100.0 - (age_days / WEB3_JOBS_NOVELTY_DECAY_DAYS) * 100.0), 1)
+
+    # Credibility: cheap, deterministic legitimacy signals -- no LLM judgment
+    # about whether a listing "sounds real". A logo, a focused (not spam-
+    # bloated) tag list, and a substantive description are all things a
+    # thin/scam listing typically lacks. Live-observed: spam-tagged listings
+    # in this feed had 30-40 unrelated tags; genuine ones had under a dozen,
+    # topically coherent.
+    credibility = 40.0
+    if payload.get("company_logo"):
+        credibility += 30.0
+    tag_count = len(payload.get("tags") or [])
+    if 1 <= tag_count <= 12:
+        credibility += 15.0
+    if (payload.get("description_length") or 0) > 200:
+        credibility += 15.0
+    credibility = round(_clamp(credibility), 1)
+
+    # Actionability: RemoteOK listings are remote by definition, so the real
+    # differentiator is whether the role is geographically OPEN (any global
+    # reader could apply) vs. region-restricted despite being "remote" (e.g.
+    # a GCC-only role requiring Arabic + local market knowledge -- live-
+    # observed in this feed) -- plus a basic apply-ability gate.
+    apply_url = payload.get("apply_url")
+    location = (payload.get("location") or "").strip().lower()
+    if not apply_url:
+        actionability = 10.0
+    elif not location or "world" in location or "anywhere" in location:
+        actionability = 90.0
+    else:
+        actionability = 60.0
 
     return {
         "impact": impact,

@@ -77,8 +77,9 @@ def get_new_candidates(conn, category: str, channel: str) -> list[dict]:
                FROM raw_items r
                JOIN scores s ON s.raw_item_id = r.id
                WHERE r.category = %s AND s.score >= %s
+                 AND (r.payload->>'assigned_channel' IS NULL OR r.payload->>'assigned_channel' = %s)
                ORDER BY s.score DESC""",
-            (category, threshold),
+            (category, threshold, channel),
         )
         rows = cur.fetchall()
 

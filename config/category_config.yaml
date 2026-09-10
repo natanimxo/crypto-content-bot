@@ -132,3 +132,50 @@ whale_movements:
     own funds — describe what moved and what that typically signals, not
     financial advice. Measured tone: no hype, no manufactured urgency, no
     emoji beyond what the template itself adds.
+
+# Phase 2, category 3 of 2026-09-10 — web3_jobs -> Alpha Edge Crypto / CoinCraft
+# (shared, alternation via pipeline/channel_router.py — spec Section 3). Moved
+# faster than the first two: structured data, no price verification, no
+# editorial judgment about listing quality/meaning needed.
+web3_jobs:
+  score_weights:
+    impact: 0.25          # compensation quality/transparency (log-scaled salary_max)
+    novelty: 0.15          # freshness -- genuine early opportunity vs. sitting for weeks
+    credibility: 0.30      # listing legitimacy -- web3 job boards see real scam volume
+    actionability: 0.30    # remote-accessibility (geo-open vs. region-restricted) + apply-ability
+
+  review_threshold: 50
+  # topic_key is each listing's own id (not company) -- cooldown is
+  # deliberately near-irrelevant for this category: two DIFFERENT job
+  # postings from the same company are two different real opportunities,
+  # not a repeat of the same information the way a re-surfaced DeFi pool or
+  # whale wallet topic would be. Exact-listing dedup already happens for
+  # free via the UNIQUE(source_id, external_id) constraint at the raw_items
+  # level, independent of this.
+  cooldown_hours: 1
+  soft_daily_cap: 8
+
+  triage_model: template   # position/company/salary/location are fully structured facts
+  write_model: deepseek-v4-flash
+  write_benchmark_status: settled_deepseek
+
+  label: "💼 WEB3 JOBS"
+
+  emoji: "💼"
+  display_label: "Web3 Jobs"
+  hashtags:
+    - "#Web3Jobs"
+    - "#CryptoJobs"
+
+  voice: opportunity_framed
+  # No history blockquote for this category (pipeline/write_post.py's
+  # compute_web3_jobs_elements always returns history_line=None) — a job
+  # posting isn't a recurring signal the way a wallet's past moves or a
+  # pool's yield trend are; forcing memory here would be padding, exactly
+  # what Section 1's differentiator is supposed to avoid.
+  prompt_notes: >
+    Factual and direct: what the role is, who it's for, why it's worth a second
+    look. Never inflate a listing beyond what the facts say — if salary isn't
+    disclosed, say so plainly rather than implying it's competitive. No hype
+    language, no "AMAZING OPPORTUNITY", no manufactured urgency. Measured tone,
+    no emoji beyond what the template itself adds.

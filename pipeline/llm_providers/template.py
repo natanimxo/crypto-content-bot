@@ -59,3 +59,19 @@ def render_whale_movements(raw_item: dict) -> str:
         if sent is not None and sent < 5:
             parts.append("counterparty: low-activity wallet")
     return " · ".join(parts)
+
+
+@register_template("web3_jobs")
+def render_web3_jobs(raw_item: dict) -> str:
+    p = raw_item["payload"]
+    parts = [f"{p.get('position')} at {p.get('company')}"]
+    salary_max = p.get("salary_max") or 0
+    if salary_max:
+        salary_min = p.get("salary_min") or 0
+        parts.append(f"${salary_min:,.0f}-${salary_max:,.0f}" if salary_min else f"up to ${salary_max:,.0f}")
+    else:
+        parts.append("salary undisclosed")
+    location = p.get("location")
+    if location:
+        parts.append(location)
+    return " · ".join(parts)
