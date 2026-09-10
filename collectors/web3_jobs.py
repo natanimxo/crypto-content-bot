@@ -55,6 +55,59 @@ def _fix_mojibake(value):
         return value
 
 
+# Relevance gate (operator direction 2026-09-10, live-confirmed: ~70% of a
+# real 56-listing collection were generic corporate roles at non-crypto
+# companies — Little Caesars Pizza, The Walt Disney Company, Nestlé Health
+# Science, DSW Designer Shoe Warehouse — swept in by RemoteOK's own tag
+# system, which some listings had 40-58 tags on, "crypto" just one of them).
+# A higher score threshold would filter by SCORE, not relevance — a listing
+# can score well on salary/logo/location while still being a pizza-chain
+# regional-director role that happens to carry a crypto tag. This is a
+# separate, binary gate applied BEFORE scoring, same architectural role as
+# defi_yields' MIN_TVL_USD / whale_movements' collect_min_usd.
+#
+# A pure "how many tags" heuristic isn't reliable either — live-confirmed
+# some genuinely relevant companies (Crypto.com, Blockchain.com, Injective)
+# also carry high tag counts, so tag bloat alone doesn't separate signal
+# from noise. The real signal is COMPANY IDENTITY, with the job TITLE itself
+# (not RemoteOK's tags) as the fallback for companies not on this list --
+# same "known-entity list + self-maintaining-ish fallback" shape as
+# whale_movements' KNOWN_EXCHANGE_ADDRESSES + INSTITUTIONAL_SENT_TX_THRESHOLD,
+# though here the fallback is a keyword check, not a numeric heuristic, since
+# there's no equivalent on-chain signal for a job listing.
+#
+# Maintenance: hand-extend this list as clearly-crypto companies show up
+# filtered out that shouldn't be -- same spirit as whale_movements' watchlist,
+# just lower-stakes (a missed company means one listing's classification is
+# imperfect, not a functional/financial error), so no address-style
+# verification rigor is needed, just common-knowledge judgment.
+KNOWN_WEB3_COMPANIES = {
+    "bybit", "crypto.com", "blockchain.com", "binance", "coinbase", "kraken",
+    "okx", "kucoin", "bitfinex", "gate.io", "htx", "moonpay", "injective",
+    "exodus", "bitmex", "consensys", "chainlink", "uniswap", "opensea",
+    "gemini", "rockawayx", "kast", "coinme", "ledger", "metamask", "circle",
+    "tether", "solana", "polygon", "avalanche", "aave", "compound",
+    "chainalysis", "alchemy", "infura", "the graph", "arbitrum", "optimism",
+    "worldcoin", "ripple", "chainlink labs", "paxos", "anchorage", "fireblocks",
+}
+
+WEB3_TITLE_KEYWORDS = {
+    "crypto", "web3", "web 3", "blockchain", "defi", "bitcoin", "ethereum",
+    "solidity", "smart contract", "nft", "dao", "token", "on-chain", "onchain",
+    "digital asset", "cryptocurrency",
+}
+
+
+def _is_web3_relevant(payload: dict) -> bool:
+    """True if this listing has a real signal of being about web3/crypto
+    work, beyond just carrying RemoteOK's own (unreliable) 'crypto' tag."""
+    company_lower = (payload.get("company") or "").lower()
+    if any(known in company_lower for known in KNOWN_WEB3_COMPANIES):
+        return True
+    position_lower = (payload.get("position") or "").lower()
+    return any(kw in position_lower for kw in WEB3_TITLE_KEYWORDS)
+
+
 def fetch_listings() -> list[dict]:
     body = get_json(API_URL, params={"tags": "crypto"}, headers=REQUEST_HEADERS)
     # First element is RemoteOK's own legal/attribution notice, not a job —
@@ -81,6 +134,7 @@ def collect() -> int:
             state["details"]["fetched"] = len(listings)
 
             items = []
+            not_relevant_count = 0
             for listing in listings:
                 external_id = str(listing["id"])
                 company = listing.get("company") or ""
@@ -88,6 +142,9 @@ def collect() -> int:
                 apply_url = listing.get("apply_url") or listing.get("url")
                 if not company or not position or not apply_url:
                     continue  # missing the basics -- not enough to write a real post about
+                if not _is_web3_relevant(listing):
+                    not_relevant_count += 1
+                    continue
 
                 payload = {
                     "title": _title(listing),
@@ -110,14 +167,16 @@ def collect() -> int:
                 }
                 items.append((external_id, payload))
 
+            state["details"]["not_relevant_filtered"] = not_relevant_count
+
             inserted = insert_raw_items_batch(conn, source_id, CATEGORY, items)
             state["details"]["inserted"] = inserted
 
             assigned = assign_channels_to_new_items(conn, CATEGORY)
             state["details"]["channel_assigned"] = assigned
 
-            logger.info("web3_jobs: fetched=%d inserted=%d channel_assigned=%d",
-                        len(listings), inserted, assigned)
+            logger.info("web3_jobs: fetched=%d not_relevant_filtered=%d inserted=%d channel_assigned=%d",
+                        len(listings), not_relevant_count, inserted, assigned)
         return inserted
     finally:
         conn.close()
