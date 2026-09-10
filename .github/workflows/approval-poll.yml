@@ -2,9 +2,26 @@ name: Approval Poll
 
 on:
   schedule:
-    # 5 minutes is GitHub Actions' cron floor (Section 9 step 3) — this is what
-    # makes the notify-and-approve loop work without a persistent server.
-    - cron: "*/5 * * * *"
+    # TEMPORARY EXPERIMENT, started 2026-09-10 ~23:00 UTC (operator direction):
+    # */5 was configured but never actually honored at anything close to that
+    # rate -- measured via `gh run list --json event,createdAt` filtered to
+    # event=="schedule" (excludes manual workflow_dispatch runs, which always
+    # fire promptly): actual gaps between scheduled Approval Poll runs
+    # averaged 3.6h over a 22-hour window (00:40->05:19->09:51->13:55->17:29
+    # ->19:59->22:26), never once under 2.4h. That's fatal for the approve
+    # loop's whole design -- long-polling (bot/approval_poller.py's
+    # LONG_POLL_TIMEOUT_SECONDS) makes EACH run reliable while it's running,
+    # but Telegram drops an un-fetched callback_query well under 10 minutes
+    # (see BACKLOG.md), so a run every 3.6h still misses nearly every tap.
+    # Testing whether */5 was self-inflicted: GitHub Actions' scheduler is
+    # documented to deprioritize high-frequency cron hardest, so a less
+    # aggressive cadence sometimes gets honored far more consistently than a
+    # more aggressive one, counterintuitive as that sounds. */15 here is the
+    # test.
+    # Revert to */5 -- or escalate to */30, or move this workflow off GitHub
+    # Actions' scheduler entirely -- once there's a few hours of real
+    # scheduled-run data to compare against the */5 baseline above.
+    - cron: "*/15 * * * *"
   workflow_dispatch: {}
 
 # Live-diagnosed 2026-09-10/11: a tapped button's callback_query can vanish
