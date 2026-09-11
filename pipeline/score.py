@@ -353,30 +353,58 @@ def score_web3_jobs(conn, raw_item_id: int, payload: dict) -> dict:
 # review_threshold does elsewhere. impact=how much real money is exposed,
 # credibility=how severe/certain the finding is (weighted highest, 0.35,
 # since "how bad is this" is the actual news value here), novelty=how newly
-# this pool showed up (lower weight, 0.15 -- severity and stakes matter more
-# than freshness for a safety warning), actionability=how COMPLETE the check
-# was (fraction of critical fields actually populated, not unknown) -- a
-# thinner check is a weaker, less actionable warning, which keeps "unknown is
-# never coded as clear" true in the score itself, not just the prose.
+# this pool showed up (lower weight, 0.15), actionability=how urgent/
+# immediate the warning is, scaled by how complete the underlying check was.
+#
+# FIXED 2026-09-11 (operator-identified structural bug, not a calibration
+# tweak -- "that's broken, not uncalibrated"): live comparison showed every
+# gems_security candidate scoring 91-94.5 while defi_yields topped out at
+# 89.5 -- gems' FLOOR sat at or above defi_yields' CEILING. Root cause,
+# confirmed against real breakdowns: actionability was defined as
+# checked-tokens / total-tokens, which is ~100 by construction for nearly
+# every candidate (existing at all already requires a checked, triggered
+# token) -- it wasn't measuring anything. GEMS_TVL_CEILING was also still
+# $20M from before collectors/gems_security.py's TVL screening band widened
+# to $100M, so impact saturated for most mid-large candidates too. Both
+# fixed below; credibility's per-field weights also rebalanced (still real,
+# not broken the same way, but contributing to the same compression) so
+# hitting 100 requires multiple genuinely severe signals converging, not one
+# behavioral flag plus routine capability noise.
 GEMS_TVL_FLOOR = 100_000       # matches the collector's own noise floor
-GEMS_TVL_CEILING = 20_000_000
+GEMS_TVL_CEILING = 100_000_000  # matches MAX_TVL_USD_FOR_SCREENING (collectors/gems_security.py)
 GEMS_NOVELTY_DECAY_DAYS = 14
 
-# Per-field severity for the credibility component -- a confirmed honeypot or
-# an owner who can block sells is a far more certain, far more severe finding
-# than "owner holds 31% of supply", even though both are real CRITICAL_FIELDS
-# hits in pipeline/goplus.py. Fields not listed here (there shouldn't be any,
-# this should stay in sync with goplus.CRITICAL_FIELDS) fall back to a
-# moderate default rather than being silently ignored.
+# Per-field severity for the credibility component, rebalanced 2026-09-11
+# along the same behavioral/capability line pipeline/goplus.py's
+# NON_GATING_FIELDS draws: a field that can gate a candidate alone (a live
+# simulation catching real bad behavior, or a plain quantitative fact) is
+# weighted several times higher than a field that only means an admin
+# COULD do something and never gates alone -- so hitting 100 credibility
+# means multiple hard signals actually converged (e.g. a confirmed honeypot
+# ALSO showing concentrated ownership), not "one honeypot flag plus two
+# routine capability flags every legitimate upgradeable contract also has".
 GEMS_SEVERITY_WEIGHTS = {
-    "is_honeypot": 45, "cannot_sell_all": 40, "cannot_buy": 35,
-    "hidden_owner": 30, "can_take_back_ownership": 30, "is_mintable": 25,
-    "transfer_pausable": 25, "selfdestruct": 25, "is_blacklisted": 20,
-    "honeypot_with_same_creator": 35, "slippage_modifiable": 15,
-    "personal_slippage_modifiable": 15, "is_open_source": 15,
-    "owner_percent": 15, "creator_percent": 15, "buy_tax": 10, "sell_tax": 10,
+    # gating-capable (behavioral/quantitative) -- real evidence on its own
+    "is_honeypot": 50, "cannot_sell_all": 45, "cannot_buy": 40,
+    "owner_percent": 25, "creator_percent": 25, "is_open_source": 20,
+    "buy_tax": 20, "sell_tax": 20,
+    # non-gating (capability-only) -- real, but weak and corroborating only
+    "hidden_owner": 10, "can_take_back_ownership": 10, "selfdestruct": 10,
+    "is_mintable": 8, "transfer_pausable": 8, "is_blacklisted": 8,
+    "slippage_modifiable": 8, "personal_slippage_modifiable": 8,
+    "honeypot_with_same_creator": 8,
 }
-GEMS_SEVERITY_DEFAULT = 15
+GEMS_SEVERITY_DEFAULT = 10
+
+# Actionability base per finding class, then scaled by how complete the
+# underlying check was (payload['field_completeness'], collectors/
+# gems_security.py) -- a base of 0.5x-1.0x the class base, never zero, since
+# the field that DID gate is still real signal even if others are unknown.
+GEMS_HONEYPOT_CLASS_FIELDS = {"is_honeypot", "cannot_sell_all", "cannot_buy"}
+GEMS_QUANT_CLASS_FIELDS = {"owner_percent", "creator_percent", "buy_tax", "sell_tax"}
+GEMS_ACTIONABILITY_BASE_HONEYPOT = 95.0   # an immediate, unambiguous danger -- act now
+GEMS_ACTIONABILITY_BASE_QUANT = 75.0      # a real, quantifiable risk, not "can't sell at all"
+GEMS_ACTIONABILITY_BASE_OTHER = 55.0      # e.g. is_open_source alone -- a transparency gap, not proof of active harm
 
 
 def _gems_novelty(conn, pool_id: str) -> float:
@@ -412,14 +440,20 @@ def score_gems_security(conn, raw_item_id: int, payload: dict) -> dict:
 
     novelty = _gems_novelty(conn, payload.get("pool_id"))
 
-    triggered_fields = payload.get("triggered_fields") or []
+    triggered_fields = set(payload.get("triggered_fields") or [])
     severity_sum = sum(GEMS_SEVERITY_WEIGHTS.get(f, GEMS_SEVERITY_DEFAULT) for f in triggered_fields)
     credibility = round(_clamp(severity_sum), 1)
 
-    checked = len(payload.get("tokens_checked") or [])
-    unchecked = len(payload.get("tokens_unchecked") or [])
-    total = checked + unchecked
-    actionability = round(_clamp(100.0 * checked / total), 1) if total else 0.0
+    if triggered_fields & GEMS_HONEYPOT_CLASS_FIELDS:
+        base = GEMS_ACTIONABILITY_BASE_HONEYPOT
+    elif triggered_fields & GEMS_QUANT_CLASS_FIELDS:
+        base = GEMS_ACTIONABILITY_BASE_QUANT
+    else:
+        base = GEMS_ACTIONABILITY_BASE_OTHER
+    completeness = payload.get("field_completeness")
+    if completeness is None:
+        completeness = 0.5  # unknown completeness -- moderate, not full trust and not zero
+    actionability = round(_clamp(base * (0.5 + 0.5 * completeness)), 1)
 
     return {
         "impact": impact,

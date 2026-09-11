@@ -256,11 +256,26 @@ def collect() -> int:
                     continue  # the whole editorial point: no finding, no post
 
                 red_flags, triggered_fields, tokens_checked, tokens_unchecked = [], [], [], []
+                unknown_field_count, checked_field_slots = 0, 0
                 for t in per_token:
                     prefix = f"{t['address'][:8]}...: " if len(per_token) > 1 else ""
                     red_flags.extend(prefix + f for f in t["red_flags"])
                     triggered_fields.extend(t["triggered_fields"])
                     (tokens_checked if t["checked_at_all"] else tokens_unchecked).append(t["address"])
+                    if t["checked_at_all"]:
+                        unknown_field_count += len(t["unknown_fields"])
+                        checked_field_slots += len(goplus.CRITICAL_FIELDS)
+
+                # Field-level completeness (not just "was the token checked at
+                # all") -- feeds score_gems_security's actionability. A token
+                # GoPlus mostly couldn't populate should read as a weaker,
+                # less actionable warning than one it assessed almost fully,
+                # even though both technically count as "checked" at the
+                # token level (see pipeline/goplus.py's field-consistency
+                # finding -- the field set genuinely isn't uniform per token).
+                field_completeness = (
+                    1.0 - (unknown_field_count / checked_field_slots) if checked_field_slots else 0.0
+                )
 
                 flagged_addresses = [t["address"] for t in per_token if t["has_red_flag"]]
                 payload = {
@@ -277,6 +292,7 @@ def collect() -> int:
                     "tokens_checked": tokens_checked,
                     "tokens_unchecked": tokens_unchecked,
                     "flagged_token_addresses": flagged_addresses,
+                    "field_completeness": round(field_completeness, 3),
                 }
                 items.append((pool["pool"], payload))
 
