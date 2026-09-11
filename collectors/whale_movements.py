@@ -395,7 +395,15 @@ def collect() -> int:
             state["details"]["stale_skipped"] = stale_skipped
             state["details"]["notable"] = len(items)
 
-            inserted = insert_raw_items_batch(conn, source_id, CATEGORY, items)
+            # held=True (2026-09-12): every collector holds unconditionally
+            # right now, not just the newest ones -- operator direction is
+            # that NOTHING notifies until the Hetzner poller is verified,
+            # regardless of which category a fresh candidate belongs to.
+            # See collectors/gems_security.py's same comment for the real
+            # gap this closes (this category predates the `held` mechanism
+            # and was never updated when it landed). Flip to conditional/off
+            # once the poller is confirmed.
+            inserted = insert_raw_items_batch(conn, source_id, CATEGORY, items, held=True)
             state["details"]["inserted"] = inserted
             logger.info("whale_movements: fetched=%d notable=%d inserted=%d",
                         fetched_count, len(items), inserted)

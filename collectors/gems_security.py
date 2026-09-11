@@ -328,7 +328,16 @@ def collect() -> int:
             state["details"]["dominance_excluded"] = dominance_excluded
             state["details"]["red_flagged"] = len(items)
 
-            inserted = insert_raw_items_batch(conn, source_id, CATEGORY, items)
+            # held=True (2026-09-12, closing a real gap): this collector
+            # predates the `held` mechanism (built before the "production
+            # notified while holding" incident that introduced it) and was
+            # never updated when news/tool_launches/startup_jobs got it --
+            # a scheduled cron firing would have inserted fresh candidates
+            # with held=FALSE by default, risking the exact same class of
+            # leak a second time. Operator direction stands across every
+            # category until the Hetzner poller is verified: nothing
+            # notifies. Flip to conditional/off once that's resolved.
+            inserted = insert_raw_items_batch(conn, source_id, CATEGORY, items, held=True)
             state["details"]["inserted"] = inserted
 
             logger.info(

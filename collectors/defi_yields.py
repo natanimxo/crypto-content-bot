@@ -100,7 +100,10 @@ def collect() -> int:
                 }
                 items.append((pool_id, payload))
 
-            inserted = insert_raw_items_batch(conn, source_id, CATEGORY, items)
+            # held=True (2026-09-12) -- see collectors/gems_security.py's
+            # comment: every collector holds unconditionally right now,
+            # regardless of category, until the Hetzner poller is verified.
+            inserted = insert_raw_items_batch(conn, source_id, CATEGORY, items, held=True)
             state["details"]["inserted"] = inserted
             logger.info("defi_yields: fetched=%d inserted=%d", len(pools), inserted)
         return inserted

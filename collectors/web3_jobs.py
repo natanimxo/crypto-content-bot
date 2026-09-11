@@ -287,7 +287,10 @@ def collect() -> int:
 
             state["details"]["not_relevant_filtered"] = not_relevant_count
 
-            inserted = insert_raw_items_batch(conn, source_id, CATEGORY, items)
+            # held=True (2026-09-12) -- see collectors/gems_security.py's
+            # comment: every collector holds unconditionally right now,
+            # regardless of category, until the Hetzner poller is verified.
+            inserted = insert_raw_items_batch(conn, source_id, CATEGORY, items, held=True)
             state["details"]["inserted"] = inserted
 
             assigned = assign_channels_to_new_items(conn, CATEGORY)
