@@ -281,6 +281,22 @@ the one place to check.
   like a real collector. Revisit only if a genuinely structured source
   turns up later.
 
+- **`web3_jobs`/`startup_jobs` duplicate a real chunk of RemoteOK-specific
+  logic.** Both collectors hit the same API and hit the same real
+  data-quality bugs (server-side mojibake, duplicated location strings,
+  the location-restriction detector) — `_fix_mojibake`, `_dedupe_location`,
+  `LOCATION_RESTRICTION_PATTERNS`/`_is_location_restricted`, and
+  `score.py`'s salary/novelty/credibility/actionability formula are all
+  copy-pasted between the two rather than shared. Deliberate, not an
+  oversight — building `startup_jobs` mid-session was a chance to refactor
+  `web3_jobs.py` to extract a shared `pipeline/remoteok.py`, but that
+  means touching a working, already-relied-upon category for a DRY
+  concern alone, real regression risk for zero behavior change. Worth
+  doing eventually (a fix to the mojibake/location logic would otherwise
+  need to land in two places and could silently drift), just not folded
+  into this weekend's push. Low priority — both copies are small, stable,
+  and already independently live-verified.
+
 ## Documentation
 
 - **Update the technical spec doc** to reflect two implemented decisions that

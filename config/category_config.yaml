@@ -350,3 +350,49 @@ tool_launches:
     builder audience, not crypto: no crypto framing, no financial language.
     No hype language, no manufactured urgency. Measured tone, no emoji beyond
     what the template itself adds.
+
+# Phase 3, 2026-09-12 — startup_jobs -> Hustle to Million (shares the
+# channel with tool_launches). Reuses RemoteOK exactly as web3_jobs does
+# (same source, same live-fixed data-quality bugs -- mojibake, duplicated
+# location strings) but with the INVERSE relevance gate (operator
+# direction): web3_jobs denies-by-default and allows in known-crypto
+# companies; this category allows-by-default and denies known large-
+# non-startup companies plus generic-non-tech-role titles. See
+# collectors/startup_jobs.py for the full live-verification behind both
+# exclusion lists. Scoring weights intentionally identical to web3_jobs --
+# same underlying data shape (compensation/freshness/listing-quality/
+# apply-ability), only the relevance gate differs.
+startup_jobs:
+  score_weights:
+    impact: 0.25          # compensation quality/transparency (log-scaled salary_max)
+    novelty: 0.15          # freshness -- genuine early opportunity vs. sitting for weeks
+    credibility: 0.30      # listing legitimacy -- same scam-volume reasoning as web3_jobs
+    actionability: 0.30    # remote-accessibility (geo-open vs. region-restricted) + apply-ability
+
+  review_threshold: 50
+  cooldown_hours: 1        # same reasoning as web3_jobs -- topic_key is the listing's own
+                            # id, two different postings are two different real opportunities
+  soft_daily_cap: 8
+
+  triage_model: template   # position/company/salary/location are fully structured facts
+  write_model: deepseek-v4-flash
+  write_benchmark_status: settled_deepseek
+
+  label: "💼 STARTUP JOBS"
+
+  emoji: "💼"
+  display_label: "Startup Jobs"
+  hashtags:
+    - "#StartupJobs"
+    - "#RemoteWork"
+
+  voice: opportunity_framed
+  # No history blockquote, same reasoning as web3_jobs -- a job posting
+  # isn't a recurring signal our own history helps with.
+  prompt_notes: >
+    Factual and direct: what the role is, who it's for, why it's worth a second
+    look. Never inflate a listing beyond what the facts say — if salary isn't
+    disclosed, say so plainly rather than implying it's competitive. This is a
+    builder/startup audience, not crypto: no crypto framing, no financial
+    language. No hype language, no "AMAZING OPPORTUNITY", no manufactured
+    urgency. Measured tone, no emoji beyond what the template itself adds.

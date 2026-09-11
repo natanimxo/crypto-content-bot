@@ -535,6 +535,54 @@ def compute_web3_jobs_elements(conn, raw_item: dict, history: list) -> dict:
     return {"history_line": None, "risk_line": None, "source_name": "RemoteOK"}
 
 
+@register_prompt_builder("startup_jobs")
+def build_startup_jobs_prompt(cfg: dict, region_profile: str, raw_item: dict, history: list) -> str:
+    """Same shape as build_web3_jobs_prompt -- builder audience, not crypto,
+    per collectors/startup_jobs.py's inverse relevance gate."""
+    p = raw_item["payload"]
+    salary_max = p.get("salary_max") or 0
+    salary_note = (
+        f"${p.get('salary_min') or 0:,.0f}-${salary_max:,.0f}" if salary_max else "not disclosed"
+    )
+
+    return f"""You are writing prose for a startup/tech jobs Telegram channel (audience:
+founders, indie hackers, people job-hunting at startups -- not a crypto
+audience). Voice: {cfg.get('voice', 'opportunity_framed')}.
+{cfg.get('prompt_notes', '')}
+
+Facts about this listing:
+- Role: {p.get('position')}
+- Company: {p.get('company')}
+- Salary: {salary_note}
+- Location: {p.get('location') or 'remote (no geographic restriction stated)'}
+- Tags: {', '.join(p.get('tags') or [])}
+
+Return ONLY a JSON object (no markdown fence, no commentary) with exactly these
+three string fields:
+{{
+  "title": "one specific title naming the role and company — NOT a generic
+    label. No emoji.",
+  "narrative": "1-2 sentences: what the role is and who it's for. Plain prose.",
+  "why_it_matters": "EXACTLY one sentence on what makes this worth a second
+    look — the comp, the company, or the scope of the role. No hype."
+}}
+
+Do not mention scores or internal categorization. Never overstate or
+editorialize beyond what the facts above actually say — if salary isn't
+disclosed, say so plainly rather than guessing or hyping the opportunity. No
+crypto framing or financial language. No emoji anywhere in your output. Keep
+the combined narrative + why_it_matters under ~60 words — the whole post
+targets roughly 400-700 characters.
+"""
+
+
+@register_post_computer("startup_jobs")
+def compute_startup_jobs_elements(conn, raw_item: dict, history: list) -> dict:
+    """Same reasoning as compute_web3_jobs_elements -- no history_line, no
+    risk_line."""
+    return {"history_line": None, "risk_line": None, "source_name": "RemoteOK"}
+
+
 # Enforcement mechanism for "never overstate what a security check proves"
 # (operator direction 2026-09-11, gems_security + defi_yields retrofit: "the
 # write step must never imply more certainty than the data supports, and I

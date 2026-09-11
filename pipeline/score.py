@@ -608,6 +608,65 @@ def score_tool_launches(conn, raw_item_id: int, payload: dict) -> dict:
     }
 
 
+# startup_jobs weights (operator-approved plan, 2026-09-12) -- same shape
+# as web3_jobs' formula, duplicated rather than shared (see collectors/
+# startup_jobs.py's module docstring for why: avoiding a mid-session
+# refactor of a working, live category for a DRY concern -- flagged in
+# BACKLOG.md as a real follow-up). The underlying data shape and scoring
+# rationale (compensation, freshness, listing-quality signals, apply-
+# ability) is identical to web3_jobs -- only collectors/startup_jobs.py's
+# relevance gate differs (inverse polarity: deny large-non-startup-
+# companies and generic-non-tech-titles, not allow only known-crypto ones).
+STARTUP_JOBS_SALARY_FLOOR = 30_000
+STARTUP_JOBS_SALARY_CEILING = 150_000
+STARTUP_JOBS_NOVELTY_DECAY_DAYS = 14
+
+
+@register_scorer("startup_jobs")
+def score_startup_jobs(conn, raw_item_id: int, payload: dict) -> dict:
+    """Breakdown components, each 0-100. Pure function of payload, same
+    reasoning as score_web3_jobs throughout -- see that function's comments
+    for the live-verification behind each piece (undisclosed-salary
+    handling, the credibility signals, the location_restricted fix)."""
+    salary_max = payload.get("salary_max") or 0
+    if salary_max <= 0:
+        impact = 30.0
+    else:
+        impact = round(_log_scale(salary_max, STARTUP_JOBS_SALARY_FLOOR, STARTUP_JOBS_SALARY_CEILING), 1)
+
+    epoch = payload.get("epoch")
+    if epoch is None:
+        novelty = 50.0
+    else:
+        age_days = max(0.0, (time.time() - epoch) / 86400)
+        novelty = round(_clamp(100.0 - (age_days / STARTUP_JOBS_NOVELTY_DECAY_DAYS) * 100.0), 1)
+
+    credibility = 40.0
+    if payload.get("company_logo"):
+        credibility += 30.0
+    tag_count = len(payload.get("tags") or [])
+    if 1 <= tag_count <= 12:
+        credibility += 15.0
+    if (payload.get("description_length") or 0) > 200:
+        credibility += 15.0
+    credibility = round(_clamp(credibility), 1)
+
+    apply_url = payload.get("apply_url")
+    if not apply_url:
+        actionability = 10.0
+    elif payload.get("location_restricted"):
+        actionability = 60.0
+    else:
+        actionability = 90.0
+
+    return {
+        "impact": impact,
+        "novelty": novelty,
+        "credibility": credibility,
+        "actionability": round(actionability, 1),
+    }
+
+
 def score_new_items(conn, category: str) -> int:
     """Score every raw_item in this category that doesn't have a score row yet.
     Returns the number scored."""
