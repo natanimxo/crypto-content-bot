@@ -1,0 +1,10 @@
+# Force LF line endings for anything meant to run on Linux, regardless of
+# any developer's local core.autocrlf setting -- a CRLF shebang line
+# (#!/usr/bin/env bash\r) breaks with "bad interpreter" on the actual
+# deploy target (deploy/setup_poller_host.sh runs on a Hetzner Ubuntu box,
+# 2026-09-11), so this isn't optional the way it might be for most files.
+*.sh text eol=lf
+*.py text eol=lf
+*.service text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf

@@ -1,0 +1,30 @@
+[Unit]
+Description=Crypto content bot -- always-on Telegram approval poller
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=telegrambot
+Group=telegrambot
+WorkingDirectory=/opt/telegram-bot/app
+EnvironmentFile=/opt/telegram-bot/.env
+ExecStart=/opt/telegram-bot/venv/bin/python scripts/poller_daemon.py
+Restart=always
+RestartSec=15
+# Second line of defense only -- scripts/poller_daemon.py already catches
+# and logs+retries on any exception inside the loop without exiting. This
+# only fires if the whole Python process dies outright (OOM, killed, a bug
+# in the loop itself), so it should be rare.
+
+# Basic hardening -- this process only needs outbound HTTPS (Telegram API,
+# Supabase Postgres, DeepSeek/Etherscan) and to read its own .env; it never
+# needs to write anywhere on disk or touch anything else on the box.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadOnlyPaths=/opt/telegram-bot/app
+
+[Install]
+WantedBy=multi-user.target
