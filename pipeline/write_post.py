@@ -800,44 +800,119 @@ NEWS_CONTINUATION_OVERLAP_THRESHOLD = 0.65
 # whale_movements/defi_yields data has to be genuinely recent to be a fair
 # "also happening right now" fact, not a stale coincidence.
 CROSS_CATEGORY_LOOKBACK_HOURS = 72
-CROSS_CATEGORY_MATCH_LIMIT = 5
 
 
-def _find_cross_category_connection(conn, tickers: set[str]) -> str | None:
-    """The piece operator direction 2026-09-11/12 asked for real attention
-    on: does this news item's entities match anything in OUR OWN recently
-    collected whale_movements/defi_yields data? This is data a generic news
-    article structurally cannot offer -- it only exists because we're
-    running the rest of this pipeline. Matched on TICKERS only (not
-    phrases) -- whale_movements/defi_yields payloads carry structured
-    symbol/project fields, not prose, so ticker-level matching is the
-    precise, low-false-positive-risk join; phrase matching against
-    unrelated proper nouns in those payloads would be far weaker signal.
+# Words too short/generic to safely word-boundary-match against free news
+# prose without real risk of a coincidental hit (unlike a protocol slug's
+# first segment, which is usually distinctive enough on its own).
+_PROJECT_NAME_MIN_LENGTH = 3
 
-    defi_yields pool symbols are PAIRS ("WSOL-USDC", "ETH-EARNETH") -- split
-    on common delimiters and match each component, not the whole string, or
-    a ticker would only ever match a single-asset pool.
-    """
-    if not tickers:
+# A few real `project` values (pipeline/score.py's data, see the live query
+# behind this design) whose first hyphen-segment would be wrong or too
+# generic to use as-is -- same "small, hand-maintained override" shape as
+# collectors/gems_security.py's KNOWN_MAJOR_TOKENS, kept minimal since most
+# project slugs normalize correctly automatically (see _normalize_project).
+_PROJECT_NAME_OVERRIDES = {
+    "stake-dao-yield": "stakedao",
+    "project-0": None,  # a real but non-identifying placeholder value seen in the data
+}
+
+
+def _normalize_project(project_slug: str | None) -> str | None:
+    """defi_yields/gems_security `project` values are versioned slugs
+    ("uniswap-v3", "aave-v3", "raydium-amm") -- this recovers the actual
+    brand name a news article would use ("uniswap", "aave", "raydium") by
+    taking the slug's leading segment, with a small override list for the
+    handful of real values (live-queried, not guessed) where that's wrong.
+    Deliberately NOT a hand-curated protocol name list -- the set of names
+    worth checking is exactly whatever we've actually collected, so it
+    never goes stale as new protocols show up in defi_yields' feed."""
+    if project_slug is None:
         return None
+    if project_slug in _PROJECT_NAME_OVERRIDES:
+        return _PROJECT_NAME_OVERRIDES[project_slug]
+    name = project_slug.split("-")[0].strip().lower()
+    return name if len(name) >= _PROJECT_NAME_MIN_LENGTH else None
+
+
+def _find_cross_category_connection(conn, news_text: str) -> str | None:
+    """The piece operator direction 2026-09-11/12 asked for real attention
+    on: does this news item connect to OUR OWN whale_movements/defi_yields/
+    gems_security data in a way that's genuinely informative, not just
+    coincidental? This went through two real, live-caught failures before
+    landing here -- worth understanding both, since the fix is a direct
+    response to each:
+
+    1. Ticker-overlap matching surfaced a 0.01% APY pool with nothing to do
+       with the actual story -- they shared "USDT" and nothing else. Fixed
+       (partially) by requiring the matched row to have independently
+       cleared its own category's review_threshold.
+    2. That fix still surfaced a real, independently-notable pool (a 43.5%
+       APY pair at the TVL floor -- also flagged in BACKLOG.md as a live
+       instance of defi_yields' known APY-spike scoring gap) that was STILL
+       unrelated to the actual news story. The deeper problem (operator
+       direction): "a shared ticker isn't a connection, even a notable
+       one." USDT appears in hundreds of unrelated products; sharing it
+       proves nothing about relatedness.
+
+    The fix that actually addresses the root cause: match on the specific
+    PROTOCOL or EXCHANGE NAME the news text names, not the generic ticker
+    -- "Spark" appearing in both the headline and our own tracked Spark
+    pools is a real, specific connection; "USDT" appearing in both proves
+    only that both involve a widely-used stablecoin. And per operator
+    direction, require the matched row to have been ACTUALLY NOTIFIED (not
+    merely scored above threshold) -- a materially higher, less gameable
+    bar than a raw score comparison, since it means the connection is
+    always to something already judged genuinely worth attention, not a
+    score technicality.
+
+    This is deliberately narrower than the multi-signal-corroboration idea
+    also discussed (e.g. a token showing both a notable exchange outflow
+    AND a notable yield move together telling one coherent story) -- that
+    would mean correlating two independently-notified facts with each
+    other, a materially bigger feature than name-matching one news item
+    against one notified row. Not built this pass; flagged as a real
+    follow-on, not silently dropped. "Rare and real beats frequent and
+    coincidental" (operator direction) -- this fires far less often than
+    the ticker-matching version did, which is the intended outcome, not a
+    regression to fix.
+    """
     with dict_cursor(conn) as cur:
         cur.execute(
-            """SELECT category, payload, collected_at FROM raw_items
-               WHERE category IN ('whale_movements', 'defi_yields')
-                 AND collected_at > now() - (%s || ' hours')::interval
-               ORDER BY collected_at DESC LIMIT 200""",
+            """SELECT r.category, r.payload, n.sent_at
+               FROM raw_items r
+               JOIN notifications n ON r.id = ANY(n.candidate_raw_item_ids)
+               WHERE r.category IN ('whale_movements', 'defi_yields', 'gems_security')
+                 AND n.sent_at > now() - (%s || ' hours')::interval
+               ORDER BY n.sent_at DESC LIMIT 200""",
             (CROSS_CATEGORY_LOOKBACK_HOURS,),
         )
         rows = cur.fetchall()
 
-    for row in rows[:CROSS_CATEGORY_MATCH_LIMIT * 20]:  # bounded scan, not the whole table
+    # Visible, not silent (operator direction 2026-09-12): almost nothing
+    # will be notified yet with everything held for Hetzner, so this will
+    # correctly return None constantly for a while -- log which case it is,
+    # so "correctly omitted, nothing notified yet" stays distinguishable
+    # from "quietly broken" once there's real notified history to check
+    # against.
+    if not rows:
+        logger.info("news: cross-category lookup -- no notified whale_movements/defi_yields/"
+                     "gems_security rows in the last %dh", CROSS_CATEGORY_LOOKBACK_HOURS)
+        return None
+
+    text_lower = (news_text or "").lower()
+    for row in rows:
         p = row["payload"]
-        symbol = (p.get("symbol") or "").upper()
-        components = set(re.split(r"[-/_]", symbol))
-        if not (components & tickers):
+        if row["category"] == "whale_movements":
+            name = (p.get("exchange") or "").strip().lower()
+        else:  # defi_yields / gems_security
+            name = _normalize_project(p.get("project"))
+        if not name or len(name) < _PROJECT_NAME_MIN_LENGTH:
+            continue
+        if not re.search(rf"\b{re.escape(name)}\b", text_lower):
             continue
 
-        age_hours = (datetime.now(timezone.utc) - row["collected_at"]).total_seconds() / 3600
+        age_hours = (datetime.now(timezone.utc) - row["sent_at"]).total_seconds() / 3600
         when = "earlier today" if age_hours < 20 else f"{age_hours / 24:.0f}d ago"
 
         if row["category"] == "whale_movements":
@@ -846,11 +921,19 @@ def _find_cross_category_connection(conn, tickers: set[str]) -> str | None:
                 f"a ${p.get('value_usd', 0):,.0f} {p.get('symbol')} transfer {verb} "
                 f"{p.get('exchange')}, {when}, in our own whale tracking"
             )
-        else:  # defi_yields
+        elif row["category"] == "defi_yields":
             return (
                 f"{p.get('project')} {p.get('symbol')} is currently yielding "
                 f"{p.get('apy')}% APY (TVL ${p.get('tvl_usd', 0):,.0f}) in our own DeFi tracking"
             )
+        else:  # gems_security
+            return (
+                f"a GoPlus security finding on {p.get('symbol')} ({p.get('project')}) "
+                f"we flagged {when}: {'; '.join(p.get('red_flags') or [])}"
+            )
+
+    logger.info("news: cross-category lookup -- %d notified row(s) in the last %dh, "
+                 "none named in this item's text", len(rows), CROSS_CATEGORY_LOOKBACK_HOURS)
     return None
 
 
@@ -878,7 +961,8 @@ def compute_news_elements(conn, raw_item: dict, history: list) -> dict:
             history_line = f"We covered this developing story {when}: \"{prior['payload'].get('title')}\""
             break
 
-    context_line = _find_cross_category_connection(conn, current_entities["tickers"])
+    news_text = f"{p.get('title') or ''} {p.get('description') or ''}"
+    context_line = _find_cross_category_connection(conn, news_text)
 
     return {
         "history_line": history_line,

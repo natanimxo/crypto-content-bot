@@ -23,6 +23,17 @@ the one place to check.
   write → labeled-delivery loop end-to-end first, before touching scoring weights.
   (Validated 2026-09-10 — loop confirmed working; still not implemented, now
   just genuinely next-up rather than blocked on validation.)
+  **Observed in the wild a second time, 2026-09-12** — no longer just
+  theorized from the 2026-09-09 sample: building the news category's
+  cross-category connection feature (pipeline/write_post.py) surfaced
+  `uniswap-v3 BRZ-USDT`, 43.5% APY, TVL $100,126 — $126 above the
+  category's own $100k collection floor — as an independently-notable
+  candidate (cleared `review_threshold=50` on its own). Exactly the shape
+  this gap predicts: a thin, high-APY pool scoring as if it were a
+  healthy, established one. Not fixed in that pass (out of scope — the
+  news feature's own fix was requiring genuine relatedness, not correcting
+  defi_yields' scoring), but this is now real evidence the gap actively
+  produces bad output today, not just a plausible future risk.
 
 - **web3_jobs scores are near-constant; category currently has no real
   prioritization.** Surfaced 2026-09-11 while investigating why
