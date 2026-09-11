@@ -252,6 +252,35 @@ the one place to check.
   call. 21 real candidates are sitting collected-but-unscored right now,
   pending that direction.
 
+## Hustle to Million (Phase 3, 2026-09-12)
+
+- **`grants` deliberately out of scope, not just unbuilt.** Live-checked
+  every realistic source before concluding anything (same discipline as
+  everything else in this file): Grants.gov's API works technically but
+  returns US federal research grants (NSF SBIR, biomedical research
+  centers) — zero overlap with what a builder/indie-hacker audience means
+  by "grants". DevPost's hackathon API is bot-blocked (403). F6S, YC,
+  Antler, and Techstars expose marketing pages, not feeds or APIs.
+
+  Unlike every other category built so far, there's no structured,
+  frequently-updated source to poll in the first place — accelerator/grant
+  application windows are a handful of predictable events per program per
+  year, which is a calendar reminder, not something a 4-hour collection
+  cycle can meaningfully monitor.
+
+  The obvious alternative — a hand-maintained watchlist of known program
+  pages, text-matched for "applications open" — was considered and
+  rejected (operator direction): it's the same curated-list-rot problem
+  already hit four times this build (`is_mintable`, Syrup, osETH, Pendle —
+  see the Gems/security screening section above), except this time the
+  list itself is unmaintainable long-term — marketing pages get redesigned
+  without notice, and low-confidence text matching against unstructured
+  prose would fail silently rather than loudly. Same treatment as Product
+  Hunt (tool_launches) and `airdrops` (Section 3 of the spec) — dropped
+  outright rather than parked as a someday-maybe or stretched into looking
+  like a real collector. Revisit only if a genuinely structured source
+  turns up later.
+
 ## Documentation
 
 - **Update the technical spec doc** to reflect two implemented decisions that

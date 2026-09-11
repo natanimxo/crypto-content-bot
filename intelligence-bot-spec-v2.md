@@ -76,7 +76,7 @@ via `category_config_exists()` until built.
 | `crypto_wall_street` | Crypto Wall Street | `whale_movements` (+ `news`, not yet built) | `default` |
 | `alpha_edge_crypto` | Alpha Edge Crypto | `web3_jobs` | `us` |
 | `coincraft` | CoinCraft | `web3_jobs` | `default` |
-| `hustle_to_million` | Hustle to Million | none yet (`tool_launches`/`grants`/`startup_jobs` planned) | `default` |
+| `hustle_to_million` | Hustle to Million | `tool_launches` (2026-09-12), `startup_jobs` in progress; `grants` deliberately out of scope, see below | `default` |
 
 **Alternation.** `web3_jobs` is the first category shared across two
 channels (`alpha_edge_crypto` and `coincraft`). `pipeline/channel_router.py`
@@ -90,6 +90,26 @@ recomputed later.
 `airdrops` was deliberately paused (operator direction 2026-09-10) rather
 than left in as a stub — no collector exists yet, so it's omitted entirely
 from both channels' category lists rather than listed-but-skipped.
+
+`grants` (Hustle to Million) is deliberately OUT OF SCOPE, same treatment,
+decided 2026-09-12 after live-checking every realistic source first —
+Grants.gov's API works but returns US federal research grants (NSF SBIR,
+biomedical research centers), zero overlap with what a builder audience
+means by "grants"; DevPost's API is bot-blocked; F6S/YC/Antler/Techstars
+expose marketing pages, not feeds. Unlike every other category here,
+there's no structured, frequently-updated source to poll in the first
+place — accelerator/grant application windows are a handful of
+predictable events a year per program, which is a calendar reminder, not
+something a 4-hour collection cycle can meaningfully monitor. The
+alternative (a hand-maintained watchlist of program pages, text-matched
+for "applications open") was considered and rejected: it's the same
+curated-list-rot problem hit four times already this build (`is_mintable`,
+Syrup, osETH, Pendle — see BACKLOG.md), except this time the list itself
+is unmaintainable — marketing pages get redesigned without notice, and
+low-confidence text matching against them would fail silently. Revisit
+only if a real structured source turns up later; not planned as a
+someday-maybe the way Product Hunt was initially treated before also being
+dropped outright.
 
 ## Section 4 — LLM layer
 
@@ -502,9 +522,18 @@ action is processed — the bot's chat is not itself a secret boundary
      Complete, faster verification pace by explicit operator direction
      (structured data, no price verification, no editorial judgment
      required).
-- **Phase 3** — not yet started: `news` (Crypto Wall Street),
-  `tool_launches`/`grants`/`startup_jobs` (Hustle to Million), `airdrops`
-  (paused, see Section 3).
+- **Phase 3** — in progress, 2026-09-11/12:
+  3. `gems_security` → Crypto Notebook (shares the channel with defi_yields).
+     Complete — see BACKLOG.md for the real, multi-round tuning history
+     (TVL screening band, protocol-template dominance rule, the
+     behavioral-vs-capability field split).
+  4. `news` → Crypto Wall Street (shares the channel with whale_movements).
+     Complete.
+  5. `tool_launches` → Hustle to Million. Complete — first non-crypto
+     category (builder/SaaS/AI audience).
+  6. `startup_jobs` → Hustle to Million. In progress.
+  `grants` (Hustle to Million) deliberately out of scope, see Section 3.
+  `airdrops` (paused, see Section 3).
 
 `scripts/collect_cycle.py`'s `COLLECTORS` dict and each channel's
 `category_config.categories` list are the single source of truth for what's
