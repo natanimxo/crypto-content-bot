@@ -656,18 +656,119 @@ def _find_reproduction_issues(parsed: dict, source_excerpt: str | None) -> list[
     return issues
 
 
+# Political neutrality guard (macro_news, 2026-09-12) -- extends the SAME
+# checked-write mechanism as the gems_security overclaim guard and the news
+# copyright guard, per operator direction: "enforce this the way you did the
+# gems overclaim guard and the news copyright check -- a code-level check on
+# generated output, not just prompt wording."
+#
+# IMPORTANT, and the operator was explicit about this (2026-09-12): these
+# three checks are a FLOOR, not a guarantee. They catch loaded VOCABULARY,
+# which is real -- but bias in macro coverage lives mostly in SELECTION and
+# FRAMING (whose casualties get numbers, whose action reads as "response"
+# vs. "escalation", which side's stated reasons get repeated and which
+# don't) -- and no regex sees any of that. This module makes no claim that
+# passing these checks makes a macro_news post safe or neutral. The
+# operator's own approval step is what's actually doing that work; these
+# checks exist to catch the specific, code-catchable failure mode (loaded
+# language, unattributed motive-assertion, direct policy advocacy) that a
+# careful human reviewer might still miss on a fast read, not to replace
+# that reviewer's judgment about selection and framing.
+#
+# Sub-check 3 (prescriptive-advocacy) was explicitly flagged by the operator
+# as false-positive-risky before being trusted: "the Fed should raise
+# rates" is advocacy; "analysts expect the Fed will need to raise rates" is
+# attributed reporting -- a bare regex on "needs to" catches both, and a
+# false positive here means a legitimate post never generates (RuntimeError,
+# not a soft warning). See _find_neutrality_violations' docstring for the
+# sentence-level attribution check this uses to tell the two apart, and
+# BACKLOG.md for the real-draft test run this was checked against before
+# being wired in.
+_LOADED_CHARACTERIZATION_PATTERNS = [re.compile(p, re.IGNORECASE) for p in [
+    r"\bauthoritarian\b", r"\bcorrupt regime\b", r"\bbrutal crackdown\b",
+    r"\bdesperate (?:attempt|move)\b", r"\bradical agenda\b", r"\bextremist\b",
+    r"\billegitimate government\b", r"\brogue (?:state|nation)\b", r"\bpropaganda\b",
+    r"\bwarmongering\b", r"\breckless\b", r"\bfailed policy\b",
+]]
+
+_UNATTRIBUTED_MOTIVE_PATTERNS = [re.compile(p, re.IGNORECASE) for p in [
+    r"\bis trying to distract from\b", r"\bin an attempt to cling to power\b",
+    r"\bis desperate to\b", r"\bwants? to undermine\b", r"\bcrackdown on\b",
+    r"\bis using .{0,40} as a pretext\b",
+]]
+
+# Actor + prescriptive-modal, checked per-sentence so an ATTRIBUTION cue in
+# the SAME sentence (a third party's view being reported, not the writer's
+# own recommendation) exempts it -- see _find_neutrality_violations.
+_PRESCRIPTIVE_ACTOR_MODAL_RE = re.compile(
+    r"\b(the fed|the federal reserve|lawmakers|congress|the government|regulators|"
+    r"the administration|policymakers|the central bank)\b.{0,30}?"
+    r"\b(should|must|needs? to|ought to)\b",
+    re.IGNORECASE,
+)
+_ATTRIBUTION_CUE_RE = re.compile(
+    r"\b(analysts?|economists?|traders?|investors?|officials?|expects?|expected|"
+    r"believe[sd]?|forecast(?:s|ed)?|predicts?|predicted|according to|says?|said)\b",
+    re.IGNORECASE,
+)
+_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
+
+
+def _find_neutrality_violations(parsed: dict) -> list[str]:
+    """Three sub-checks, tested against real generated drafts before being
+    trusted (2026-09-12, operator direction -- see BACKLOG.md's "Political
+    neutrality guard" entry for the full test run and its results):
+
+    1/2. Loaded characterization ("authoritarian", "corrupt regime") and
+    unattributed motive-assertion ("is trying to distract from") -- these
+    have NO attribution exemption, deliberately: a subjective motive claim
+    or a loaded label is the writer's own editorializing regardless of who
+    they attribute the underlying fact to ("officials say the government is
+    trying to distract from the scandal" is still OUR characterization of
+    intent, just laundered through a source).
+
+    3. Prescriptive advocacy ("the Fed should raise rates") DOES have an
+    attribution exemption, and needs one to avoid the exact false-positive
+    the operator named before this was trusted: "the Fed should raise
+    rates" is the writer's own advocacy; "analysts expect the Fed will need
+    to raise rates" is the writer reporting a THIRD PARTY's forecast. Same
+    modal language, different actor making the claim -- attribution
+    genuinely changes what's being asserted here in a way it doesn't for
+    #1/#2. Checked per-sentence: an actor+modal pattern is only flagged if
+    that SAME sentence has no attribution cue nearby (analysts/economists/
+    say/expect/according to/etc.).
+
+    KNOWN LIMIT, not fixed: the attribution check is cue-PRESENCE, not real
+    parsing -- "the Fed should raise rates, according to no one in
+    particular" would NOT be flagged, because the cue is there even though
+    it isn't doing real attribution work. Narrow enough that no draft has
+    hit it live yet, but worth naming rather than pretending the exemption
+    is bulletproof."""
+    text = " ".join(str(parsed.get(k, "")) for k in ("title", "narrative", "why_it_matters"))
+    issues = [p.pattern for p in _LOADED_CHARACTERIZATION_PATTERNS if p.search(text)]
+    issues += [p.pattern for p in _UNATTRIBUTED_MOTIVE_PATTERNS if p.search(text)]
+
+    for sentence in _SENTENCE_SPLIT_RE.split(text):
+        if _PRESCRIPTIVE_ACTOR_MODAL_RE.search(sentence) and not _ATTRIBUTION_CUE_RE.search(sentence):
+            issues.append(f"prescriptive advocacy, unattributed: {sentence.strip()!r}")
+    return issues
+
+
 def _generate_checked_write(conn, category: str, prompt: str, *, model_override: str | None = None,
-                             source_excerpt: str | None = None) -> str:
-    """llm.generate_write, but refuses to let an overclaiming OR (when
-    source_excerpt is given) reproduced draft through. One retry with a
-    stricter reminder appended to the SAME prompt, then a hard failure
-    rather than silently shipping it -- same "never silently ship a
-    malformed post" philosophy as post_format.parse_llm_json. A
-    RuntimeError here surfaces as a failed write, not a bad post the
-    operator has to catch by reading carefully."""
+                             source_excerpt: str | None = None, check_neutrality: bool = False) -> str:
+    """llm.generate_write, but refuses to let an overclaiming, (when
+    source_excerpt is given) reproduced, or (when check_neutrality is set)
+    politically-loaded draft through. One retry with a stricter reminder
+    appended to the SAME prompt, then a hard failure rather than silently
+    shipping it -- same "never silently ship a malformed post" philosophy as
+    post_format.parse_llm_json. A RuntimeError here surfaces as a failed
+    write, not a bad post the operator has to catch by reading carefully."""
     def _check(raw: str) -> list[str]:
         parsed = post_format.parse_llm_json(raw)
-        return _find_overclaims(parsed) + _find_reproduction_issues(parsed, source_excerpt)
+        hits = _find_overclaims(parsed) + _find_reproduction_issues(parsed, source_excerpt)
+        if check_neutrality:
+            hits += _find_neutrality_violations(parsed)
+        return hits
 
     raw = llm.generate_write(conn, category, prompt, model_override=model_override)
     hits = _check(raw)
@@ -676,10 +777,14 @@ def _generate_checked_write(conn, category: str, prompt: str, *, model_override:
         stricter_prompt = prompt + (
             "\n\nSTRICT REMINDER: your previous draft either (a) used language claiming or "
             "implying certainty this data doesn't support (words like 'safe', 'legit', "
-            "'guaranteed', 'risk-free', 'no risk') or (b) reproduced or too-closely paraphrased "
-            "the source material instead of summarizing it in your own words. Fix both: state "
-            "only what the data supports, and write your own summary -- a short, clearly quoted "
-            "and attributed phrase is fine, reproducing sentences or structure is not."
+            "'guaranteed', 'risk-free', 'no risk'), (b) reproduced or too-closely paraphrased "
+            "the source material instead of summarizing it in your own words, or (c) used "
+            "loaded characterizations of a political actor, asserted a government's motive "
+            "without attribution, or told a government/policymaker what it should do. Fix all "
+            "that apply: state only what the data supports, write your own summary, report what "
+            "happened and its plausible economic implications without taking a side or "
+            "characterizing anyone's motives, and never recommend a course of action to a "
+            "policymaker or reader -- describe, don't advocate."
         )
         raw = llm.generate_write(conn, category, stricter_prompt, model_override=model_override)
         hits = _check(raw)
@@ -883,13 +988,75 @@ def _normalize_project(project_slug: str | None) -> str | None:
     return name if len(name) >= _PROJECT_NAME_MIN_LENGTH else None
 
 
-def _find_cross_category_connection(conn, news_text: str) -> str | None:
+# Cross-category name extraction, one entry per category this connection
+# check can run against -- each returns a single normalized candidate NAME
+# string to word-boundary-match against the OTHER category's text, or None
+# if this row doesn't offer one. tool_launches/startup_jobs added 2026-09-12
+# for macro_news (operator-approved plan: "same notified-only, named-entity
+# bar as the crypto version") -- neither has a clean single "project"-style
+# slug field the way defi_yields/gems_security do, so their name comes from
+# running the SAME shared entity extractor (pipeline/entities.py) already
+# used everywhere else in this codebase, just handed the row's own title
+# (and company, for startup_jobs) as the "description" argument specifically
+# -- extract_entities() only pulls proper-noun PHRASES from description, not
+# title, because news headlines are stylistically Title-Cased throughout
+# (see that module's docstring); tool_launches/startup_jobs titles are
+# natural HN/GitHub/job-board text, not headline-styled, so this reuses the
+# existing phrase extractor for its intended purpose rather than working
+# around it.
+def _primary_phrase_name(text: str | None) -> str | None:
+    if not text:
+        return None
+    ent = entity_lib.extract_entities("", text)
+    phrases = sorted(ent["phrases"], key=len, reverse=True)
+    return phrases[0].lower() if phrases else None
+
+
+CROSS_CATEGORY_NAME_EXTRACTORS = {
+    "whale_movements": lambda p: (p.get("exchange") or "").strip().lower() or None,
+    "defi_yields": lambda p: _normalize_project(p.get("project")),
+    "gems_security": lambda p: _normalize_project(p.get("project")),
+    "tool_launches": lambda p: _primary_phrase_name(p.get("title")),
+    "startup_jobs": lambda p: _primary_phrase_name(f"{p.get('company') or ''} {p.get('title') or ''}"),
+}
+
+
+def _cross_category_fact(category: str, p: dict, when: str) -> str:
+    if category == "whale_movements":
+        verb = "withdrew from" if p.get("direction") == "outflow" else "deposited to"
+        return (
+            f"a ${p.get('value_usd', 0):,.0f} {p.get('symbol')} transfer {verb} "
+            f"{p.get('exchange')}, {when}, in our own whale tracking"
+        )
+    elif category == "defi_yields":
+        return (
+            f"{p.get('project')} {p.get('symbol')} is currently yielding "
+            f"{p.get('apy')}% APY (TVL ${p.get('tvl_usd', 0):,.0f}) in our own DeFi tracking"
+        )
+    elif category == "gems_security":
+        return (
+            f"a GoPlus security finding on {p.get('symbol')} ({p.get('project')}) "
+            f"we flagged {when}: {'; '.join(p.get('red_flags') or [])}"
+        )
+    elif category == "tool_launches":
+        source_label = "Hacker News" if p.get("source") == "hackernews" else "GitHub Trending"
+        return f"\"{p.get('title')}\", which we surfaced {when} in our own {source_label} tracking"
+    else:  # startup_jobs
+        return f"a {p.get('position')} role at {p.get('company')} we surfaced {when} in our own job listings"
+
+
+def _find_cross_category_connection(conn, text: str, categories: tuple[str, ...],
+                                     lookback_hours: int = None, log_label: str = "news") -> str | None:
     """The piece operator direction 2026-09-11/12 asked for real attention
-    on: does this news item connect to OUR OWN whale_movements/defi_yields/
-    gems_security data in a way that's genuinely informative, not just
-    coincidental? This went through two real, live-caught failures before
-    landing here -- worth understanding both, since the fix is a direct
-    response to each:
+    on: does this item connect to OUR OWN data from other categories in a
+    way that's genuinely informative, not just coincidental? Originally
+    built for news (whale_movements/defi_yields/gems_security) and
+    generalized 2026-09-12 for macro_news (tool_launches/startup_jobs) --
+    same mechanism, parameterized `categories` instead of a hardcoded tuple,
+    since the two channels' "our own data" sets are entirely different.
+
+    This went through two real, live-caught failures before landing here --
+    worth understanding both, since the fix is a direct response to each:
 
     1. Ticker-overlap matching surfaced a 0.01% APY pool with nothing to do
        with the actual story -- they shared "USDT" and nothing else. Fixed
@@ -904,36 +1071,36 @@ def _find_cross_category_connection(conn, news_text: str) -> str | None:
        proves nothing about relatedness.
 
     The fix that actually addresses the root cause: match on the specific
-    PROTOCOL or EXCHANGE NAME the news text names, not the generic ticker
-    -- "Spark" appearing in both the headline and our own tracked Spark
-    pools is a real, specific connection; "USDT" appearing in both proves
-    only that both involve a widely-used stablecoin. And per operator
-    direction, require the matched row to have been ACTUALLY NOTIFIED (not
-    merely scored above threshold) -- a materially higher, less gameable
-    bar than a raw score comparison, since it means the connection is
-    always to something already judged genuinely worth attention, not a
-    score technicality.
+    NAME the text names (protocol/exchange for news, product/company name
+    for macro_news), not a generic shared ticker/keyword -- "Spark"
+    appearing in both the headline and our own tracked Spark pools is a
+    real, specific connection. And per operator direction, require the
+    matched row to have been ACTUALLY NOTIFIED (not merely scored above
+    threshold) -- a materially higher, less gameable bar than a raw score
+    comparison, since it means the connection is always to something
+    already judged genuinely worth attention, not a score technicality.
 
     This is deliberately narrower than the multi-signal-corroboration idea
     also discussed (e.g. a token showing both a notable exchange outflow
     AND a notable yield move together telling one coherent story) -- that
     would mean correlating two independently-notified facts with each
-    other, a materially bigger feature than name-matching one news item
-    against one notified row. Not built this pass; flagged as a real
-    follow-on, not silently dropped. "Rare and real beats frequent and
-    coincidental" (operator direction) -- this fires far less often than
-    the ticker-matching version did, which is the intended outcome, not a
-    regression to fix.
+    other, a materially bigger feature than name-matching one item against
+    one notified row. Not built this pass; flagged as a real follow-on, not
+    silently dropped. "Rare and real beats frequent and coincidental"
+    (operator direction) -- this fires far less often than the ticker-
+    matching version did, which is the intended outcome, not a regression
+    to fix.
     """
+    lookback_hours = lookback_hours or CROSS_CATEGORY_LOOKBACK_HOURS
     with dict_cursor(conn) as cur:
         cur.execute(
             """SELECT r.category, r.payload, n.sent_at
                FROM raw_items r
                JOIN notifications n ON r.id = ANY(n.candidate_raw_item_ids)
-               WHERE r.category IN ('whale_movements', 'defi_yields', 'gems_security')
+               WHERE r.category = ANY(%s)
                  AND n.sent_at > now() - (%s || ' hours')::interval
                ORDER BY n.sent_at DESC LIMIT 200""",
-            (CROSS_CATEGORY_LOOKBACK_HOURS,),
+            (list(categories), lookback_hours),
         )
         rows = cur.fetchall()
 
@@ -944,17 +1111,15 @@ def _find_cross_category_connection(conn, news_text: str) -> str | None:
     # from "quietly broken" once there's real notified history to check
     # against.
     if not rows:
-        logger.info("news: cross-category lookup -- no notified whale_movements/defi_yields/"
-                     "gems_security rows in the last %dh", CROSS_CATEGORY_LOOKBACK_HOURS)
+        logger.info("%s: cross-category lookup -- no notified %s rows in the last %dh",
+                     log_label, "/".join(categories), lookback_hours)
         return None
 
-    text_lower = (news_text or "").lower()
+    text_lower = (text or "").lower()
     for row in rows:
         p = row["payload"]
-        if row["category"] == "whale_movements":
-            name = (p.get("exchange") or "").strip().lower()
-        else:  # defi_yields / gems_security
-            name = _normalize_project(p.get("project"))
+        extractor = CROSS_CATEGORY_NAME_EXTRACTORS.get(row["category"])
+        name = extractor(p) if extractor else None
         if not name or len(name) < _PROJECT_NAME_MIN_LENGTH:
             continue
         if not re.search(rf"\b{re.escape(name)}\b", text_lower):
@@ -962,26 +1127,10 @@ def _find_cross_category_connection(conn, news_text: str) -> str | None:
 
         age_hours = (datetime.now(timezone.utc) - row["sent_at"]).total_seconds() / 3600
         when = "earlier today" if age_hours < 20 else f"{age_hours / 24:.0f}d ago"
+        return _cross_category_fact(row["category"], p, when)
 
-        if row["category"] == "whale_movements":
-            verb = "withdrew from" if p.get("direction") == "outflow" else "deposited to"
-            return (
-                f"a ${p.get('value_usd', 0):,.0f} {p.get('symbol')} transfer {verb} "
-                f"{p.get('exchange')}, {when}, in our own whale tracking"
-            )
-        elif row["category"] == "defi_yields":
-            return (
-                f"{p.get('project')} {p.get('symbol')} is currently yielding "
-                f"{p.get('apy')}% APY (TVL ${p.get('tvl_usd', 0):,.0f}) in our own DeFi tracking"
-            )
-        else:  # gems_security
-            return (
-                f"a GoPlus security finding on {p.get('symbol')} ({p.get('project')}) "
-                f"we flagged {when}: {'; '.join(p.get('red_flags') or [])}"
-            )
-
-    logger.info("news: cross-category lookup -- %d notified row(s) in the last %dh, "
-                 "none named in this item's text", len(rows), CROSS_CATEGORY_LOOKBACK_HOURS)
+    logger.info("%s: cross-category lookup -- %d notified row(s) in the last %dh, "
+                 "none named in this item's text", log_label, len(rows), lookback_hours)
     return None
 
 
@@ -1010,7 +1159,9 @@ def compute_news_elements(conn, raw_item: dict, history: list) -> dict:
             break
 
     news_text = f"{p.get('title') or ''} {p.get('description') or ''}"
-    context_line = _find_cross_category_connection(conn, news_text)
+    context_line = _find_cross_category_connection(
+        conn, news_text, categories=("whale_movements", "defi_yields", "gems_security"),
+    )
 
     return {
         "history_line": history_line,
@@ -1076,6 +1227,115 @@ def compute_tool_launches_elements(conn, raw_item: dict, history: list) -> dict:
     return {"history_line": None, "risk_line": None, "source_name": source_name}
 
 
+@register_prompt_builder("macro_news")
+def build_macro_news_prompt(cfg: dict, region_profile: str, raw_item: dict, history: list) -> str:
+    """Hustle to Million's macro category -- reuses news.py's collection
+    infrastructure unchanged (operator direction), but the editorial brief
+    and voice are different: this is NOT "business news" or a general news
+    feed, it's macro developments that plausibly affect a reader's economic
+    situation, written with a hard political-neutrality requirement.
+
+    Neutrality is enforced BOTH here (prompt instructions) AND structurally
+    in _generate_checked_write's check_neutrality path (_find_neutrality_
+    violations) -- the same "prompts get ignored, a code-level guard
+    doesn't" reasoning as every other guard in this file. See that
+    function's docstring for what the structural check does and does NOT
+    catch (it's a floor, not a guarantee -- selection and framing bias is
+    not something a regex can see; the operator's own approval step is what
+    actually covers that)."""
+    p = raw_item["payload"]
+
+    return f"""You are writing prose for a macro-economics Telegram channel (audience:
+founders, indie hackers, people who want to understand how world events affect
+their own economic situation -- not a crypto audience, not a general news
+audience). Voice: {cfg.get('voice', 'market_summary')}.
+{cfg.get('prompt_notes', '')}
+
+Facts about this story (from a wire excerpt, summarize in your own words --
+never quote more than a short phrase, and never copy the excerpt's sentence
+structure):
+- Headline: {p.get('title')}
+- Source excerpt: {p.get('description')}
+- Outlet: {p.get('source')}
+
+Return ONLY a JSON object (no markdown fence, no commentary) with exactly these
+three string fields:
+{{
+  "title": "one specific title in your own words — not a copy of the
+    headline above. No emoji.",
+  "narrative": "1-2 sentences: what happened, in your own words, summarized
+    from the excerpt — never a close paraphrase of its structure or wording.",
+  "why_it_matters": "EXACTLY one sentence on the PLAUSIBLE ECONOMIC
+    IMPLICATION for a reader — prices, rates, jobs, costs, markets — never a
+    restatement of the narrative in different words."
+}}
+
+HARD RULES, no exceptions:
+- Report what happened and its plausible economic implications. Never
+  advocate a position, never tell a government/policymaker/reader what
+  should happen, never characterize any government's or actor's MOTIVES
+  ("in a desperate attempt to...", "trying to distract from...") — describe
+  actions, don't assign intent.
+- Never use loaded characterizations of a political actor ("authoritarian",
+  "corrupt regime", "radical", "extremist", "regime") — use neutral,
+  specific, factual language regardless of which side or country is
+  involved.
+- If two sides dispute what happened or why, say that plainly rather than
+  adopting either side's framing as settled fact.
+- Never state a price prediction or tell the reader what to do with their
+  own money. No crypto framing, no financial-advice language.
+- No emoji anywhere in your output. Keep the combined narrative +
+  why_it_matters under ~70 words — the whole post (header/source/hashtags
+  added separately, not by you) targets roughly 400-700 characters.
+"""
+
+
+@register_post_computer("macro_news")
+def compute_macro_news_elements(conn, raw_item: dict, history: list) -> dict:
+    """Same two deterministic value-adds as compute_news_elements, reused
+    unchanged (operator direction): history_line for a genuine developing-
+    story continuation (same entity-fingerprint mechanism/threshold,
+    pipeline/entities.py), context_line for a cross-category connection --
+    but pointed at tool_launches/startup_jobs (Hustle to Million's own other
+    categories) instead of news's whale_movements/defi_yields/gems_security,
+    via _find_cross_category_connection's generalized `categories` param."""
+    p = raw_item["payload"]
+    current_entities = {
+        "tickers": set(p.get("tickers") or []),
+        "phrases": set(p.get("phrases") or []),
+        "figures": set(p.get("figures") or []),
+    }
+
+    history_line = None
+    for prior in history:
+        if _news_topic_overlap_ok(current_entities, prior["payload"], NEWS_CONTINUATION_OVERLAP_THRESHOLD):
+            days_ago = (raw_item["collected_at"] - prior["collected_at"]).days if raw_item.get("collected_at") and prior.get("collected_at") else None
+            when = f"{days_ago}d ago" if days_ago is not None else "previously"
+            history_line = f"We covered this developing story {when}: \"{prior['payload'].get('title')}\""
+            break
+
+    macro_text = f"{p.get('title') or ''} {p.get('description') or ''}"
+    context_line = _find_cross_category_connection(
+        conn, macro_text, categories=("tool_launches", "startup_jobs"), log_label="macro_news",
+    )
+
+    source_name = MACRO_NEWS_SOURCE_DISPLAY_NAMES.get(p.get("source"), p.get("source"))
+    return {
+        "history_line": history_line,
+        "risk_line": None,
+        "source_name": source_name,
+        "context_line": context_line,
+    }
+
+
+MACRO_NEWS_SOURCE_DISPLAY_NAMES = {
+    "bbc_world": "BBC", "bbc_business": "BBC", "npr_economy": "NPR",
+    "cnbc_economy": "CNBC", "federal_reserve": "Federal Reserve",
+    "axios": "Axios", "ars_technica": "Ars Technica", "the_verge": "The Verge",
+    "wired": "Wired",
+}
+
+
 def _assemble(conn, category: str, raw_item: dict, history: list, llm_raw_output: str) -> str:
     cfg = load_category_config(conn, category)
     parsed = post_format.parse_llm_json(llm_raw_output)
@@ -1106,11 +1366,20 @@ def _build_prompt_and_history(conn, category: str, channel: str, raw_item: dict)
     return prompt, history
 
 
+# Categories whose written output gets checked against
+# _find_neutrality_violations -- see that function's docstring and
+# _generate_checked_write's check_neutrality param.
+NEUTRALITY_CHECKED_CATEGORIES = {"macro_news"}
+
+
 def generate_post(conn, category: str, channel: str, raw_item: dict) -> str:
     """Single-variant write, using whatever write_model is currently configured."""
     prompt, history = _build_prompt_and_history(conn, category, channel, raw_item)
     source_excerpt = (raw_item.get("payload") or {}).get("description")
-    raw = _generate_checked_write(conn, category, prompt, source_excerpt=source_excerpt)
+    raw = _generate_checked_write(
+        conn, category, prompt, source_excerpt=source_excerpt,
+        check_neutrality=category in NEUTRALITY_CHECKED_CATEGORIES,
+    )
     return _assemble(conn, category, raw_item, history, raw)
 
 
@@ -1122,8 +1391,9 @@ def generate_post_variants(conn, category: str, channel: str, raw_item: dict) ->
     risk/source/hashtags) — only the LLM prose differs between them."""
     prompt, history = _build_prompt_and_history(conn, category, channel, raw_item)
     source_excerpt = (raw_item.get("payload") or {}).get("description")
-    raw_deepseek = _generate_checked_write(conn, category, prompt, model_override="deepseek-v4-flash", source_excerpt=source_excerpt)
-    raw_sonnet = _generate_checked_write(conn, category, prompt, model_override="claude-sonnet-5", source_excerpt=source_excerpt)
+    check_neutrality = category in NEUTRALITY_CHECKED_CATEGORIES
+    raw_deepseek = _generate_checked_write(conn, category, prompt, model_override="deepseek-v4-flash", source_excerpt=source_excerpt, check_neutrality=check_neutrality)
+    raw_sonnet = _generate_checked_write(conn, category, prompt, model_override="claude-sonnet-5", source_excerpt=source_excerpt, check_neutrality=check_neutrality)
     return {
         "deepseek-v4-flash": _assemble(conn, category, raw_item, history, raw_deepseek),
         "claude-sonnet-5": _assemble(conn, category, raw_item, history, raw_sonnet),

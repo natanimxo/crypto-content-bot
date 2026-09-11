@@ -396,3 +396,86 @@ startup_jobs:
     builder/startup audience, not crypto: no crypto framing, no financial
     language. No hype language, no "AMAZING OPPORTUNITY", no manufactured
     urgency. Measured tone, no emoji beyond what the template itself adds.
+
+# Phase 3, 2026-09-12 — macro_news -> Hustle to Million (shares the channel
+# with tool_launches/startup_jobs). Reuses news.py's entire infrastructure
+# unchanged (operator direction): entity fingerprinting, cross-outlet dedup,
+# topic caps. Deliberately NOT "business news" or a general news feed --
+# macro developments that plausibly affect a reader's economic situation
+# (rates/inflation, trade policy, geopolitical events with real economic
+# spillover, AI regulation/industry shifts, major regulatory action). See
+# collectors/macro_news.py's module docstring for the full feed-by-feed
+# live-verification reasoning and the relevance gate's design (a deliberately
+# high bar -- a cycle with zero candidates is the expected, correct outcome
+# on a quiet day, not a bug).
+#
+# POLITICAL NEUTRALITY (operator hard requirement): enforced both in the
+# write prompt AND structurally in pipeline/write_post.py's
+# _find_neutrality_violations, wired into the same checked-write/retry/
+# RuntimeError mechanism as the gems_security overclaim guard and the news
+# copyright guard. Read that function's docstring before treating this
+# category as "handled" -- it is explicitly a FLOOR (catches loaded
+# vocabulary), not a guarantee (selection/framing bias is not something a
+# regex can see; the operator's own approval step is what covers that).
+macro_news:
+  score_weights:
+    impact: 0.40          # bucket severity (rates/inflation broadest reach,
+                            # regulatory/AI-policy narrower) + cross-outlet
+                            # corroboration bonus -- same shape as news
+    novelty: 0.30          # slower decay than news (72h, not 36h) -- a Fed
+                            # decision or tariff story stays the live story
+                            # for days, not hours
+    actionability: 0.30    # a concrete figure (rate/inflation/tariff number)
+                            # beats a named entity with no figure, beats a
+                            # vague scale-free mention
+    # No credibility key -- landed on the SAME conclusion as news (drop it,
+    # redistribute the weight) but for a DIFFERENT, freshly-verified reason:
+    # live-checked 2026-09-12 across 195 real items from every tag/title-
+    # bearing candidate feed, ZERO carried any opinion/analysis/op-ed/
+    # column/commentary marker in tags or title. Unlike news's curated
+    # crypto blogs, these are wire/official-statement feeds -- there's no
+    # real original-reporting-vs-opinion split in this data to gate on at
+    # all, so building one here would be a no-op, not real signal.
+
+  review_threshold: 50
+  # topic_key is the story's primary extracted entity (pipeline/entities.py),
+  # same coarse "same primary subject" mechanism as news. 24h, not news's
+  # 12h -- macro stories (a Fed policy debate, a tariff dispute) genuinely
+  # develop more slowly than a crypto news cycle.
+  cooldown_hours: 24
+  soft_daily_cap: 4       # deliberately low -- the relevance gate already
+                            # does the real filtering (live-checked: ~10% of
+                            # a real cycle's candidate feed items clear it);
+                            # this is a second, tighter throttle on top,
+                            # same "rare and notable, not a quota" posture
+                            # as gems_security.
+
+  triage_model: template   # a headline is already a one-line summary, same as news
+  write_model: deepseek-v4-flash
+  write_benchmark_status: settled_deepseek
+
+  label: "🌐 MACRO NEWS"
+
+  emoji: "🌐"
+  display_label: "Macro News"
+  hashtags:
+    - "#MacroNews"
+    - "#Economy"
+
+  voice: market_summary
+  # Tight, factual register (same as news's Crypto Wall Street voice) --
+  # report what happened and its plausible economic implication, stop. The
+  # hard constraint here is neutrality, not voice: see
+  # build_macro_news_prompt (pipeline/write_post.py) for the full rule set,
+  # enforced both in this prose instruction and structurally afterward.
+  prompt_notes: >
+    Tight, factual, market-summary register. Explain the plausible economic
+    implication in your own words — never restate the headline or closely
+    paraphrase the source excerpt's wording or structure. Report what
+    happened; never advocate a position, never characterize any actor's
+    motives, never use loaded language about a government or political
+    actor, and never tell a policymaker or reader what should happen. If two
+    sides dispute the facts or the reasons, say that plainly rather than
+    adopting either side's framing. No crypto framing, no financial-advice
+    language, no price predictions. Measured tone: no hype, no manufactured
+    urgency, no emoji beyond what the template itself adds.

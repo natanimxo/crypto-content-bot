@@ -281,6 +281,50 @@ the one place to check.
   like a real collector. Revisit only if a genuinely structured source
   turns up later.
 
+- **Political neutrality guard (`macro_news`) is a floor, not a
+  guarantee — write this down plainly, operator direction 2026-09-12.**
+  `pipeline/write_post.py`'s `_find_neutrality_violations` (wired into the
+  same checked-write/retry/`RuntimeError` mechanism as the gems_security
+  overclaim guard and the news copyright guard) catches three real,
+  code-detectable failure modes: loaded characterization of a political
+  actor ("authoritarian", "corrupt regime"), unattributed motive-assertion
+  ("is trying to distract from"), and unattributed prescriptive advocacy
+  ("the Fed should raise rates"). All three are regex/keyword checks on
+  LOADED VOCABULARY.
+
+  What they structurally cannot see, and were never going to: bias in
+  macro coverage lives mostly in SELECTION and FRAMING, not vocabulary —
+  whose casualties get numbers and whose don't, whose action reads as "a
+  response" versus "an escalation," which side's stated reasons get
+  repeated in the piece and which side's don't. None of that shows up as
+  a banned word a regex can catch. Passing all three checks is not a
+  claim that a given post is neutral or safe to publish unreviewed — it's
+  a claim that it avoids the specific, narrow vocabulary-level failure
+  this code knows how to look for. The operator's own approval step is
+  what actually covers selection/framing bias; this guard is real
+  defense-in-depth underneath that, not a replacement for it.
+
+  Before being trusted, the prescriptive-advocacy sub-check specifically
+  was tested against real generated drafts (operator direction: "show me
+  the check running against a handful of real generated drafts, not just
+  synthetic test strings," since a false positive here means a legitimate
+  post never generates rather than degrading). Two passes: (1) all 13
+  real held candidates from macro_news's first live cycle (2026-09-12)
+  were written through the full pipeline end to end — zero triggered any
+  of the three checks, meaning the model already avoids advocacy-flavored
+  language on its own with the prompt instructions in place, so this
+  batch didn't actually exercise the risky code path; (2) the operator's
+  own named pair ("the Fed should raise rates" vs. "analysts expect the
+  Fed will need to raise rates") plus seven adjacent hand-built cases were
+  run directly against `_find_neutrality_violations` — all nine behaved
+  as intended, including the attributed-via-"said"-at-sentence-end and
+  attributed-via-"according to" variants. One deliberately adversarial
+  case was included and left unfixed as a known, named limit (see that
+  function's docstring): the attribution exemption checks for cue
+  PRESENCE, not real parsing, so a sentence gaming the exemption with a
+  fake attribution phrase would slip through. Narrow enough that no real
+  draft has hit it, not fixed pre-emptively.
+
 - **`web3_jobs`/`startup_jobs` duplicate a real chunk of RemoteOK-specific
   logic.** Both collectors hit the same API and hit the same real
   data-quality bugs (server-side mojibake, duplicated location strings,

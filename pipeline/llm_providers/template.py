@@ -113,6 +113,15 @@ def render_web3_jobs(raw_item: dict) -> str:
     return " · ".join(parts)
 
 
+@register_template("macro_news")
+def render_macro_news(raw_item: dict) -> str:
+    p = raw_item["payload"]
+    parts = [p.get("title") or "", f"— {p.get('source')}"]
+    if p.get("also_covered_by"):
+        parts.append(f"(+{len(p['also_covered_by'])} other outlet(s))")
+    return " ".join(parts)
+
+
 @register_template("startup_jobs")
 def render_startup_jobs(raw_item: dict) -> str:
     p = raw_item["payload"]

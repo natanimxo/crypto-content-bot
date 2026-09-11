@@ -667,6 +667,93 @@ def score_startup_jobs(conn, raw_item_id: int, payload: dict) -> dict:
     }
 
 
+# macro_news weights (operator-approved plan, 2026-09-12) -- same 3-component
+# shape as news (impact 0.40 / novelty 0.30 / actionability 0.30, no
+# credibility key), but landed on for a DIFFERENT, freshly-verified reason:
+# news dropped credibility because the real signal (Opinion/newsletter tags)
+# was binary, not a scale, so it became a pre-score gate instead. For
+# macro_news, live-checked 2026-09-12 across 195 real items from all four
+# tag/title-bearing feeds (BBC Business, NPR Economy, CNBC Economy, Axios) --
+# ZERO carried any opinion/analysis/op-ed/column/commentary marker in tags OR
+# title. There is no original-reporting-vs-opinion split to gate on here at
+# all (these are wire/official-statement feeds, not curated blogs) -- so
+# there's nothing for a "credibility" component to measure that isn't
+# already a constant. Not built as a no-op gate; genuinely dropped, weight
+# redistributed the same way news's was.
+MACRO_NEWS_NOVELTY_DECAY_HOURS = 72   # slower-moving than crypto news (score_news: 36h) --
+                                       # a Fed rate decision or a tariff announcement stays
+                                       # the live story for days, not hours
+# Base "how broad is this bucket's typical reach" severity -- collectors/
+# macro_news.py's matched_buckets (computed once, at collection time, from
+# the same taxonomy regexes the relevance gate already ran). Not a claim
+# about any SPECIFIC story's importance, just the category's own reasonable
+# prior: a Fed rate/inflation move touches every reader's borrowing costs
+# and prices; a single regulatory action or AI-policy story is real but
+# narrower in who it actually affects. A title matching multiple buckets
+# takes the highest.
+MACRO_NEWS_BUCKET_SEVERITY = {
+    "rates": 90.0,
+    "inflation": 85.0,
+    "trade_policy": 70.0,
+    "conflict_spillover": 65.0,
+    "ai_policy": 55.0,
+    "regulatory": 50.0,
+}
+MACRO_NEWS_BUCKET_SEVERITY_DEFAULT = 50.0
+MACRO_NEWS_CORROBORATION_BONUS_PER_OUTLET = 15.0
+MACRO_NEWS_CORROBORATION_BONUS_CAP = 30.0
+
+
+def _macro_news_impact(payload: dict) -> float:
+    buckets = payload.get("matched_buckets") or []
+    severity = max(
+        (MACRO_NEWS_BUCKET_SEVERITY.get(b, MACRO_NEWS_BUCKET_SEVERITY_DEFAULT) for b in buckets),
+        default=MACRO_NEWS_BUCKET_SEVERITY_DEFAULT,
+    )
+    also_covered_by = payload.get("also_covered_by") or []
+    bonus = min(len(also_covered_by) * MACRO_NEWS_CORROBORATION_BONUS_PER_OUTLET,
+                MACRO_NEWS_CORROBORATION_BONUS_CAP)
+    return round(_clamp(severity + bonus), 1)
+
+
+def _macro_news_novelty(payload: dict) -> float:
+    published_at = payload.get("published_at")
+    if not published_at:
+        return 50.0
+    published = datetime.fromisoformat(published_at)
+    age_hours = max(0.0, (datetime.now(timezone.utc) - published).total_seconds() / 3600)
+    return round(_clamp(100.0 - (age_hours / MACRO_NEWS_NOVELTY_DECAY_HOURS) * 100.0), 1)
+
+
+def _macro_news_actionability(payload: dict) -> float:
+    """Same "can a reader do something concrete with this" question every
+    other category's actionability asks, answered with what a macro story
+    actually offers: a real figure (a rate, an inflation print, a tariff
+    dollar amount) lets a reader reason concretely about magnitude and is
+    the strongest signal; a named entity (an agency, an official, a
+    company) with no figure is weaker but still concrete; neither is a
+    vague, scale-free mention. Figures over named phrases (unlike news,
+    which ranks tickers highest) since macro headlines rarely name a
+    tradeable ticker at all -- a real number is the more common and more
+    telling signal for this category."""
+    if payload.get("figures"):
+        return 90.0
+    if payload.get("phrases"):
+        return 60.0
+    return 35.0
+
+
+@register_scorer("macro_news")
+def score_macro_news(conn, raw_item_id: int, payload: dict) -> dict:
+    """Breakdown -- three components (impact/novelty/actionability), no
+    credibility key. See the weights comment above for why."""
+    return {
+        "impact": _macro_news_impact(payload),
+        "novelty": _macro_news_novelty(payload),
+        "actionability": _macro_news_actionability(payload),
+    }
+
+
 def score_new_items(conn, category: str) -> int:
     """Score every raw_item in this category that doesn't have a score row yet.
     Returns the number scored."""

@@ -73,10 +73,10 @@ via `category_config_exists()` until built.
 | Channel | Display name | Categories (live) | Region profile |
 |---|---|---|---|
 | `crypto_notebook` | Crypto Notebook | `defi_yields` | `us` |
-| `crypto_wall_street` | Crypto Wall Street | `whale_movements` (+ `news`, not yet built) | `default` |
+| `crypto_wall_street` | Crypto Wall Street | `whale_movements`, `news` | `default` |
 | `alpha_edge_crypto` | Alpha Edge Crypto | `web3_jobs` | `us` |
 | `coincraft` | CoinCraft | `web3_jobs` | `default` |
-| `hustle_to_million` | Hustle to Million | `tool_launches` (2026-09-12), `startup_jobs` in progress; `grants` deliberately out of scope, see below | `default` |
+| `hustle_to_million` | Hustle to Million | `tool_launches`, `startup_jobs`, `macro_news` (2026-09-12); `grants` deliberately out of scope, see below | `default` |
 
 **Alternation.** `web3_jobs` is the first category shared across two
 channels (`alpha_edge_crypto` and `coincraft`). `pipeline/channel_router.py`
@@ -110,6 +110,24 @@ low-confidence text matching against them would fail silently. Revisit
 only if a real structured source turns up later; not planned as a
 someday-maybe the way Product Hunt was initially treated before also being
 dropped outright.
+
+`macro_news` (Hustle to Million, 2026-09-12) reuses `news`'s entire
+infrastructure unchanged (entity fingerprinting, cross-outlet dedup, topic
+caps) against a different feed list (BBC World/Business, NPR Economy, CNBC
+Economy, Federal Reserve, Axios, Ars Technica, The Verge, Wired — see
+`collectors/macro_news.py`'s module docstring for the full live-verification
+reasoning per feed). Deliberately NOT "business news": macro developments
+that plausibly affect a reader's economic situation (rates/inflation, trade
+policy, geopolitical events with real economic spillover, AI regulation,
+major regulatory action), gated by a deliberately high relevance bar — a
+cycle with zero candidates is the expected outcome on a quiet day, live-
+verified at ~10% of a real cycle's candidate feed items clearing it. Carries
+a hard political-neutrality requirement, enforced both in the write prompt
+and structurally (`pipeline/write_post.py`'s `_find_neutrality_violations`,
+same checked-write/retry/`RuntimeError` mechanism as the gems_security
+overclaim guard and the news copyright guard) — see BACKLOG.md's "Political
+neutrality guard" entry for the real-draft test run and the explicit
+floor-not-guarantee framing.
 
 ## Section 4 — LLM layer
 
@@ -531,7 +549,10 @@ action is processed — the bot's chat is not itself a secret boundary
      Complete.
   5. `tool_launches` → Hustle to Million. Complete — first non-crypto
      category (builder/SaaS/AI audience).
-  6. `startup_jobs` → Hustle to Million. In progress.
+  6. `startup_jobs` → Hustle to Million. Complete.
+  7. `macro_news` → Hustle to Million. Complete — reuses `news`'s
+     infrastructure against a non-crypto feed list, with a hard political-
+     neutrality requirement enforced structurally (see Section 3).
   `grants` (Hustle to Million) deliberately out of scope, see Section 3.
   `airdrops` (paused, see Section 3).
 
@@ -551,4 +572,8 @@ Suggested `soft_daily_cap` ranges used when the live categories were tuned
 - Crypto-focused channels (Crypto Notebook, Crypto Wall Street, Alpha Edge
   Crypto, CoinCraft): 4–15, tuned per channel/category based on realistic
   source volume (`defi_yields` 6-8, `whale_movements` 12, `web3_jobs` 8-12).
-- Non-crypto channel (Hustle to Million): 6, pending Phase 3 categories.
+- Non-crypto channel (Hustle to Million): 6 channel-wide, with each of its
+  three categories also carrying its own tighter per-category cap
+  (`tool_launches` 8, `startup_jobs` 8, `macro_news` 4 — deliberately low,
+  matching `gems_security`'s "rare and notable, not a quota" posture, since
+  `macro_news`'s relevance gate already does most of the real filtering).

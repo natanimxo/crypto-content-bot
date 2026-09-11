@@ -18,7 +18,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from dotenv import load_dotenv  # noqa: E402
 
 from bot import notify  # noqa: E402
-from collectors import defi_yields, gems_security, news, startup_jobs, tool_launches, web3_jobs, whale_movements  # noqa: E402
+from collectors import defi_yields, gems_security, macro_news, news, startup_jobs, tool_launches, web3_jobs, whale_movements  # noqa: E402
 from pipeline.db import get_conn  # noqa: E402
 from pipeline.score import score_new_items  # noqa: E402
 
@@ -41,6 +41,7 @@ COLLECTORS = {
     "news": news.collect,
     "tool_launches": tool_launches.collect,
     "startup_jobs": startup_jobs.collect,
+    "macro_news": macro_news.collect,
 }
 
 

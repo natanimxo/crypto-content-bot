@@ -67,8 +67,18 @@ hustle_to_million:
   display_name: "Hustle to Million"
   categories:
     - tool_launches
-    - grants
     - startup_jobs
+    - macro_news    # added 2026-09-12 -- see config/category_config.yaml's
+                     # macro_news section for the full editorial/neutrality design
+    # grants deliberately out of scope (operator direction 2026-09-12,
+    # live-verified) -- same "documented, not silently missing" treatment
+    # as airdrops above: Grants.gov is real but US federal research grants,
+    # not builder/indie-hacker grants; DevPost's API is bot-blocked (403);
+    # F6S/YC/Antler/Techstars expose marketing pages, not feeds. No
+    # structured source exists for what this audience means by "grants" --
+    # would be curation work, not a collector. See BACKLOG.md's "Hustle to
+    # Million" section and intelligence-bot-spec-v2.md Section 3/16 for the
+    # full reasoning.
   region_profile: default
   soft_daily_cap: 6
   chat_id: "-1001897854375"
