@@ -18,7 +18,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from dotenv import load_dotenv  # noqa: E402
 
 from bot import notify  # noqa: E402
-from collectors import defi_yields, gems_security, news, web3_jobs, whale_movements  # noqa: E402
+from collectors import defi_yields, gems_security, news, tool_launches, web3_jobs, whale_movements  # noqa: E402
 from pipeline.db import get_conn  # noqa: E402
 from pipeline.score import score_new_items  # noqa: E402
 
@@ -36,8 +36,10 @@ COLLECTORS = {
     # always-small (~25/cycle) retrofit volume go first means gems_security's
     # larger budget sweep never gets starved by it.
     "gems_security": gems_security.collect,
-    # news last -- no GoPlus/rate-limit interaction, just simplest to append.
+    # news / tool_launches last -- no GoPlus/rate-limit interaction with
+    # anything above, just simplest to append.
     "news": news.collect,
+    "tool_launches": tool_launches.collect,
 }
 
 

@@ -972,6 +972,62 @@ def compute_news_elements(conn, raw_item: dict, history: list) -> dict:
     }
 
 
+@register_prompt_builder("tool_launches")
+def build_tool_launches_prompt(cfg: dict, region_profile: str, raw_item: dict, history: list) -> str:
+    p = raw_item["payload"]
+    if p.get("source") == "hackernews":
+        facts = (
+            f"- Launch: {p.get('title')}\n"
+            f"- Discussed on Hacker News: {p.get('points')} points, {p.get('comments')} comments\n"
+            f"- Link: {p.get('url')}"
+        )
+        cross_note = "\nNote: this also appeared on GitHub Trending the same day." if p.get("also_trending_on_github") else ""
+    else:
+        facts = (
+            f"- Repository: {p.get('title')}\n"
+            f"- Trending on GitHub: {p.get('stars_today')} stars today (language: {p.get('language') or 'unspecified'})\n"
+            f"- Description: {p.get('description') or 'none given'}"
+        )
+        cross_note = "\nNote: this was also posted to Hacker News the same day." if p.get("also_shown_on_hn") else ""
+
+    return f"""You are writing prose for a builder/startup-tools Telegram channel (audience:
+founders, indie hackers, people evaluating new tools -- not a crypto audience).
+Voice: {cfg.get('voice', 'opportunity_framed')}.
+{cfg.get('prompt_notes', '')}
+
+Facts about this launch:
+{facts}{cross_note}
+
+Return ONLY a JSON object (no markdown fence, no commentary) with exactly these
+three string fields:
+{{
+  "title": "one specific title naming what the tool actually does — not a
+    generic label. No emoji.",
+  "narrative": "1-2 sentences: what it is and who it's for. Plain prose.",
+  "why_it_matters": "EXACTLY one sentence on why a builder should take a
+    second look — what problem it solves or what's genuinely new about it.
+    No hype."
+}}
+
+Do not mention scores or internal categorization. Never inflate a launch
+beyond what the facts say — if the traction is modest, say so plainly rather
+than implying it's a bigger deal than the numbers show. No emoji anywhere in
+your output. Keep the combined narrative + why_it_matters under ~60 words —
+the whole post targets roughly 400-700 characters.
+"""
+
+
+@register_post_computer("tool_launches")
+def compute_tool_launches_elements(conn, raw_item: dict, history: list) -> dict:
+    """No history_line, same reasoning as web3_jobs (Section 1's differentiator
+    is deliberately not forced onto a category where "we saw this before"
+    isn't real memory -- each launch is its own event). No risk_line -- this
+    category isn't a safety/warning category the way gems_security is."""
+    p = raw_item["payload"]
+    source_name = "Hacker News" if p.get("source") == "hackernews" else "GitHub Trending"
+    return {"history_line": None, "risk_line": None, "source_name": source_name}
+
+
 def _assemble(conn, category: str, raw_item: dict, history: list, llm_raw_output: str) -> str:
     cfg = load_category_config(conn, category)
     parsed = post_format.parse_llm_json(llm_raw_output)

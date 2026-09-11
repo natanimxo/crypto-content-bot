@@ -61,6 +61,20 @@ def render_whale_movements(raw_item: dict) -> str:
     return " · ".join(parts)
 
 
+@register_template("tool_launches")
+def render_tool_launches(raw_item: dict) -> str:
+    p = raw_item["payload"]
+    if p.get("source") == "hackernews":
+        parts = [p.get("title") or "", f"{p.get('points')} pts, {p.get('comments')} comments (HN)"]
+        if p.get("also_trending_on_github"):
+            parts.append("also trending on GitHub")
+    else:
+        parts = [p.get("title") or "", f"{p.get('stars_today')} stars today (GitHub)"]
+        if p.get("also_shown_on_hn"):
+            parts.append("also on HN")
+    return " · ".join(parts)
+
+
 @register_template("news")
 def render_news(raw_item: dict) -> str:
     p = raw_item["payload"]

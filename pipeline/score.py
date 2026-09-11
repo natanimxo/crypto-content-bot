@@ -526,6 +526,88 @@ def score_news(conn, raw_item_id: int, payload: dict) -> dict:
     }
 
 
+# tool_launches weights (operator-approved plan, 2026-09-12) -- Hustle to
+# Million, a builder audience, not crypto: "notable" means real traction +
+# real discussion + something actually available to try right now, not
+# market impact. impact=0.35 (real, direct traction data -- HN points or
+# GitHub stars-today, no proxy needed, unusually clean for this project),
+# novelty=0.20 (freshness), credibility=0.20 (engagement DEPTH, not just
+# count -- real discussion vs. passive upvotes for HN, a substantive
+# description for GitHub), actionability=0.25 (is there something to
+# actually go try right now).
+TOOL_LAUNCHES_HN_POINTS_FLOOR = 5      # matches collectors/tool_launches.py's own noise floor
+TOOL_LAUNCHES_HN_POINTS_CEILING = 100  # live-checked 2026-09-12: max in a real 48h sample was 162
+TOOL_LAUNCHES_GITHUB_STARS_FLOOR = 30
+TOOL_LAUNCHES_GITHUB_STARS_CEILING = 2000  # live-checked: real trending page ranged 36-3642 stars/day
+TOOL_LAUNCHES_NOVELTY_DECAY_HOURS = 48     # matches the collector's own MAX_AGE_HOURS window
+
+# Operator-corrected 2026-09-12: kept MILD on purpose. A launch appearing on
+# both HN and GitHub Trending the same day usually means real momentum, but
+# can also be one coordinated launch-day push -- same shape of structural
+# false positive hit repeatedly on gems_security (one signal treated as
+# strong evidence when it's actually weak alone). A modest bump, not a
+# multiplier.
+TOOL_LAUNCHES_CROSS_SOURCE_BONUS = 8.0
+
+
+def _tool_launches_impact(payload: dict) -> float:
+    if payload.get("source") == "hackernews":
+        base = _log_scale(payload.get("points") or 0, TOOL_LAUNCHES_HN_POINTS_FLOOR, TOOL_LAUNCHES_HN_POINTS_CEILING)
+        cross_source = bool(payload.get("also_trending_on_github"))
+    else:
+        base = _log_scale(payload.get("stars_today") or 0, TOOL_LAUNCHES_GITHUB_STARS_FLOOR, TOOL_LAUNCHES_GITHUB_STARS_CEILING)
+        cross_source = bool(payload.get("also_shown_on_hn"))
+    if cross_source:
+        base = _clamp(base + TOOL_LAUNCHES_CROSS_SOURCE_BONUS)
+    return round(base, 1)
+
+
+def _tool_launches_novelty(payload: dict) -> float:
+    created_at = payload.get("created_at")
+    if not created_at:
+        return 50.0
+    created = datetime.fromisoformat(created_at)
+    age_hours = max(0.0, (datetime.now(timezone.utc) - created).total_seconds() / 3600)
+    return round(_clamp(100.0 - (age_hours / TOOL_LAUNCHES_NOVELTY_DECAY_HOURS) * 100.0), 1)
+
+
+def _tool_launches_credibility(payload: dict) -> float:
+    """Engagement DEPTH, not count -- a post with lots of upvotes and zero
+    discussion is different from one people actually argued about. For
+    GitHub, a substantive (not boilerplate/empty) description is the
+    cheapest real signal available from a trending-page scrape."""
+    if payload.get("source") == "hackernews":
+        points = payload.get("points") or 0
+        comments = payload.get("comments") or 0
+        ratio = comments / max(points, 1)
+        return round(_clamp(40.0 + ratio * 120.0), 1)  # a comment-heavy post can clear 100 on its own
+    else:
+        desc_len = len(payload.get("description") or "")
+        return 75.0 if desc_len > 20 else 40.0
+
+
+def _tool_launches_actionability(payload: dict) -> float:
+    """Is there something to actually go try right now. A public GitHub
+    repo is always immediately actionable (clone it, read it). An HN post
+    is actionable if it links somewhere real, not just back to the HN
+    thread itself (no external url -- rare, but real -- means there's
+    nothing to go look at yet)."""
+    if payload.get("source") == "github_trending":
+        return 90.0
+    url = payload.get("url") or ""
+    return 80.0 if url and "news.ycombinator.com" not in url else 40.0
+
+
+@register_scorer("tool_launches")
+def score_tool_launches(conn, raw_item_id: int, payload: dict) -> dict:
+    return {
+        "impact": _tool_launches_impact(payload),
+        "novelty": _tool_launches_novelty(payload),
+        "credibility": _tool_launches_credibility(payload),
+        "actionability": _tool_launches_actionability(payload),
+    }
+
+
 def score_new_items(conn, category: str) -> int:
     """Score every raw_item in this category that doesn't have a score row yet.
     Returns the number scored."""

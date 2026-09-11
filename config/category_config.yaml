@@ -304,3 +304,49 @@ news:
     state a price prediction or tell the reader what to do with their own
     funds. Measured tone: no hype, no manufactured urgency, no emoji beyond
     what the template itself adds.
+
+# Phase 3, 2026-09-12 — tool_launches -> Hustle to Million. First non-crypto
+# category: builder/SaaS/AI audience, different voice and different notion
+# of "notable" from every category before it. Sources: Hacker News (Show HN,
+# Algolia API) + GitHub Trending (scraped -- no official API exists).
+# Product Hunt deliberately dropped, not parked (operator-approved) — their
+# API requires an account-issued token and their ToS prohibits commercial
+# use, and these channels generate revenue. See collectors/tool_launches.py
+# for the full sourcing/scoring design and the live verification behind it.
+tool_launches:
+  score_weights:
+    impact: 0.35          # real, direct traction data (HN points / GitHub
+                            # stars-today) -- no proxy needed here
+    novelty: 0.20          # freshness -- decays over the same 48h window the
+                            # collector itself looks back across
+    credibility: 0.20      # engagement DEPTH (comment-to-point ratio / a
+                            # substantive description), not just raw count
+    actionability: 0.25    # is there something to actually go try right now
+
+  review_threshold: 50
+  cooldown_hours: 24
+  soft_daily_cap: 8
+
+  triage_model: template   # points/stars/comments are already structured facts
+  write_model: deepseek-v4-flash
+  write_benchmark_status: settled_deepseek
+
+  label: "🚀 TOOL LAUNCH"
+
+  emoji: "🚀"
+  display_label: "Tool Launches"
+  hashtags:
+    - "#BuildInPublic"
+    - "#ToolLaunch"
+
+  voice: opportunity_framed
+  # No history blockquote (pipeline/write_post.py's compute_tool_launches_elements
+  # always returns history_line=None) -- same reasoning as web3_jobs: each
+  # launch is its own event, not a recurring signal our own history helps with.
+  prompt_notes: >
+    Factual and direct: what the tool does, who it's for, why it's worth a
+    second look. Never inflate traction beyond what the numbers say — modest
+    engagement should read as modest, not hyped into a bigger deal. This is a
+    builder audience, not crypto: no crypto framing, no financial language.
+    No hype language, no manufactured urgency. Measured tone, no emoji beyond
+    what the template itself adds.
