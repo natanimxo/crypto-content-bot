@@ -113,27 +113,53 @@ CRITICAL_FIELDS = {
     "sell_tax": (_high_percent(0.10), "sell tax is over 10%"),
 }
 
-# Live evidence, first real gems_security run 2026-09-11 (24 candidates):
-# is_mintable fired on 17/24 (71%) and honeypot_with_same_creator on 8/24
-# (33%) -- together the overwhelming majority of every flag raised, and in
-# 5 of those cases the ONLY flag raised at all, on tokens that turned out to
-# be well-known liquid-staking derivatives and institutional funds (rETH,
-# tBTC, kBTC, a Securitize tokenized CLO fund, a second BlackRock BUIDL share
-# class). Root cause, not a data quirk: minting IS the correct, designed
-# behavior of a liquid-staking or wrapped-asset receipt token (it mints on
-# every new stake/deposit) -- GoPlus's heuristic can't distinguish "mints
-# because that's the product" from "mints to rug holders". Likewise,
-# honeypot_with_same_creator conflates shared deployer/factory
-# infrastructure (normal for established protocols) with a repeat scammer.
-# Both heuristics were almost certainly built against a memecoin-style scam
-# population, which is a poor match for what defi_yields' pool feed actually
-# surfaces (heavily wrapped/staking/stable assets). Rather than an
-# ever-growing per-address exclusion list chasing this reactively, these two
-# fields are demoted here: still reported (a real signal, just a weak,
-# unreliable one on its own) if OTHER fields also fire, but can no longer be
-# the SOLE reason a candidate clears the gate. See evaluate()'s
-# has_red_flag_fields distinction below.
-NON_GATING_FIELDS = {"is_mintable", "honeypot_with_same_creator"}
+# Principled split, 2026-09-11 -- this recurred four times (is_mintable,
+# Syrup, osETH, Pendle) before the actual generalizable axis became clear
+# enough to encode, rather than reactively demoting one field at a time
+# forever. Checked and ruled out first: holder_count as a legitimacy proxy
+# (a real genuine finding -- a Base memecoin GoPlus's own honeypot
+# SIMULATION caught red-handed -- had 93,372 holders, MORE than any of the
+# false-positive-prone tokens it was being compared against, which had
+# 26-76,532; holder count doesn't separate these at all).
+#
+# What actually separates every real case seen so far is the KIND of
+# evidence the field represents, not which specific field or token it is:
+#
+# - BEHAVIORAL fields are things GoPlus directly tested or directly
+#   measured: is_honeypot/cannot_sell_all/cannot_buy are live buy-then-sell
+#   SIMULATIONS (near-ground-truth, not an inference), and owner_percent/
+#   creator_percent/buy_tax/sell_tax/is_open_source are plain facts read
+#   straight off the contract (a concentration percentage, a tax rate,
+#   whether the source is even readable at all). These can gate a candidate
+#   on their own.
+# - CAPABILITY fields only mean an admin COULD do something -- they say
+#   nothing about whether it's disclosed, expected, or ever used. Minting is
+#   the designed, correct behavior of every liquid-staking/yield-
+#   tokenization receipt token (it mints on every new stake/deposit,
+#   verified live on rETH/tBTC/kBTC and every Pendle PT/YT/SY token this
+#   session). Pause/blacklist capability is a standard, disclosed feature of
+#   regulated/compliant stablecoins (verified live: Cronos-bridged USDT/USDC
+#   flagged hidden_owner+is_mintable+transfer_pausable -- exactly how a
+#   centralized stablecoin is supposed to work, not a rug indicator).
+#   honeypot_with_same_creator conflates shared deployer/factory
+#   infrastructure (normal for established protocols) with a repeat
+#   scammer (verified live on BlackRock's BUIDL fund). These fields are
+#   still reported if they fire (real signal, just weak alone), but can
+#   never be the SOLE reason a candidate clears the gate.
+#
+# This is the encoding the operator asked for "beyond maintaining exclusion
+# lists" -- it classifies by what KIND of claim the underlying GoPlus field
+# is actually making, so a new liquid-staking token, a new compliant
+# stablecoin, or a new Pendle-style tokenization product doesn't need its
+# own hand-added exclusion the next time one shows up. KNOWN_MAJOR_TOKENS
+# (collectors/gems_security.py) still exists as a narrower, separate belt
+# for specific well-known contracts -- this fixes the general pattern
+# instead of only the specific instances already seen.
+NON_GATING_FIELDS = {
+    "hidden_owner", "can_take_back_ownership", "is_mintable",
+    "transfer_pausable", "selfdestruct", "slippage_modifiable",
+    "personal_slippage_modifiable", "is_blacklisted", "honeypot_with_same_creator",
+}
 
 
 def _rate_limited_get(url: str, params: dict) -> dict:

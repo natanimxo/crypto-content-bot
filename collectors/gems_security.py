@@ -16,20 +16,26 @@ what a check proves" chain (missing fields coded as unknown, never clear;
 a banned-overclaim-phrase guard on the LLM's actual output).
 
 Rate-limit-aware by design (pipeline/goplus.py has the live measurement:
-~10 keyless requests per ~30-45s). Screening the full ~3,400-pair qualifying
-universe in one run isn't possible -- MAX_GOPLUS_CALLS_PER_RUN caps real API
-calls per cycle. Cache lookups are batched per-chain (~10 bulk queries, not
-one per token per pool) so the ~6,800-pool qualifying set can be swept
-cheaply; only genuine cache MISSES consume the real per-run budget. Pools
-walk TVL-descending, so the highest-value uncached tokens get priority every
-cycle -- coverage of the existing universe converges over several days as the
-cache fills in, while a brand-new high-TVL pool gets checked essentially
-immediately regardless of where the backfill sweep currently is.
+~10 keyless requests per ~30-45s). Screening the full qualifying universe in
+one run isn't possible -- MAX_GOPLUS_CALLS_PER_RUN caps real API calls per
+cycle. Cache lookups are batched per-chain (~10 bulk queries, not one per
+token per pool) so the qualifying set can be swept cheaply; only genuine
+cache MISSES consume the real per-run budget. Pools walk TVL-descending
+WITHIN a TVL band (MIN_TVL_USD..MAX_TVL_USD_FOR_SCREENING) rather than
+across the whole universe -- see that constant's comment for why: unbounded
+TVL-descending order structurally guarantees the budget gets spent on the
+LEAST "gem"-like assets in DeFi first, every cycle.
+
+Also filters out pools where the same underlying token dominates the
+cycle's candidates (PROTOCOL_DOMINANCE_THRESHOLD) -- a token GoPlus flags
+across many independent pool deployments in one cycle is exhibiting a
+property of its own design, not something wrong with any one pool.
 """
 
 import logging
+import re
 import sys
-from collections import defaultdict
+from collections import Counter, defaultdict
 
 from dotenv import load_dotenv
 
@@ -47,6 +53,28 @@ SOURCE_NAME = "goplus_defillama_pools"
 POOLS_API_URL = "https://yields.llama.fi/pools"
 
 MIN_TVL_USD = 100_000  # matches defi_yields' own noise floor -- collectors/defi_yields.py
+
+# TVL screening ceiling, added 2026-09-11 (operator direction, after live
+# verification of the corrected run): TVL-descending prioritization
+# structurally guarantees the per-run budget gets spent on the LEAST
+# "gem"-like assets in DeFi first, every single cycle -- the entire
+# qualifying universe's top ~2-3% by TVL is wrapped-BTC variants, major
+# stablecoins, and liquid-staking tokens, exactly the population GoPlus's
+# heuristics are worst-suited to (see KNOWN_MAJOR_TOKENS and
+# pipeline.goplus.NON_GATING_FIELDS above/below). Live-measured: a $100M
+# ceiling excludes only the top 2.6% of the qualifying universe by count
+# (176/6,799 pools) -- keeping 97.4% of it in play -- while cleanly excluding
+# every remaining false-positive-prone institutional/LST token from the
+# corrected run (osETH $312M, kBTC $251M/$186M, tBTC $132M, rETH $103M, a
+# Securitize tokenized fund $103M) and still including both of that run's
+# genuinely useful findings (BMD-USDC $97M, WETH-GFC $67.5M) -- proof the
+# ceiling is set close to where real signal actually lives, not arbitrarily.
+# Sort order below stays TVL-descending WITHIN this band deliberately: both
+# genuine finds sat near the top of it, not the bottom, so there's no
+# evidence yet that flipping to ascending-within-the-band would help: as
+# cache coverage fills in over successive cycles, the effective screening
+# frontier will naturally work its way down through the band on its own.
+MAX_TVL_USD_FOR_SCREENING = 100_000_000
 
 # Live bug, first real run 2026-09-11: sorting qualifying pools TVL-descending
 # (below) means the highest-TVL pools -- overwhelmingly wrapped-BTC variants,
@@ -91,6 +119,45 @@ KNOWN_MAJOR_TOKENS = {
 def _is_known_major(chain: str, address: str) -> bool:
     return ((chain or "").lower(), (address or "").lower()) in KNOWN_MAJOR_TOKENS
 
+# Same-protocol/product dominance rule, added 2026-09-11, extended same day
+# (operator direction): "if one protocol/product dominates a cycle's
+# candidates, that's a signal the flag means something structural rather
+# than something wrong." Started address-only (9/21 candidates in one run
+# were different pools built around Maple Finance's Syrup product, one
+# shared token contract) but that missed a second real case the very next
+# cycle: 12/22 candidates were Pendle Principal/Yield/Standardized-Yield
+# tokens spanning 10 DIFFERENT contract addresses (Pendle mints a genuinely
+# distinct token per maturity date), so no single address ever repeated
+# enough to trip an address-only check, even though the underlying cause --
+# one protocol's factory template -- was identical every time.
+#
+# Grouping now checks THREE keys per candidate, any one of which hitting the
+# threshold excludes it: the flagged token's own address (catches the same
+# contract redeployed across many pools -- Syrup), the pool's host `project`
+# (catches many pools built directly on one protocol -- e.g. many pendle-v2
+# pools), and a recognized tokenization-template naming prefix (catches a
+# protocol's standardized product minted as genuinely distinct contracts
+# across OTHER hosts entirely -- Pendle's PT-/YT-/SY- convention specifically,
+# since those tokens get deposited as collateral into aave/morpho/etc., not
+# just held within Pendle's own pools). The naming-prefix key is deliberately
+# narrow (Pendle's own documented, stable naming convention, not a fuzzy
+# guess) so it generalizes to every future Pendle market without maintenance,
+# without over-matching unrelated tokens that happen to start with similar
+# letters.
+PROTOCOL_DOMINANCE_THRESHOLD = 3
+
+_TOKENIZATION_TEMPLATE_PREFIXES = re.compile(r"^(PT|YT|SY)-", re.IGNORECASE)
+
+
+def _dominance_keys(payload: dict) -> set[str]:
+    keys = {f"addr:{a}" for a in payload.get("flagged_token_addresses") or []}
+    if payload.get("project"):
+        keys.add(f"project:{payload['project']}")
+    m = _TOKENIZATION_TEMPLATE_PREFIXES.match(payload.get("symbol") or "")
+    if m:
+        keys.add(f"template:{m.group(1).upper()}")
+    return keys
+
 # 60 real API calls * ~6s safe pace (pipeline/goplus.py) = ~6 minutes,
 # leaving real headroom inside collect.yml's job timeout (bumped alongside
 # this collector -- see .github/workflows/collect.yml).
@@ -125,7 +192,7 @@ def collect() -> int:
 
             qualifying = [
                 p for p in pools
-                if (p.get("tvlUsd") or 0) >= MIN_TVL_USD
+                if MIN_TVL_USD <= (p.get("tvlUsd") or 0) < MAX_TVL_USD_FOR_SCREENING
                 and not p.get("outlier")
                 and p.get("pool")
                 and p.get("underlyingTokens")
@@ -209,12 +276,40 @@ def collect() -> int:
                     "triggered_fields": triggered_fields,
                     "tokens_checked": tokens_checked,
                     "tokens_unchecked": tokens_unchecked,
+                    "flagged_token_addresses": flagged_addresses,
                 }
                 items.append((pool["pool"], payload))
+
+            # Same-protocol/product dominance filter -- see
+            # PROTOCOL_DOMINANCE_THRESHOLD's comment. Applied once, after the
+            # full cycle's candidates are known, since dominance is a
+            # property of the WHOLE cycle's output, not any single pool.
+            # Checks address/project/naming-template keys together (a token
+            # or protocol can trip more than one).
+            key_occurrences = Counter(
+                key for _, payload in items for key in _dominance_keys(payload)
+            )
+            dominant_keys = {k for k, n in key_occurrences.items() if n >= PROTOCOL_DOMINANCE_THRESHOLD}
+            dominance_excluded = 0
+            if dominant_keys:
+                kept = []
+                for external_id, payload in items:
+                    if _dominance_keys(payload) & dominant_keys:
+                        dominance_excluded += 1
+                    else:
+                        kept.append((external_id, payload))
+                items = kept
+                logger.info(
+                    "gems_security: excluded %d pool(s) this cycle -- dominated by "
+                    "token/project/template appearing in >=%d independent pools "
+                    "(structural, not a per-pool red flag): %s",
+                    dominance_excluded, PROTOCOL_DOMINANCE_THRESHOLD, sorted(dominant_keys),
+                )
 
             state["details"]["fresh_goplus_calls"] = fresh_calls
             state["details"]["deferred_budget"] = deferred_budget
             state["details"]["deferred_unmapped_chain"] = deferred_unmapped_chain
+            state["details"]["dominance_excluded"] = dominance_excluded
             state["details"]["red_flagged"] = len(items)
 
             inserted = insert_raw_items_batch(conn, source_id, CATEGORY, items)
@@ -222,9 +317,9 @@ def collect() -> int:
 
             logger.info(
                 "gems_security: fetched=%d qualifying=%d fresh_calls=%d red_flagged=%d inserted=%d "
-                "deferred_budget=%d deferred_unmapped_chain=%d",
+                "deferred_budget=%d deferred_unmapped_chain=%d dominance_excluded=%d",
                 len(pools), len(qualifying), fresh_calls, len(items), inserted,
-                deferred_budget, deferred_unmapped_chain,
+                deferred_budget, deferred_unmapped_chain, dominance_excluded,
             )
         return inserted
     finally:
