@@ -18,7 +18,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from dotenv import load_dotenv  # noqa: E402
 
 from bot import notify  # noqa: E402
-from collectors import defi_yields, web3_jobs, whale_movements  # noqa: E402
+from collectors import defi_yields, gems_security, web3_jobs, whale_movements  # noqa: E402
 from pipeline.db import get_conn  # noqa: E402
 from pipeline.score import score_new_items  # noqa: E402
 
@@ -29,6 +29,12 @@ COLLECTORS = {
     "defi_yields": defi_yields.collect,
     "whale_movements": whale_movements.collect,
     "web3_jobs": web3_jobs.collect,
+    # gems_security runs LAST, deliberately -- its own GoPlus sweep shares
+    # pipeline.goplus's module-level rate-limit pacing with defi_yields'
+    # scoring-time retrofit (score_new_items below calls it too), so letting
+    # defi_yields' small, always-small (~25/cycle) retrofit volume go first
+    # means gems_security's larger budget sweep never gets starved by it.
+    "gems_security": gems_security.collect,
 }
 
 

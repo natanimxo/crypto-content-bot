@@ -115,6 +115,24 @@ ALTER TABLE category_config ADD COLUMN IF NOT EXISTS collect_min_usd NUMERIC;
 -- scripts/hold_candidates.py (or directly in Supabase).
 ALTER TABLE raw_items ADD COLUMN IF NOT EXISTS held BOOLEAN NOT NULL DEFAULT FALSE;
 
+-- Extension 2026-09-11 (gems_security category + defi_yields retrofit): shared
+-- cache for GoPlus Token Security API results, keyed by the actual contract
+-- (not by pool or raw_item) so the same token appearing in many pools -- or the
+-- same pool reappearing across cycles -- costs one real API call, ever, not one
+-- per sighting. Live-measured, keyless GoPlus rate limit: ~10 requests per
+-- ~30-45s window per IP (pipeline/goplus.py has the full measurement writeup).
+-- With ~3,400 unique (chain, token) pairs above defi_yields' own $100k TVL
+-- floor and a conservative per-run screening budget, this cache is what makes
+-- the ramp-up to full coverage converge over days instead of restarting from
+-- zero every 4-hour cycle.
+CREATE TABLE IF NOT EXISTS token_security_cache (
+    chain_id INT NOT NULL,
+    contract_address TEXT NOT NULL,
+    result JSONB,              -- NULL means "checked, GoPlus had no data" (still cached -- distinct from never-checked)
+    checked_at TIMESTAMPTZ DEFAULT now(),
+    PRIMARY KEY (chain_id, contract_address)
+);
+
 -- Score per item, per its OWN category — never cross-category
 CREATE TABLE IF NOT EXISTS scores (
     id SERIAL PRIMARY KEY,

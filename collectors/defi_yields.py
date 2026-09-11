@@ -89,6 +89,14 @@ def collect() -> int:
                     "exposure": pool.get("exposure"),
                     "stablecoin": pool.get("stablecoin"),
                     "prediction": (pool.get("predictions") or {}).get("predictedClass"),
+                    # GoPlus retrofit, 2026-09-11 (BACKLOG.md: the very first
+                    # digest surfaced 214%/240% APY pools scoring in the high
+                    # 80s with nothing checking whether the underlying tokens
+                    # were honeypots). Free to capture -- DefiLlama already
+                    # returns this on 17,146/17,148 live pools, we just weren't
+                    # storing it. score_defi_yields reads it; no extra API call
+                    # at collection time, only at scoring time (pipeline/goplus.py).
+                    "underlying_tokens": pool.get("underlyingTokens") or [],
                 }
                 items.append((pool_id, payload))
 

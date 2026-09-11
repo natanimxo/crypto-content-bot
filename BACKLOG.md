@@ -173,6 +173,74 @@ the one place to check.
   not — cannot actually run yet. Needs the operator's go-ahead before secrets
   are written into the repo's settings.
 
+## Gems/security screening (Phase 2/3, built 2026-09-11)
+
+- **Pre-liquidity discovery gap — accepted tradeoff, not fixed.** Discovery
+  reuses defi_yields' own DefiLlama pool feed (operator-approved plan): a
+  token only becomes a candidate once it has a real DEX pool with ≥$100k
+  TVL. This misses tokens at the pre-liquidity stage — arguably when a scam
+  token is most dangerous — since there's no free, keyless "new token
+  firehose" available to catch that earlier. Not blocking; a separate,
+  harder sourcing problem for later if it turns out to matter in practice.
+
+**Resolved same-day, after the first live collect run surfaced real problems
+(same pattern as whale_movements' first cycle):**
+
+- ~~Chain-name case mismatch~~ — **fixed.** `collectors/gems_security.py`
+  compared DefiLlama's `chain` field ("Ethereum") directly against
+  `CHAIN_NAME_TO_GOPLUS_ID`'s lowercase keys without lowercasing first — every
+  single pool read as an unmapped chain (`deferred_unmapped_chain=6756` of
+  6801 qualifying pools on the first run). One-line fix.
+- ~~GoPlus flagged well-known blue-chip assets~~ — **fixed.** First real run
+  (post chain-mapping fix) produced 18 candidates; every single one was a
+  top-tier established asset (WBTC, USDT, wstETH, BlackRock's BUIDL fund,
+  etc.) — sorting qualifying pools TVL-descending means the highest-TVL
+  pools, dominated by exactly these assets, consume the whole per-run
+  screening budget first. Verified live that "this creator has deployed a
+  honeypot before" on BUIDL was a heuristic artifact (BlackRock's fund has 5
+  holders, 80% in one institutional wallet — the flag is GoPlus's
+  same-deployer heuristic conflating shared institutional tokenization
+  infrastructure with a repeat scammer). Fixed with a hand-maintained
+  `KNOWN_MAJOR_TOKENS` exclusion list (same pattern as whale_movements'
+  `KNOWN_EXCHANGE_ADDRESSES` / web3_jobs' `KNOWN_WEB3_COMPANIES`) — excluded
+  before screening, not just before posting, so budget isn't wasted on them.
+- ~~`is_mintable` / `honeypot_with_same_creator` dominated every flag~~ —
+  **fixed.** Re-ran after the exclusion list: 24 candidates, but
+  `is_mintable` fired on 17/24 (71%) and `honeypot_with_same_creator` on
+  8/24 (33%), and in 5 cases were the ONLY flag on tokens that turned out to
+  be well-known liquid-staking derivatives (rETH, tBTC, kBTC) and a second
+  institutional fund (Securitize-tokenized CLO). Root cause: minting is the
+  correct, designed behavior of a liquid-staking/wrapped-asset receipt token
+  (it mints on every new stake/deposit) — GoPlus's heuristic can't tell
+  "mints because that's the product" from "mints to rug holders," and
+  same-creator conflates shared deployer/factory infrastructure with a
+  repeat offender. Both fields were almost certainly built against a
+  memecoin-style scam population, a poor match for what a DeFi yield-pool
+  feed actually surfaces. Fixed by demoting both to corroborating-only
+  (`pipeline/goplus.py`'s `NON_GATING_FIELDS`) — still reported if another
+  field also fires, but can no longer be the sole reason something qualifies.
+
+**Still open — a real, structural question, not a bug:**
+
+- **Even after both fixes, TVL-descending prioritization keeps surfacing
+  institutional/yield-infrastructure tokens over genuine small-cap "gems."**
+  The post-fix candidate list (21 items) is still dominated by yield-bearing
+  wrapper tokens (osETH-style receipt tokens, Maple's Syrup product across 9
+  of 21 pools) tripping `hidden_owner`/`is_blacklisted` — plausibly
+  legitimate, disclosed features of audited yield products, same shape of
+  mismatch as the two already-fixed fields, just one level less obvious. The
+  two clearest genuine "gem"-style findings (real concentration/transparency
+  concerns on small, unrecognizable tokens — `BMD-USDC`, `WETH-GFC`) only
+  reached screening near the bottom of the TVL-sorted budget. Candidate fix:
+  stop sorting pools TVL-descending (which structurally privileges the most
+  institutional, least "gem"-like assets every cycle) — a TVL *band*
+  (excluding both sub-floor noise and the largest, most-established pools)
+  would more directly target what "gems" actually means here. **Deliberately
+  not implemented yet** — this changes what the category actually screens,
+  not just fixes a bug, and needs operator direction rather than a unilateral
+  call. 21 real candidates are sitting collected-but-unscored right now,
+  pending that direction.
+
 ## Documentation
 
 - **Update the technical spec doc** to reflect two implemented decisions that

@@ -61,6 +61,19 @@ def render_whale_movements(raw_item: dict) -> str:
     return " · ".join(parts)
 
 
+@register_template("gems_security")
+def render_gems_security(raw_item: dict) -> str:
+    p = raw_item["payload"]
+    red_flags = p.get("red_flags") or []
+    parts = [
+        f"{p.get('symbol')} on {p.get('chain')} ({p.get('project')}), TVL ${p.get('tvl_usd', 0):,.0f}",
+        f"{len(red_flags)} finding(s): " + "; ".join(red_flags[:2]) + ("..." if len(red_flags) > 2 else ""),
+    ]
+    if p.get("tokens_unchecked"):
+        parts.append(f"{len(p['tokens_unchecked'])} token(s) unchecked")
+    return " · ".join(parts)
+
+
 @register_template("web3_jobs")
 def render_web3_jobs(raw_item: dict) -> str:
     p = raw_item["payload"]

@@ -10,7 +10,13 @@ on:
 jobs:
   collect:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # Raised from 10 -> 20, 2026-09-11: gems_security's GoPlus sweep (up to
+    # MAX_GOPLUS_CALLS_PER_RUN=60 real calls at the measured safe ~6s pace,
+    # collectors/gems_security.py) plus defi_yields' own small retrofit sweep
+    # (score_new_items, ~25 new pools/cycle) can together take up to ~8-9
+    # minutes of deliberate pacing on top of the existing ~75s for the other
+    # three collectors + notify — 10 minutes no longer has real headroom.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 

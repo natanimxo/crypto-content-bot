@@ -34,6 +34,10 @@ crypto_notebook:
   display_name: "Crypto Notebook"
   categories:
     - defi_yields
+    - gems_security   # added 2026-09-11 — see config/category_config.yaml's
+                       # gems_security section for the full editorial/rate-limit
+                       # design; soft_daily_cap: 4 there is a separate, tighter
+                       # cap on top of this channel-wide one
   region_profile: us
   soft_daily_cap: 8
   chat_id: "-1002905948541"

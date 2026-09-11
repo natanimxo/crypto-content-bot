@@ -16,9 +16,11 @@ are there for scorers that need that. defi_yields ignores both.
 import json
 import math
 import time
+from datetime import datetime, timezone
 
 from psycopg2.extras import execute_values
 
+from pipeline import goplus
 from pipeline.db import dict_cursor
 
 SCORERS = {}
@@ -113,6 +115,26 @@ def score_defi_yields(conn, raw_item_id: int, payload: dict) -> dict:
     base_share = apy_base / apy if apy else 0.0
     credibility = _clamp(base_share * 60.0 + min(tvl, 20_000_000) / 20_000_000 * 40.0)
 
+    # GoPlus retrofit, 2026-09-11 -- this gap has been open since day one
+    # (BACKLOG.md): the very first digest surfaced 214%/240% APY pools
+    # scoring in the high 80s with nothing checking whether the underlying
+    # tokens were honeypots. A confirmed red flag (honeypot, hidden owner,
+    # owner-mintable, etc.) on ANY underlying token hard-caps credibility low
+    # regardless of how good the APY/TVL numbers look -- a 200%+ APY pool on
+    # a honeypot token is the textbook setup this check exists to catch, not
+    # a "slightly less credible" opportunity. An UNCHECKED token (unmapped
+    # chain, no GoPlus data at all) is real uncertainty, not a clean bill of
+    # health -- capped more moderately, reflecting "we don't know" rather
+    # than "we know it's fine" (operator direction 2026-09-11: unknown is
+    # never coded as clear). See pipeline/goplus.py's evaluate_pool() --
+    # stashed whole in the breakdown so write_post.py's risk_line reads the
+    # same verdict scoring saw, rather than re-deriving it later.
+    goplus_eval = goplus.evaluate_pool(conn, payload.get("chain"), payload.get("underlying_tokens") or [])
+    if goplus_eval["has_red_flag"]:
+        credibility = min(credibility, 10.0)
+    elif not goplus_eval["tokens_checked"]:
+        credibility = min(credibility, 50.0)
+
     # Actionability: penalize pools DefiLlama itself flags as high IL risk unless
     # they're a stablecoin pair, where IL risk is close to moot.
     if il_risk == "yes" and not stablecoin:
@@ -128,6 +150,7 @@ def score_defi_yields(conn, raw_item_id: int, payload: dict) -> dict:
         "novelty": round(novelty, 1),
         "credibility": round(credibility, 1),
         "actionability": round(actionability, 1),
+        "goplus": goplus_eval,
     }
 
 
@@ -318,6 +341,91 @@ def score_web3_jobs(conn, raw_item_id: int, payload: dict) -> dict:
         "novelty": novelty,
         "credibility": credibility,
         "actionability": round(actionability, 1),
+    }
+
+
+# gems_security weights (operator-approved plan, 2026-09-11) -- again not
+# copied from any prior category: this category only ever scores candidates
+# that already cleared a hard binary gate at collection time (a genuine
+# GoPlus red flag on a token with real TVL -- see collectors/gems_security.py
+# and the "narrow, flag-risk-don't-endorse-safety" editorial decision), so the
+# four components rank AMONG findings, they don't decide relevance the way
+# review_threshold does elsewhere. impact=how much real money is exposed,
+# credibility=how severe/certain the finding is (weighted highest, 0.35,
+# since "how bad is this" is the actual news value here), novelty=how newly
+# this pool showed up (lower weight, 0.15 -- severity and stakes matter more
+# than freshness for a safety warning), actionability=how COMPLETE the check
+# was (fraction of critical fields actually populated, not unknown) -- a
+# thinner check is a weaker, less actionable warning, which keeps "unknown is
+# never coded as clear" true in the score itself, not just the prose.
+GEMS_TVL_FLOOR = 100_000       # matches the collector's own noise floor
+GEMS_TVL_CEILING = 20_000_000
+GEMS_NOVELTY_DECAY_DAYS = 14
+
+# Per-field severity for the credibility component -- a confirmed honeypot or
+# an owner who can block sells is a far more certain, far more severe finding
+# than "owner holds 31% of supply", even though both are real CRITICAL_FIELDS
+# hits in pipeline/goplus.py. Fields not listed here (there shouldn't be any,
+# this should stay in sync with goplus.CRITICAL_FIELDS) fall back to a
+# moderate default rather than being silently ignored.
+GEMS_SEVERITY_WEIGHTS = {
+    "is_honeypot": 45, "cannot_sell_all": 40, "cannot_buy": 35,
+    "hidden_owner": 30, "can_take_back_ownership": 30, "is_mintable": 25,
+    "transfer_pausable": 25, "selfdestruct": 25, "is_blacklisted": 20,
+    "honeypot_with_same_creator": 35, "slippage_modifiable": 15,
+    "personal_slippage_modifiable": 15, "is_open_source": 15,
+    "owner_percent": 15, "creator_percent": 15, "buy_tax": 10, "sell_tax": 10,
+}
+GEMS_SEVERITY_DEFAULT = 15
+
+
+def _gems_novelty(conn, pool_id: str) -> float:
+    """How recently defi_yields itself first tracked this pool -- a red flag
+    on a pool that JUST appeared is more urgent than the same flag on one
+    that's been sitting in the dataset for months and gems_security's backfill
+    sweep is only now getting around to. A pool defi_yields has never tracked
+    at all (still possible -- gems_security's own TVL floor and defi_yields'
+    aren't guaranteed identical forever) reads as maximally novel rather than
+    zero, same defensive-default shape as every other category's novelty."""
+    if not pool_id:
+        return 50.0
+    with dict_cursor(conn) as cur:
+        cur.execute(
+            """SELECT MIN(collected_at) AS first_seen FROM raw_items
+               WHERE category = 'defi_yields' AND payload->>'pool_id' = %s""",
+            (pool_id,),
+        )
+        row = cur.fetchone()
+    if not row or not row["first_seen"]:
+        return 100.0
+    age_days = max(0.0, (datetime.now(timezone.utc) - row["first_seen"]).total_seconds() / 86400)
+    return round(_clamp(100.0 - (age_days / GEMS_NOVELTY_DECAY_DAYS) * 100.0), 1)
+
+
+@register_scorer("gems_security")
+def score_gems_security(conn, raw_item_id: int, payload: dict) -> dict:
+    """Breakdown components, each 0-100. Every candidate scored here already
+    has has_red_flag=True (collectors/gems_security.py's hard gate) -- there
+    is no "this one's clean" case to score, by design."""
+    tvl = payload.get("tvl_usd") or 0.0
+    impact = round(_log_scale(tvl, GEMS_TVL_FLOOR, GEMS_TVL_CEILING), 1)
+
+    novelty = _gems_novelty(conn, payload.get("pool_id"))
+
+    triggered_fields = payload.get("triggered_fields") or []
+    severity_sum = sum(GEMS_SEVERITY_WEIGHTS.get(f, GEMS_SEVERITY_DEFAULT) for f in triggered_fields)
+    credibility = round(_clamp(severity_sum), 1)
+
+    checked = len(payload.get("tokens_checked") or [])
+    unchecked = len(payload.get("tokens_unchecked") or [])
+    total = checked + unchecked
+    actionability = round(_clamp(100.0 * checked / total), 1) if total else 0.0
+
+    return {
+        "impact": impact,
+        "novelty": novelty,
+        "credibility": credibility,
+        "actionability": actionability,
     }
 
 

@@ -179,3 +179,70 @@ web3_jobs:
     disclosed, say so plainly rather than implying it's competitive. No hype
     language, no "AMAZING OPPORTUNITY", no manufactured urgency. Measured tone,
     no emoji beyond what the template itself adds.
+
+# Phase 2/3, 2026-09-11 — gems_security -> Crypto Notebook (shares the channel
+# with defi_yields). Discovery reuses defi_yields' own DefiLlama pool feed
+# (operator-approved plan) rather than a separate source — see
+# collectors/gems_security.py's module docstring for the full reasoning,
+# the rate-limit math, and pipeline/goplus.py for the live-measured GoPlus
+# Token Security API behavior this whole category is built on.
+#
+# Editorial premise (operator-approved, deliberately narrow): flag risk, don't
+# endorse safety. This category ONLY ever posts when a pool with real TVL has
+# a token carrying a genuine, specific GoPlus red flag — there is no "notable
+# launch, clean check" case. A clean result isn't a claim worth making
+# publicly: without a concrete concern to name, that post is just "here's a
+# token," promotion regardless of hedging, and the downside of a reader
+# losing money on something highlighted as clean isn't offset by a disclaimer.
+gems_security:
+  score_weights:
+    impact: 0.30          # TVL exposed, log-scaled — how much real money is at stake
+    novelty: 0.15          # how recently this pool showed up in defi_yields' own feed
+    credibility: 0.35      # severity/certainty of the finding, weighted per field —
+                            # highest weight, since "how bad is this" IS the news value
+                            # here, more than freshness or even raw dollar exposure
+    actionability: 0.20    # completeness of the check (checked vs. unknown critical
+                            # fields) — a thinner check is a weaker, less actionable
+                            # warning; keeps "unknown is never coded as clear" true in
+                            # the score itself, not just the prose (operator direction)
+
+  review_threshold: 50
+  # A confirmed bad-token finding on the SAME token doesn't go stale in days
+  # the way a whale move or job listing does — 72h suppresses re-notifying
+  # about the same risky token if it resurfaces in a different pool shortly
+  # after (topic_key is the flagged token's own contract address, not the
+  # pool_id — see _topic_key() in collectors/gems_security.py).
+  cooldown_hours: 72
+  soft_daily_cap: 4       # deliberately low — this is meant to be rare and notable,
+                            # not a daily quota to fill (narrow editorial premise above)
+
+  triage_model: template   # structured findings, no synthesis needed
+  write_model: deepseek-v4-flash
+  write_benchmark_status: settled_deepseek
+
+  label: "🚨 GEM SECURITY CHECK"
+
+  emoji: "🚨"
+  display_label: "Security Screen"
+  hashtags:
+    - "#TokenSecurity"
+    - "#DYOR"
+
+  voice: educational
+  # No history blockquote (pipeline/write_post.py's compute_gems_security_elements
+  # always returns history_line=None) — a security finding isn't a recurring
+  # signal the way a wallet's past moves are. Structure is fixed in code
+  # (pipeline/post_format.py); these notes shape only the LLM's prose, and the
+  # prompt itself (build_gems_security_prompt) hands the LLM a pre-determined
+  # finding rather than asking it to render its own verdict — see that
+  # function's docstring for the full "teach the pattern, never overstate
+  # certainty" enforcement chain.
+  prompt_notes: >
+    Teach the pattern, not just the finding: name the specific automated check
+    that triggered this post, explain in plain terms what that pattern enables
+    and why it matters, and tell the reader how they could check the same
+    thing themselves on any token. Never render a safety verdict — you are
+    reporting what a specific, limited automated check found, not vouching for
+    or against a project. Never say or imply a token is safe, legit, or worth
+    buying/depositing into, even by omission. Measured tone: no hype, no
+    manufactured urgency, no emoji beyond what the template itself adds.

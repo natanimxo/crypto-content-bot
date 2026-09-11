@@ -16,6 +16,7 @@ variants, only the writing does, so the comparison isolates writing quality.
 
 import logging
 import os
+import re
 
 from pipeline import llm, post_format
 from pipeline.db import dict_cursor
@@ -193,6 +194,23 @@ def compute_defi_yields_elements(conn, raw_item: dict, history: list) -> dict:
         risk_reasons.append("APY is far above typical stable-yield norms")
     if apy_reward and apy_base == 0:
         risk_reasons.append("yield is entirely emissions-driven, not real fees")
+
+    # GoPlus retrofit, 2026-09-11 -- read the SAME verdict pipeline/score.py
+    # already computed (stashed in score_breakdown['goplus']) rather than
+    # re-querying, so scoring and the delivered post can never disagree.
+    # Operator direction: an unchecked token must say so explicitly, never
+    # stay silent -- silence reads as "passed".
+    goplus_eval = (raw_item.get("score_breakdown") or {}).get("goplus") or {}
+    if goplus_eval.get("has_red_flag"):
+        risk_reasons.append(
+            "GoPlus flagged the underlying token: " + "; ".join(goplus_eval["red_flags"])
+        )
+    elif goplus_eval.get("tokens_unchecked"):
+        risk_reasons.append(
+            "token contract security could not be verified for this pool "
+            "(unsupported chain or no GoPlus data) — not the same as a clean result"
+        )
+
     risk_line = ("; ".join(risk_reasons) + ".").capitalize() if risk_reasons else None
 
     # No hyperlinks (2026-09-10, operator direction) — plain-text attribution only.
@@ -514,6 +532,143 @@ def compute_web3_jobs_elements(conn, raw_item: dict, history: list) -> dict:
     return {"history_line": None, "risk_line": None, "source_name": "RemoteOK"}
 
 
+# Enforcement mechanism for "never overstate what a security check proves"
+# (operator direction 2026-09-11, gems_security + defi_yields retrofit: "the
+# write step must never imply more certainty than the data supports, and I
+# want to see how you're enforcing that, not just an instruction in a
+# prompt"). Checked against what the LLM actually returned, not just
+# requested in the prompt -- prompts get ignored; a code-level guard doesn't.
+# Not category-scoped on purpose: cheap to run everywhere, and a category
+# that doesn't touch GoPlus data has nothing to trip it on anyway.
+BANNED_OVERCLAIM_PATTERNS = [re.compile(p, re.IGNORECASE) for p in [
+    r"\bis (?:completely |totally |100% )?safe\b",
+    r"\bis legit\b",
+    r"\bis (?:not )?a scam\b",
+    r"\bguaranteed\b",
+    r"\brisk[- ]free\b",
+    r"\bverified safe\b",
+    r"\byou can trust\b",
+    r"\bproven (?:safe|legit)\b",
+    r"\bno risk\b",
+    r"\bdefinitely (?:safe|risky)\b",
+    r"\bcertainly (?:safe|risky)\b",
+]]
+
+
+def _find_overclaims(parsed: dict) -> list[str]:
+    text = " ".join(str(parsed.get(k, "")) for k in ("title", "narrative", "why_it_matters"))
+    return [p.pattern for p in BANNED_OVERCLAIM_PATTERNS if p.search(text)]
+
+
+def _generate_checked_write(conn, category: str, prompt: str, *, model_override: str | None = None) -> str:
+    """llm.generate_write, but refuses to let an overclaiming draft through.
+    One retry with a stricter reminder appended to the SAME prompt, then a
+    hard failure rather than silently shipping it -- same "never silently
+    ship a malformed post" philosophy as post_format.parse_llm_json. A
+    RuntimeError here surfaces as a failed write, not a bad post the
+    operator has to catch by reading carefully."""
+    raw = llm.generate_write(conn, category, prompt, model_override=model_override)
+    hits = _find_overclaims(post_format.parse_llm_json(raw))
+    if hits:
+        logger.warning("write_post: overclaim language detected for category=%s, retrying once: %s", category, hits)
+        stricter_prompt = prompt + (
+            "\n\nSTRICT REMINDER: your previous draft used language claiming or implying "
+            "certainty this data doesn't support (words like 'safe', 'legit', 'guaranteed', "
+            "'risk-free', 'no risk'). Do not use any such language anywhere in your output. "
+            "State only what the specific checks found, nothing more."
+        )
+        raw = llm.generate_write(conn, category, stricter_prompt, model_override=model_override)
+        hits = _find_overclaims(post_format.parse_llm_json(raw))
+        if hits:
+            raise RuntimeError(
+                f"write_post: category={category} still overclaimed certainty after one retry "
+                f"({hits}) -- refusing to publish rather than ship it"
+            )
+    return raw
+
+
+@register_prompt_builder("gems_security")
+def build_gems_security_prompt(cfg: dict, region_profile: str, raw_item: dict, history: list) -> str:
+    """Educational voice, built into the prompt structurally, not left as a
+    tone request (operator direction 2026-09-11): the reader should come away
+    better at spotting this PATTERN themselves, not just told a verdict about
+    this one token. The LLM is deliberately never asked for a safety verdict
+    at all -- only to explain a finding Python already determined (see
+    compute_gems_security_elements) -- and is handed the found/unchecked
+    split explicitly so it can't imply more than what was actually checked."""
+    p = raw_item["payload"]
+    red_flags = p.get("red_flags") or []
+    tokens_unchecked = p.get("tokens_unchecked") or []
+
+    unchecked_note = (
+        f"\nNote: {len(tokens_unchecked)} of this pool's underlying token(s) could not be "
+        f"checked at all (unsupported chain or no GoPlus data) -- do not imply they're clean, "
+        f"say plainly that they weren't checked."
+        if tokens_unchecked else ""
+    )
+
+    return f"""You are writing prose for a crypto DeFi security/education channel. Voice: {cfg.get('voice', 'educational')}.
+{cfg.get('prompt_notes', '')}
+
+Facts about this pool (already verified by an automated check, not your judgment):
+- Protocol: {p.get('project')}
+- Chain: {p.get('chain')}
+- Pool: {p.get('symbol')}
+- TVL: ${p.get('tvl_usd', 0):,.0f}
+- Specific security findings from GoPlus's Token Security API:
+{chr(10).join(f'  - {flag}' for flag in red_flags)}{unchecked_note}
+
+Return ONLY a JSON object (no markdown fence, no commentary) with exactly these
+three string fields:
+{{
+  "title": "one specific title naming the ACTUAL finding — e.g. 'XYZ pool's
+    token has a hidden owner who can still mint', never a vague 'Watch out
+    for this token'. No emoji.",
+  "narrative": "2-3 sentences: state plainly what the check found, on this
+    specific pool. Do not add certainty the check itself doesn't have — you
+    are reporting a finding, not delivering a verdict.",
+  "why_it_matters": "EXACTLY one sentence explaining the GENERAL pattern
+    behind this specific finding, and how a reader could check for the same
+    thing themselves on any token. This is the teaching moment — the reader
+    should leave better at spotting this pattern, not just informed about
+    this one token."
+}}
+
+Hard rules, no exceptions: never write "safe", "legit", "a scam", "guaranteed",
+"risk-free", "verified safe", or any equivalent verdict language — you are
+reporting specific automated findings, not rendering a safety judgment. Never
+say or imply a token is fine, trustworthy, or worth buying/depositing into,
+even by omission. Never tell the reader what to do with their own money. No
+emoji anywhere in your output. Keep the combined narrative + why_it_matters
+under ~70 words — the whole post targets roughly 400-700 characters.
+"""
+
+
+@register_post_computer("gems_security")
+def compute_gems_security_elements(conn, raw_item: dict, history: list) -> dict:
+    """No history_line -- a security finding isn't a recurring signal the way
+    a wallet's past moves are (same reasoning web3_jobs used to omit one).
+    risk_line here is NOT optional or conditional the way it is for every
+    other category -- this category only ever posts when there IS a finding,
+    so risk_line always exists, and it explicitly separates what was found
+    from what couldn't be checked (operator direction 2026-09-11: an
+    unchecked token must say so, never stay silent -- silence reads as
+    "passed")."""
+    p = raw_item["payload"]
+    red_flags = p.get("red_flags") or []
+    tokens_unchecked = p.get("tokens_unchecked") or []
+
+    parts = ["GoPlus Token Security: " + "; ".join(red_flags)]
+    if tokens_unchecked:
+        parts.append(
+            f"{len(tokens_unchecked)} underlying token(s) in this pool could not be checked "
+            f"at all — not the same as a clean result"
+        )
+    risk_line = ". ".join(parts) + "."
+
+    return {"history_line": None, "risk_line": risk_line, "source_name": "GoPlus Token Security API"}
+
+
 def _assemble(conn, category: str, raw_item: dict, history: list, llm_raw_output: str) -> str:
     cfg = load_category_config(conn, category)
     parsed = post_format.parse_llm_json(llm_raw_output)
@@ -546,7 +701,7 @@ def _build_prompt_and_history(conn, category: str, channel: str, raw_item: dict)
 def generate_post(conn, category: str, channel: str, raw_item: dict) -> str:
     """Single-variant write, using whatever write_model is currently configured."""
     prompt, history = _build_prompt_and_history(conn, category, channel, raw_item)
-    raw = llm.generate_write(conn, category, prompt)
+    raw = _generate_checked_write(conn, category, prompt)
     return _assemble(conn, category, raw_item, history, raw)
 
 
@@ -557,8 +712,8 @@ def generate_post_variants(conn, category: str, channel: str, raw_item: dict) ->
     variants go through the identical deterministic assembly (same history/
     risk/source/hashtags) — only the LLM prose differs between them."""
     prompt, history = _build_prompt_and_history(conn, category, channel, raw_item)
-    raw_deepseek = llm.generate_write(conn, category, prompt, model_override="deepseek-v4-flash")
-    raw_sonnet = llm.generate_write(conn, category, prompt, model_override="claude-sonnet-5")
+    raw_deepseek = _generate_checked_write(conn, category, prompt, model_override="deepseek-v4-flash")
+    raw_sonnet = _generate_checked_write(conn, category, prompt, model_override="claude-sonnet-5")
     return {
         "deepseek-v4-flash": _assemble(conn, category, raw_item, history, raw_deepseek),
         "claude-sonnet-5": _assemble(conn, category, raw_item, history, raw_sonnet),
