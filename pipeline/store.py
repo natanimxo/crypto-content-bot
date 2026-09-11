@@ -53,7 +53,8 @@ def insert_raw_item(conn, source_id: int, category: str, external_id: str, paylo
         return row["id"] if row else None
 
 
-def insert_raw_items_batch(conn, source_id: int, category: str, items: list[tuple[str, dict]]) -> int:
+def insert_raw_items_batch(conn, source_id: int, category: str, items: list[tuple[str, dict]],
+                            held: bool = False) -> int:
     """Bulk version of insert_raw_item — one round trip for the whole batch instead
     of one per row. A category like defi_yields can easily produce several
     thousand candidate rows per cycle; inserting those one at a time (each with
@@ -62,19 +63,28 @@ def insert_raw_items_batch(conn, source_id: int, category: str, items: list[tupl
     (Section 12). `items` is a list of (external_id, payload) pairs. Returns the
     number of rows actually inserted (existing ones are silently skipped via the
     same UNIQUE(source_id, external_id) ON CONFLICT DO NOTHING as insert_raw_item).
+
+    `held` (2026-09-12, added for the news category): when True, every row this
+    call inserts is written with held=TRUE directly in the same INSERT, rather
+    than a follow-up UPDATE trying to guess which rows were just added by id
+    range or timestamp — a collector that wants "hold everything this category
+    produces, every cycle" (operator direction: news stays held until the
+    Hetzner poller is verified and the existing defi_yields/gems_security
+    backlog is cleared) gets that as an atomic, unambiguous part of the insert
+    itself. Existing callers are unaffected (default False, unchanged behavior).
     """
     if not items:
         return 0
-    values = [(source_id, category, external_id, json.dumps(payload)) for external_id, payload in items]
+    values = [(source_id, category, external_id, json.dumps(payload), held) for external_id, payload in items]
     with conn.cursor() as cur:
         inserted_rows = execute_values(
             cur,
-            """INSERT INTO raw_items (source_id, category, external_id, payload)
+            """INSERT INTO raw_items (source_id, category, external_id, payload, held)
                VALUES %s
                ON CONFLICT (source_id, external_id) DO NOTHING
                RETURNING id""",
             values,
-            template="(%s, %s, %s, %s)",
+            template="(%s, %s, %s, %s, %s)",
             page_size=500,
             fetch=True,
         )

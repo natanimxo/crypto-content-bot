@@ -61,6 +61,15 @@ def render_whale_movements(raw_item: dict) -> str:
     return " · ".join(parts)
 
 
+@register_template("news")
+def render_news(raw_item: dict) -> str:
+    p = raw_item["payload"]
+    parts = [p.get("title") or "", f"— {p.get('source')}"]
+    if p.get("also_covered_by"):
+        parts.append(f"(+{len(p['also_covered_by'])} other outlet(s))")
+    return " ".join(parts)
+
+
 @register_template("gems_security")
 def render_gems_security(raw_item: dict) -> str:
     p = raw_item["payload"]

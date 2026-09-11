@@ -246,3 +246,61 @@ gems_security:
     or against a project. Never say or imply a token is safe, legit, or worth
     buying/depositing into, even by omission. Measured tone: no hype, no
     manufactured urgency, no emoji beyond what the template itself adds.
+
+# Phase 3, 2026-09-11/12 — news -> Crypto Wall Street (alongside
+# whale_movements). Deliberate spec deviation, operator-approved: skips
+# CryptoPanic entirely for a curated list of original-outlet RSS feeds (see
+# collectors/news.py's module docstring for the full sourcing/dedup/
+# credibility design and the live verification behind each choice).
+news:
+  score_weights:
+    impact: 0.40          # cross-outlet corroboration + concrete figures --
+                            # how big/market-moving, not a dollar amount we
+                            # collect ourselves the way other categories can
+    novelty: 0.30          # news moves fast -- full novelty at 0h, ~0 by 36h old
+    actionability: 0.30    # does this name a trackable ticker/asset a reader
+                            # can actually follow, vs. vague general-interest
+    # No credibility key (operator-approved, 2026-09-11): checked real
+    # category/author data across every candidate feed first -- the real
+    # signal found (explicit Opinion/newsletter-recap categories) is binary,
+    # not a scale, so it's collectors/news.py's _is_original_reporting()
+    # pre-score gate instead, not a scored, weighted component. Weight
+    # redistributed to the three components above rather than left dead.
+
+  review_threshold: 50
+  # topic_key is the story's primary extracted entity (pipeline/entities.py)
+  # -- coarser than "the exact same event", closer to "the same primary
+  # subject". cooldown_hours suppresses recycled restatements of that
+  # subject; genuine developments still get through via the status-change
+  # keyword override in collectors/news.py, not by raising this.
+  cooldown_hours: 12
+  soft_daily_cap: 10
+
+  triage_model: template   # a headline is already a one-line summary
+  write_model: deepseek-v4-flash
+  write_benchmark_status: settled_deepseek
+
+  label: "📰 NEWS"
+
+  emoji: "📰"
+  display_label: "News"
+  hashtags:
+    - "#CryptoNews"
+
+  voice: market_summary
+  # Crypto Wall Street's tight, factual register (see whale_movements'
+  # prompt_notes for the same voice) -- report what happened and why it
+  # matters, stop. The real differentiator for this category isn't voice,
+  # it's substance: never restate the headline (operator direction
+  # 2026-09-11 — "a post that rephrases the article adds nothing"), and
+  # never reproduce the source's prose or structure (enforced structurally
+  # in pipeline/write_post.py's _find_reproduction_issues, not just
+  # requested here).
+  prompt_notes: >
+    Tight, factual, market-summary register. Explain the story's significance
+    or implication in your own words — never restate the headline or closely
+    paraphrase the source excerpt's wording or structure. A short, clearly
+    quoted and attributed phrase is fine; reproducing sentences is not. Never
+    state a price prediction or tell the reader what to do with their own
+    funds. Measured tone: no hype, no manufactured urgency, no emoji beyond
+    what the template itself adds.

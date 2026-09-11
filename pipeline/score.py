@@ -463,6 +463,69 @@ def score_gems_security(conn, raw_item_id: int, payload: dict) -> dict:
     }
 
 
+# news weights (operator-approved plan, 2026-09-11/12) -- three components,
+# not four. Credibility was checked against real category/author data across
+# every candidate feed first, and dropped rather than left as dead weight:
+# the real signal found (explicit Opinion/newsletter-recap categories) is
+# binary, not a scale, so it's a hard pre-score gate at collection time
+# (collectors/news.py's _is_original_reporting) instead -- once past that
+# gate every remaining item is from an already-curated, reputable outlet,
+# with no further real signal to rank "more credible" vs "less" within that
+# set. Weight redistributed to impact 0.40 / novelty 0.30 / actionability 0.30.
+NEWS_NOVELTY_DECAY_HOURS = 36  # news moves fast -- full novelty at 0h, zero by a day and a half old
+NEWS_ACTIONABILITY_NO_TICKER = 30.0  # a story naming no trackable ticker/asset is harder to act on
+
+
+def _news_impact(payload: dict) -> float:
+    """Cross-outlet corroboration (collectors/news.py's same-cycle dedup
+    merge -- also_covered_by) is a genuine, deterministic significance
+    signal: a story independently covered by multiple curated outlets is
+    objectively bigger news than one only a single outlet ran. Concrete
+    dollar/percentage figures (vs. vague scale-free chatter) add a smaller
+    bump on top -- a story with a real number attached is more substantive
+    than one without, independent of how many outlets covered it."""
+    also_covered_by = payload.get("also_covered_by") or []
+    base = _clamp(40.0 + len(also_covered_by) * 20.0)
+    if payload.get("figures"):
+        base = _clamp(base + 15.0)
+    return round(base, 1)
+
+
+def _news_novelty(payload: dict) -> float:
+    published_at = payload.get("published_at")
+    if not published_at:
+        return 50.0
+    published = datetime.fromisoformat(published_at)
+    age_hours = max(0.0, (datetime.now(timezone.utc) - published).total_seconds() / 3600)
+    return round(_clamp(100.0 - (age_hours / NEWS_NOVELTY_DECAY_HOURS) * 100.0), 1)
+
+
+def _news_actionability(payload: dict) -> float:
+    """Ties actionability to whether the story names something concrete a
+    Crypto Wall Street reader can actually watch/track -- a real ticker
+    beats a vague general-interest piece with no identifiable asset, the
+    same "can a reader do something with this" question actionability asks
+    in every other category, just answered with what news items actually
+    offer (a named, trackable subject) rather than a dollar amount or an
+    apply link."""
+    if payload.get("tickers"):
+        return 90.0
+    if payload.get("phrases"):
+        return 60.0
+    return NEWS_ACTIONABILITY_NO_TICKER
+
+
+@register_scorer("news")
+def score_news(conn, raw_item_id: int, payload: dict) -> dict:
+    """Breakdown -- three components (impact/novelty/actionability), no
+    credibility key. See the weights comment above for why."""
+    return {
+        "impact": _news_impact(payload),
+        "novelty": _news_novelty(payload),
+        "actionability": _news_actionability(payload),
+    }
+
+
 def score_new_items(conn, category: str) -> int:
     """Score every raw_item in this category that doesn't have a score row yet.
     Returns the number scored."""

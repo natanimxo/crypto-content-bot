@@ -36,12 +36,20 @@ def parse_llm_json(raw: str) -> dict:
 
 def assemble_post(*, emoji: str, title: str, narrative: str, why_it_matters: str,
                    history_line: str | None, risk_line: str | None,
-                   source_name: str | None, hashtags: list[str]) -> str:
+                   source_name: str | None, hashtags: list[str],
+                   context_line: str | None = None) -> str:
     """Builds the final HTML post text. Every input here is either
-    deterministically computed (history_line, risk_line) or config (emoji,
-    source_name, hashtags) or LLM prose (title, narrative, why_it_matters) —
-    LLM output is HTML-escaped since only this function ever emits real HTML
-    tags (<b>, <blockquote>), never the model.
+    deterministically computed (history_line, risk_line, context_line) or
+    config (emoji, source_name, hashtags) or LLM prose (title, narrative,
+    why_it_matters) — LLM output is HTML-escaped since only this function
+    ever emits real HTML tags (<b>, <blockquote>), never the model.
+
+    context_line (added 2026-09-12, news category): a fact from OUR OWN
+    whale_movements/defi_yields data connected to this item's entities —
+    the strongest version of Section 1's "memory the reader doesn't have"
+    idea so far, since it's data a generic news article structurally cannot
+    offer. Optional and omitted honestly like every other element here when
+    no genuine connection exists (pipeline/write_post.py never invents one).
 
     No hyperlinks anywhere (2026-09-10, operator direction) — source_name is
     plain-text attribution ("Source: DefiLlama"), not a clickable link. Even
@@ -68,6 +76,14 @@ def assemble_post(*, emoji: str, title: str, narrative: str, why_it_matters: str
     if history_line:
         lines.append("")
         lines.append(f"<blockquote>{esc(history_line)}</blockquote>")
+
+    if context_line:
+        lines.append("")
+        # Plain-text lead-in, not a second emoji -- the one-emoji budget
+        # (title only) stays intact; this still needs to read as visually
+        # distinct from history_line's blockquote just above it, or two
+        # consecutive blockquotes blur together.
+        lines.append(f"<blockquote>Also in our own tracking: {esc(context_line)}</blockquote>")
 
     if risk_line:
         lines.append("")

@@ -14,10 +14,13 @@ deterministic pipeline — history/risk/source/hashtags never differ between
 variants, only the writing does, so the comparison isolates writing quality.
 """
 
+import difflib
 import logging
 import os
 import re
+from datetime import datetime, timezone
 
+from pipeline import entities as entity_lib
 from pipeline import llm, post_format
 from pipeline.db import dict_cursor
 from pipeline.http import get_json
@@ -560,28 +563,81 @@ def _find_overclaims(parsed: dict) -> list[str]:
     return [p.pattern for p in BANNED_OVERCLAIM_PATTERNS if p.search(text)]
 
 
-def _generate_checked_write(conn, category: str, prompt: str, *, model_override: str | None = None) -> str:
-    """llm.generate_write, but refuses to let an overclaiming draft through.
-    One retry with a stricter reminder appended to the SAME prompt, then a
-    hard failure rather than silently shipping it -- same "never silently
-    ship a malformed post" philosophy as post_format.parse_llm_json. A
+# Copyright guard (news category, 2026-09-12) -- extends the SAME checked-
+# write mechanism built for gems_security's overclaim guard, rather than a
+# parallel one, per operator direction ("the way you did the gems
+# banned-phrase guard"). Only ever invoked with a real source_excerpt
+# (news); every other category passes None and pays nothing for this check.
+#
+# Worth being explicit about the actual risk surface: this system only ever
+# collects an RSS teaser excerpt (collectors/news.py), never a scraped full
+# article body -- there is no complete article text anywhere in this system
+# to closely paraphrase the structure of in the first place. This check is
+# real defense-in-depth against reproducing even that excerpt, not the only
+# thing standing between this category and a copyright problem.
+_QUOTE_SPAN_RE = re.compile(r"[\"“]([^\"”]{1,600})[\"”]")
+REPRODUCTION_NGRAM_SIZE = 8       # 8+ consecutive words verbatim = reproduction, not paraphrase
+REPRODUCTION_QUOTE_MAX_WORDS = 25  # a "short attributed quote" beyond this reads as excerpt reproduction
+REPRODUCTION_SIMILARITY_THRESHOLD = 0.6  # overall structural closeness, even without an exact long run
+
+
+def _find_reproduction_issues(parsed: dict, source_excerpt: str | None) -> list[str]:
+    if not source_excerpt:
+        return []
+    text = " ".join(str(parsed.get(k, "")) for k in ("title", "narrative", "why_it_matters"))
+
+    issues = []
+    unquoted = text
+    for m in _QUOTE_SPAN_RE.finditer(text):
+        quote = m.group(1)
+        if len(quote.split()) > REPRODUCTION_QUOTE_MAX_WORDS:
+            issues.append(f"quoted span is {len(quote.split())} words -- too long to read as a short attributed quote")
+        unquoted = unquoted.replace(m.group(0), " ", 1)
+
+    src_words = re.findall(r"\w+", source_excerpt.lower())
+    gen_words = re.findall(r"\w+", unquoted.lower())
+    n = REPRODUCTION_NGRAM_SIZE
+    src_ngrams = {tuple(src_words[i:i + n]) for i in range(max(0, len(src_words) - n + 1))}
+    if any(tuple(gen_words[i:i + n]) in src_ngrams for i in range(max(0, len(gen_words) - n + 1))):
+        issues.append(f"reproduces {n}+ consecutive words verbatim from the source outside a marked quote")
+
+    ratio = difflib.SequenceMatcher(None, unquoted.lower(), source_excerpt.lower()).ratio()
+    if ratio > REPRODUCTION_SIMILARITY_THRESHOLD:
+        issues.append(f"closely mirrors the source's structure (similarity {ratio:.2f})")
+
+    return issues
+
+
+def _generate_checked_write(conn, category: str, prompt: str, *, model_override: str | None = None,
+                             source_excerpt: str | None = None) -> str:
+    """llm.generate_write, but refuses to let an overclaiming OR (when
+    source_excerpt is given) reproduced draft through. One retry with a
+    stricter reminder appended to the SAME prompt, then a hard failure
+    rather than silently shipping it -- same "never silently ship a
+    malformed post" philosophy as post_format.parse_llm_json. A
     RuntimeError here surfaces as a failed write, not a bad post the
     operator has to catch by reading carefully."""
+    def _check(raw: str) -> list[str]:
+        parsed = post_format.parse_llm_json(raw)
+        return _find_overclaims(parsed) + _find_reproduction_issues(parsed, source_excerpt)
+
     raw = llm.generate_write(conn, category, prompt, model_override=model_override)
-    hits = _find_overclaims(post_format.parse_llm_json(raw))
+    hits = _check(raw)
     if hits:
-        logger.warning("write_post: overclaim language detected for category=%s, retrying once: %s", category, hits)
+        logger.warning("write_post: guard violation for category=%s, retrying once: %s", category, hits)
         stricter_prompt = prompt + (
-            "\n\nSTRICT REMINDER: your previous draft used language claiming or implying "
-            "certainty this data doesn't support (words like 'safe', 'legit', 'guaranteed', "
-            "'risk-free', 'no risk'). Do not use any such language anywhere in your output. "
-            "State only what the specific checks found, nothing more."
+            "\n\nSTRICT REMINDER: your previous draft either (a) used language claiming or "
+            "implying certainty this data doesn't support (words like 'safe', 'legit', "
+            "'guaranteed', 'risk-free', 'no risk') or (b) reproduced or too-closely paraphrased "
+            "the source material instead of summarizing it in your own words. Fix both: state "
+            "only what the data supports, and write your own summary -- a short, clearly quoted "
+            "and attributed phrase is fine, reproducing sentences or structure is not."
         )
         raw = llm.generate_write(conn, category, stricter_prompt, model_override=model_override)
-        hits = _find_overclaims(post_format.parse_llm_json(raw))
+        hits = _check(raw)
         if hits:
             raise RuntimeError(
-                f"write_post: category={category} still overclaimed certainty after one retry "
+                f"write_post: category={category} still failed the output guard after one retry "
                 f"({hits}) -- refusing to publish rather than ship it"
             )
     return raw
@@ -669,6 +725,169 @@ def compute_gems_security_elements(conn, raw_item: dict, history: list) -> dict:
     return {"history_line": None, "risk_line": risk_line, "source_name": "GoPlus Token Security API"}
 
 
+@register_prompt_builder("news")
+def build_news_prompt(cfg: dict, region_profile: str, raw_item: dict, history: list) -> str:
+    """The write step's real job here (operator direction 2026-09-11: "the
+    spec's premise is posts worth reading late -- a post that rephrases the
+    article adds nothing"): explain SIGNIFICANCE, never restate the
+    headline. Enforced structurally too, not just requested -- see
+    _generate_checked_write's reproduction guard, which checks the actual
+    returned prose against the source excerpt, not just the prompt wording."""
+    # No coordination with compute_news_elements' history_line/context_line
+    # here, deliberately -- same pattern every other category already uses
+    # (compare build_defi_yields_prompt / compute_defi_yields_elements):
+    # the LLM's prose is written with no knowledge of the deterministic
+    # blockquotes that get appended around it afterward, so those elements
+    # stay guaranteed-accurate regardless of what the model does with the
+    # facts it WAS given below.
+    p = raw_item["payload"]
+
+    return f"""You are writing prose for a crypto market-summary Telegram channel. Voice: {cfg.get('voice', 'market_summary')}.
+{cfg.get('prompt_notes', '')}
+
+Facts about this story (from a wire excerpt, summarize in your own words --
+never quote more than a short phrase, and never copy the excerpt's sentence
+structure):
+- Headline: {p.get('title')}
+- Source excerpt: {p.get('description')}
+- Outlet: {p.get('source')}
+
+Return ONLY a JSON object (no markdown fence, no commentary) with exactly these
+three string fields:
+{{
+  "title": "one specific title in your own words — not a copy of the
+    headline above. No emoji.",
+  "narrative": "1-2 sentences: what happened, in your own words, summarized
+    from the excerpt — never a close paraphrase of its structure or wording.",
+  "why_it_matters": "EXACTLY one sentence on the SIGNIFICANCE or implication
+    — what this means going forward, not a restatement of the narrative in
+    different words. If you genuinely cannot say anything beyond what the
+    narrative already covers, say what to watch for next instead."
+}}
+
+Do not mention scores or internal categorization. Never state a price
+prediction or tell the reader what to do with their own funds. No emoji
+anywhere in your output. Keep the combined narrative + why_it_matters under
+~70 words — the whole post targets roughly 400-700 characters.
+"""
+
+
+def _news_topic_overlap_ok(current_entities: dict, candidate_payload: dict, threshold: float) -> bool:
+    candidate_entities = {
+        "tickers": set(candidate_payload.get("tickers") or []),
+        "phrases": set(candidate_payload.get("phrases") or []),
+        "figures": set(candidate_payload.get("figures") or []),
+    }
+    return entity_lib.fingerprint_overlap(current_entities, candidate_entities) >= threshold
+
+
+# Live bug, first end-to-end test 2026-09-12: originally set to 0.3 on the
+# theory that continuation should be LOOSER than same-cycle dedup (a
+# developing story drifts further from earlier coverage than same-day
+# multi-outlet coverage of one event does). Real test caught this being
+# wrong: 0.3 is exactly fingerprint_overlap's ticker-only floor (pipeline/
+# entities.py), so it provided NO actual filtering beyond "shares a
+# ticker" -- a real run produced "we covered this developing story" linking
+# a Spark/OKX USDT vault story to an unrelated Tether private-credit-fund
+# story, whose only connection was both mentioning USDT. A "developing
+# story" claim is a STRONGER, more visible editorial statement to a reader
+# than silently merging same-cycle duplicates -- it deserves a HIGHER bar,
+# not a lower one. Raised to require more than ticker-only agreement
+# (ticker+figure, ticker+phrase, or figure+phrase all clear this).
+NEWS_CONTINUATION_OVERLAP_THRESHOLD = 0.65
+
+# How far back to look for a cross-category connection -- our own
+# whale_movements/defi_yields data has to be genuinely recent to be a fair
+# "also happening right now" fact, not a stale coincidence.
+CROSS_CATEGORY_LOOKBACK_HOURS = 72
+CROSS_CATEGORY_MATCH_LIMIT = 5
+
+
+def _find_cross_category_connection(conn, tickers: set[str]) -> str | None:
+    """The piece operator direction 2026-09-11/12 asked for real attention
+    on: does this news item's entities match anything in OUR OWN recently
+    collected whale_movements/defi_yields data? This is data a generic news
+    article structurally cannot offer -- it only exists because we're
+    running the rest of this pipeline. Matched on TICKERS only (not
+    phrases) -- whale_movements/defi_yields payloads carry structured
+    symbol/project fields, not prose, so ticker-level matching is the
+    precise, low-false-positive-risk join; phrase matching against
+    unrelated proper nouns in those payloads would be far weaker signal.
+
+    defi_yields pool symbols are PAIRS ("WSOL-USDC", "ETH-EARNETH") -- split
+    on common delimiters and match each component, not the whole string, or
+    a ticker would only ever match a single-asset pool.
+    """
+    if not tickers:
+        return None
+    with dict_cursor(conn) as cur:
+        cur.execute(
+            """SELECT category, payload, collected_at FROM raw_items
+               WHERE category IN ('whale_movements', 'defi_yields')
+                 AND collected_at > now() - (%s || ' hours')::interval
+               ORDER BY collected_at DESC LIMIT 200""",
+            (CROSS_CATEGORY_LOOKBACK_HOURS,),
+        )
+        rows = cur.fetchall()
+
+    for row in rows[:CROSS_CATEGORY_MATCH_LIMIT * 20]:  # bounded scan, not the whole table
+        p = row["payload"]
+        symbol = (p.get("symbol") or "").upper()
+        components = set(re.split(r"[-/_]", symbol))
+        if not (components & tickers):
+            continue
+
+        age_hours = (datetime.now(timezone.utc) - row["collected_at"]).total_seconds() / 3600
+        when = "earlier today" if age_hours < 20 else f"{age_hours / 24:.0f}d ago"
+
+        if row["category"] == "whale_movements":
+            verb = "withdrew from" if p.get("direction") == "outflow" else "deposited to"
+            return (
+                f"a ${p.get('value_usd', 0):,.0f} {p.get('symbol')} transfer {verb} "
+                f"{p.get('exchange')}, {when}, in our own whale tracking"
+            )
+        else:  # defi_yields
+            return (
+                f"{p.get('project')} {p.get('symbol')} is currently yielding "
+                f"{p.get('apy')}% APY (TVL ${p.get('tvl_usd', 0):,.0f}) in our own DeFi tracking"
+            )
+    return None
+
+
+@register_post_computer("news")
+def compute_news_elements(conn, raw_item: dict, history: list) -> dict:
+    """Two genuinely deterministic value-adds, both optional and omitted
+    honestly when absent (operator direction 2026-09-11): history_line for
+    a real developing-story continuation, context_line for a cross-category
+    connection to our OWN whale_movements/defi_yields data -- the strongest
+    version of Section 1's "memory the reader doesn't have" idea in any
+    category so far, since it's the one thing a reader genuinely cannot get
+    from the article itself."""
+    p = raw_item["payload"]
+    current_entities = {
+        "tickers": set(p.get("tickers") or []),
+        "phrases": set(p.get("phrases") or []),
+        "figures": set(p.get("figures") or []),
+    }
+
+    history_line = None
+    for prior in history:
+        if _news_topic_overlap_ok(current_entities, prior["payload"], NEWS_CONTINUATION_OVERLAP_THRESHOLD):
+            days_ago = (raw_item["collected_at"] - prior["collected_at"]).days if raw_item.get("collected_at") and prior.get("collected_at") else None
+            when = f"{days_ago}d ago" if days_ago is not None else "previously"
+            history_line = f"We covered this developing story {when}: \"{prior['payload'].get('title')}\""
+            break
+
+    context_line = _find_cross_category_connection(conn, current_entities["tickers"])
+
+    return {
+        "history_line": history_line,
+        "risk_line": None,
+        "source_name": p.get("source") or None,
+        "context_line": context_line,
+    }
+
+
 def _assemble(conn, category: str, raw_item: dict, history: list, llm_raw_output: str) -> str:
     cfg = load_category_config(conn, category)
     parsed = post_format.parse_llm_json(llm_raw_output)
@@ -684,6 +903,7 @@ def _assemble(conn, category: str, raw_item: dict, history: list, llm_raw_output
         risk_line=elements.get("risk_line"),
         source_name=elements.get("source_name"),
         hashtags=cfg.get("hashtags") or [],
+        context_line=elements.get("context_line"),
     )
 
 
@@ -701,7 +921,8 @@ def _build_prompt_and_history(conn, category: str, channel: str, raw_item: dict)
 def generate_post(conn, category: str, channel: str, raw_item: dict) -> str:
     """Single-variant write, using whatever write_model is currently configured."""
     prompt, history = _build_prompt_and_history(conn, category, channel, raw_item)
-    raw = _generate_checked_write(conn, category, prompt)
+    source_excerpt = (raw_item.get("payload") or {}).get("description")
+    raw = _generate_checked_write(conn, category, prompt, source_excerpt=source_excerpt)
     return _assemble(conn, category, raw_item, history, raw)
 
 
@@ -712,8 +933,9 @@ def generate_post_variants(conn, category: str, channel: str, raw_item: dict) ->
     variants go through the identical deterministic assembly (same history/
     risk/source/hashtags) — only the LLM prose differs between them."""
     prompt, history = _build_prompt_and_history(conn, category, channel, raw_item)
-    raw_deepseek = _generate_checked_write(conn, category, prompt, model_override="deepseek-v4-flash")
-    raw_sonnet = _generate_checked_write(conn, category, prompt, model_override="claude-sonnet-5")
+    source_excerpt = (raw_item.get("payload") or {}).get("description")
+    raw_deepseek = _generate_checked_write(conn, category, prompt, model_override="deepseek-v4-flash", source_excerpt=source_excerpt)
+    raw_sonnet = _generate_checked_write(conn, category, prompt, model_override="claude-sonnet-5", source_excerpt=source_excerpt)
     return {
         "deepseek-v4-flash": _assemble(conn, category, raw_item, history, raw_deepseek),
         "claude-sonnet-5": _assemble(conn, category, raw_item, history, raw_sonnet),
