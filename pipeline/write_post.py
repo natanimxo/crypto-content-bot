@@ -611,22 +611,80 @@ def _find_overclaims(parsed: dict) -> list[str]:
     return [p.pattern for p in BANNED_OVERCLAIM_PATTERNS if p.search(text)]
 
 
-# Copyright guard (news category, 2026-09-12) -- extends the SAME checked-
-# write mechanism built for gems_security's overclaim guard, rather than a
-# parallel one, per operator direction ("the way you did the gems
-# banned-phrase guard"). Only ever invoked with a real source_excerpt
-# (news); every other category passes None and pays nothing for this check.
+# Copyright guard (news category, 2026-09-12; corrected 2026-09-12 after a
+# macro_news finding, see below) -- extends the SAME checked-write mechanism
+# built for gems_security's overclaim guard, rather than a parallel one, per
+# operator direction ("the way you did the gems banned-phrase guard"). Runs
+# for every category via generate_post's generic `source_excerpt =
+# payload.get("description")` line -- it isn't actually news-only, it's just
+# that most categories' payloads have no "description" key, so it naturally
+# no-ops (None in, [] out) for them. news and macro_news both populate a
+# real description, so both get a real check.
 #
-# Worth being explicit about the actual risk surface: this system only ever
-# collects an RSS teaser excerpt (collectors/news.py), never a scraped full
-# article body -- there is no complete article text anywhere in this system
-# to closely paraphrase the structure of in the first place. This check is
-# real defense-in-depth against reproducing even that excerpt, not the only
-# thing standing between this category and a copyright problem.
+# CORRECTED, operator direction 2026-09-12: this comment used to claim the
+# architecture itself was doing protective work -- "this system only ever
+# collects an RSS teaser excerpt, never a scraped full article body -- there
+# is no complete article text anywhere in this system to closely paraphrase
+# the structure of in the first place." That was true of news's 6 feeds
+# specifically (live-checked: max real description length 373 chars across
+# theblock/decrypt/blockworks/thedefiant/protos; CoinDesk's is empty, headline
+# -only by design) but was never an architectural guarantee -- it was a fact
+# about what those particular feeds happen to put in their RSS `summary`
+# field, which is external and could change without any code here changing.
+# macro_news proved this directly: its Axios feed delivers full article
+# bodies (live-measured, 1000-3400+ chars/item) through the EXACT SAME
+# feedparser/`summary` mechanism news uses. Same collection method, opposite
+# risk profile -- "RSS-only" was never what was protecting anything. The
+# code-level check below is what's actually load-bearing, for every category
+# that reaches it, regardless of source length.
+#
+# And the check itself needed a real fix, not just a documentation update,
+# once tested against a genuinely long source (see BACKLOG.md's "Copyright
+# guard" entry for the full test sequence): the original similarity check
+# used `SequenceMatcher(None, draft, source).ratio()`, which is 2*M /
+# (len(draft)+len(source)) -- a fixed amount of verbatim overlap gets
+# diluted almost to nothing once `source` is a 2500+ char article instead of
+# a ~100-500 char teaser (measured: a real 90-word verbatim lift from a
+# 2565-char source scored ratio=0.067, nowhere near the 0.6 threshold, purely
+# because of the long denominator, not because the copying was subtle).
+# Replaced with `_content_overlap_fraction`, which measures matched
+# characters as a fraction of the DRAFT's own length, not the combined
+# length -- source length stops mattering, which is the property this
+# needed. Re-verified after the fix: the same verbatim lift now scores 1.0
+# (caught); a genuine synonym-substituted paraphrase of the same passage
+# still scores low (0.17, NOT caught) and a legitimate own-words summary
+# scores 0.0 (correctly not caught) -- see that function's docstring for
+# what this can and cannot see. Two realistic partial-reproduction drafts
+# (half verbatim/half original commentary; one ~20-word verbatim run inside
+# an otherwise-original draft) scored 0.37-0.38, which is what
+# REPRODUCTION_OVERLAP_THRESHOLD is set just below.
+#
+# FLOOR, NOT GUARANTEE -- same honesty as _find_neutrality_violations. This
+# check reliably catches verbatim-or-near-verbatim lifting, at any source
+# length now. It does NOT and structurally cannot catch a genuine semantic
+# paraphrase (same meaning, different words, same structure) -- that's a
+# character-diff heuristic's real limit, not a bug; catching that would need
+# semantic/embedding comparison, a materially different (and non-zero-LLM-
+# call) approach, not attempted here.
 _QUOTE_SPAN_RE = re.compile(r"[\"“]([^\"”]{1,600})[\"”]")
 REPRODUCTION_NGRAM_SIZE = 8       # 8+ consecutive words verbatim = reproduction, not paraphrase
 REPRODUCTION_QUOTE_MAX_WORDS = 25  # a "short attributed quote" beyond this reads as excerpt reproduction
-REPRODUCTION_SIMILARITY_THRESHOLD = 0.6  # overall structural closeness, even without an exact long run
+REPRODUCTION_MIN_BLOCK_CHARS = 15  # ignore trivial few-character coincidental matches
+REPRODUCTION_OVERLAP_THRESHOLD = 0.3  # fraction of the DRAFT's own text made of >=15-char runs shared with the source
+
+
+def _content_overlap_fraction(gen_text: str, source_text: str,
+                               min_block_len: int = REPRODUCTION_MIN_BLOCK_CHARS) -> float:
+    """What fraction of gen_text is made of substantial (>=min_block_len
+    char) contiguous runs that also appear in source_text -- normalized
+    against gen_text's OWN length, not the combined length, so a long
+    source doesn't dilute a real match (see the module comment above for
+    the live bug this replaced)."""
+    if not gen_text:
+        return 0.0
+    sm = difflib.SequenceMatcher(None, gen_text, source_text)
+    matched = sum(block.size for block in sm.get_matching_blocks() if block.size >= min_block_len)
+    return matched / len(gen_text)
 
 
 def _find_reproduction_issues(parsed: dict, source_excerpt: str | None) -> list[str]:
@@ -649,9 +707,9 @@ def _find_reproduction_issues(parsed: dict, source_excerpt: str | None) -> list[
     if any(tuple(gen_words[i:i + n]) in src_ngrams for i in range(max(0, len(gen_words) - n + 1))):
         issues.append(f"reproduces {n}+ consecutive words verbatim from the source outside a marked quote")
 
-    ratio = difflib.SequenceMatcher(None, unquoted.lower(), source_excerpt.lower()).ratio()
-    if ratio > REPRODUCTION_SIMILARITY_THRESHOLD:
-        issues.append(f"closely mirrors the source's structure (similarity {ratio:.2f})")
+    overlap = _content_overlap_fraction(unquoted.lower(), source_excerpt.lower())
+    if overlap > REPRODUCTION_OVERLAP_THRESHOLD:
+        issues.append(f"substantial verbatim overlap with the source ({overlap:.2f} of the draft)")
 
     return issues
 

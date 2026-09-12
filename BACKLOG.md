@@ -252,6 +252,67 @@ the one place to check.
   call. 21 real candidates are sitting collected-but-unscored right now,
   pending that direction.
 
+## Copyright guard (cross-category, 2026-09-12)
+
+- **The "RSS-only collection means there's no full article to paraphrase"
+  reasoning in `pipeline/write_post.py`'s copyright-guard comment was never
+  an architectural guarantee, and macro_news proved it — followed up,
+  fixed, and re-verified, not just corrected in prose.** Operator
+  follow-up after the macro_news build: since `macro_news` reuses `news`'s
+  RSS collection method but some of its feeds turned out to deliver
+  full-body text, does that same finding apply to `news`'s own 6 crypto
+  feeds, and does the documented "the architecture protects us" reasoning
+  need correcting?
+
+  Checked live: no, `news`'s 6 feeds are genuinely short — max real
+  description length 373 chars across theblock/decrypt/blockworks/
+  thedefiant/protos; CoinDesk's `summary` field is empty on every entry
+  (headline-only feed by design, not a bug — confirmed by inspecting the
+  raw entry, `content`/`summary_detail` are empty too). So the ORIGINAL
+  claim happens to still hold for these specific 6 feeds.
+
+  But the REASONING behind it was wrong regardless, and macro_news is the
+  proof: its Axios feed delivers full article bodies (1000-3400+ chars/
+  item, live-measured) through the exact same feedparser/RSS `summary`
+  mechanism `news` uses. Same collection method, opposite outcome — "RSS
+  collection" was never what was protecting anything; it was always a
+  fact about what these 6 specific feeds happen to put in that field,
+  external and changeable without any code here changing. Corrected the
+  comment in `pipeline/write_post.py` to say so plainly, and to note the
+  check runs for every category via `generate_post`'s generic
+  `payload.get("description")` line — it was never actually gated to
+  `news` specifically, just naturally a no-op for categories with no
+  `description` field.
+
+  Testing the reasoning against real data surfaced a second, deeper,
+  actually-fixed bug, not left as a documentation note: the similarity
+  check used `SequenceMatcher(None, draft, source).ratio()`, which is
+  `2*matched / (len(draft)+len(source))` — a real 90-word verbatim lift
+  from macro_news's 2565-char Axios source scored ratio=0.067 (nowhere
+  near the 0.6 threshold), purely because the long source diluted the
+  denominator, not because the copying was subtle. Replaced with
+  `_content_overlap_fraction` — matched characters as a fraction of the
+  DRAFT's own length, source length no longer dilutes anything. Re-tested
+  before trusting: the same verbatim lift now scores 1.0 (caught); a
+  legitimate own-words summary scores 0.0 (correctly not caught); two
+  realistic partial-reproduction drafts (half verbatim/half original
+  commentary; one ~20-word verbatim run inside an otherwise-original
+  draft) scored 0.37-0.38, which is what the new threshold (0.3) sits just
+  below. Regression-tested against 15 real `news` items post-fix — 14
+  passed, 1 correctly failed the (unchanged) n-gram check on a genuine
+  verbatim lift from a short teaser, unrelated to this fix. Re-verified
+  all 13 real macro_news candidates (including the full-body Axios items)
+  still generate cleanly.
+
+  **Named, NOT fixed — a real, structural limit, same "floor not
+  guarantee" honesty as the neutrality guard**: none of this catches a
+  genuine semantic paraphrase (same meaning, different words, same
+  structure) — tested directly, a synonym-substituted paraphrase of a real
+  passage scored 0.17, well under threshold, both before and after the
+  fix. Character-diff heuristics structurally cannot see that; only
+  semantic/embedding comparison could, a materially different approach
+  (and not a zero-LLM-call one) not attempted here.
+
 ## Hustle to Million (Phase 3, 2026-09-12)
 
 - **`grants` deliberately out of scope, not just unbuilt.** Live-checked
