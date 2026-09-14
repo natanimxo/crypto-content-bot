@@ -35,5 +35,13 @@ def generate(prompt: str, *, system: str | None = None, max_tokens: int = 800) -
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
     }
-    resp = post_json(API_URL, json_body=body, headers=headers)
+    # Live bug, 2026-09-14 (Railway poller, approval_id=73): three consecutive
+    # ReadTimeoutError -- the connection to api.deepseek.com succeeded every
+    # time (never a ConnectionError/DNS failure), DeepSeek just didn't finish
+    # generating within pipeline/http.py's 30s default before all 3 retries
+    # were exhausted. That default is tuned for collectors' fast data-source
+    # APIs (Section 12: "a dead source logs and gets skipped"), a completion
+    # call is a slower, different workload -- 60s here, not a global change to
+    # http.py's default, since collectors legitimately want to fail fast.
+    resp = post_json(API_URL, json_body=body, headers=headers, timeout=60)
     return resp["choices"][0]["message"]["content"].strip()

@@ -23,5 +23,7 @@ def generate(prompt: str, *, max_tokens: int = 800) -> str:
         "contents": [{"parts": [{"text": prompt}]}],
         "generationConfig": {"maxOutputTokens": max_tokens, "temperature": 0.4},
     }
-    resp = post_json(url, json_body=body)
+    # Same reasoning as deepseek.py's timeout=60 (2026-09-14): a completion
+    # call is a slower workload than http.py's 30s default was tuned for.
+    resp = post_json(url, json_body=body, timeout=60)
     return resp["candidates"][0]["content"]["parts"][0]["text"].strip()

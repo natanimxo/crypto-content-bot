@@ -107,6 +107,53 @@ def _set_last_update_id(conn, update_id: int):
     conn.commit()
 
 
+def _fetch_orphaned_approvals(conn) -> list[dict]:
+    """Approvals marked 'approved' with no post_previews row for them --
+    the write either never ran or raised and was never retried (Section 8's
+    LLM write step is the only thing standing between 'approved' and a
+    preview existing at all). Same join shape as _fetch_pending_approval,
+    just not filtered to decision='pending' and keyed by approval id, not
+    raw_item_id, since there's no fresh callback_query to key off here.
+
+    Real bug, 2026-09-14 (Railway poller, approval_id=73 -- operator
+    direction: "this is the second time an approval has ended up
+    approved-with-no-write... it needs to self-heal rather than needing
+    manual rescue each time"): _handle_approve marks 'approved' in the fast
+    ack phase, then run()'s second phase calls _generate_and_preview for
+    it -- if THAT raises (a DeepSeek timeout, any other write failure), the
+    exception is logged and swallowed (by design -- one candidate's failed
+    write must never take down the rest of the batch), but nothing ever
+    revisits that approval afterward. A re-tap on the same button is
+    consumed as a no-op ("Already handled") since decision is no longer
+    'pending' -- from the operator's side, the item just vanishes.
+
+    Deliberately NOT "only mark approved after the write succeeds" (the
+    other option on the table) -- that would mean holding the ack, or the
+    decision write, until an LLM round trip completes, which is exactly
+    what the two-phase ack/write split (see _handle_approve's docstring)
+    was already built to avoid: a slow write for one candidate blocking the
+    fast ack of OTHERS in the same batch, which is how a 2026-09-09 3-tap
+    batch previously failed. This is the additive fix instead: every poll
+    cycle, before touching new updates, sweep for exactly this orphaned
+    state and retry the write. Self-healing on whatever cadence run() is
+    already being called at (continuous on the Railway poller) -- no
+    separate cron, no manual rescue, and it can't race a fresh tap on the
+    same item since a fresh tap on an already-'approved' row is already a
+    no-op by construction (_fetch_pending_approval only matches 'pending')."""
+    with dict_cursor(conn) as cur:
+        cur.execute(
+            """SELECT a.id AS approval_id, a.decision, a.raw_item_id, a.prompt_message_id,
+                      r.category, r.payload, r.collected_at, s.score, s.score_breakdown, n.channel
+               FROM approvals a
+               JOIN raw_items r ON r.id = a.raw_item_id
+               JOIN scores s ON s.raw_item_id = r.id AND s.category = r.category
+               JOIN notifications n ON n.id = a.notification_id
+               LEFT JOIN post_previews p ON p.approval_id = a.id
+               WHERE a.decision = 'approved' AND p.id IS NULL"""
+        )
+        return cur.fetchall()
+
+
 def _fetch_pending_approval(conn, raw_item_id: int):
     """The 'pending' approval for this raw_item_id, if any — there's at most one,
     since a raw_item only ever appears in one notification (Section 7's
@@ -429,6 +476,25 @@ def run() -> None:
     conn = get_conn()
     try:
         with run_log(conn, "approval_poll") as state:
+            # Self-healing sweep, before anything else this cycle -- see
+            # _fetch_orphaned_approvals' docstring. Runs every cycle
+            # (continuous on the Railway poller), so an approval that falls
+            # through here gets retried on the very next long-poll return,
+            # not left stuck until someone notices.
+            orphaned = _fetch_orphaned_approvals(conn)
+            recovered = 0
+            for approval in orphaned:
+                try:
+                    _generate_and_preview(conn, approval)
+                    recovered += 1
+                    logger.info("poll: recovered orphaned approval_id=%s (write had never succeeded)",
+                                approval["approval_id"])
+                except Exception:
+                    logger.exception("poll: recovery retry still failed for approval_id=%s -- will retry next cycle",
+                                     approval["approval_id"])
+            state["details"]["orphaned_found"] = len(orphaned)
+            state["details"]["orphaned_recovered"] = recovered
+
             offset = _get_last_update_id(conn)
             requested_offset = (offset + 1) if offset else None
             updates = get_updates(offset=requested_offset, timeout=LONG_POLL_TIMEOUT_SECONDS)

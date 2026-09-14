@@ -32,5 +32,7 @@ def generate(prompt: str, *, system: str | None = None, max_tokens: int = 1024) 
         "anthropic-version": ANTHROPIC_VERSION,
         "content-type": "application/json",
     }
-    resp = post_json(API_URL, json_body=body, headers=headers)
+    # Same reasoning as deepseek.py's timeout=60 (2026-09-14): a completion
+    # call is a slower workload than http.py's 30s default was tuned for.
+    resp = post_json(API_URL, json_body=body, headers=headers, timeout=60)
     return "".join(block["text"] for block in resp["content"] if block["type"] == "text").strip()
