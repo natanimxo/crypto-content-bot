@@ -34,7 +34,7 @@ def parse_llm_json(raw: str) -> dict:
     return json.loads(text.strip())
 
 
-def assemble_post(*, emoji: str, title: str, narrative: str, why_it_matters: str,
+def assemble_post(*, emoji: str, title: str, narrative: str, why_it_matters: str | None,
                    history_line: str | None, risk_line: str | None,
                    source_name: str | None, hashtags: list[str],
                    context_line: str | None = None) -> str:
@@ -43,6 +43,20 @@ def assemble_post(*, emoji: str, title: str, narrative: str, why_it_matters: str
     config (emoji, source_name, hashtags) or LLM prose (title, narrative,
     why_it_matters) — LLM output is HTML-escaped since only this function
     ever emits real HTML tags (<b>, <blockquote>), never the model.
+
+    why_it_matters is optional as of 2026-09-15 (operator direction) --
+    previously mandatory for every category, which forced categories where
+    a straightforward item often has no genuine implication to draw
+    (startup_jobs, web3_jobs) into padding: a second paragraph that just
+    restated the salary/role already given in the narrative, or paraphrased
+    the listing. Omitted honestly here exactly like history_line/risk_line/
+    context_line already were -- a category whose prompt builder decides
+    there's nothing genuine to add returns an empty string, which renders
+    as nothing rather than a forced, contentless sentence. Categories where
+    implication IS the point (news, macro_news, gems_security) keep asking
+    for it every time in their own prompts; this function doesn't know or
+    care which category it's assembling for, same as it doesn't know why
+    history_line is sometimes present and sometimes not.
 
     context_line (added 2026-09-12, news category): a fact from OUR OWN
     whale_movements/defi_yields data connected to this item's entities —
@@ -70,8 +84,10 @@ def assemble_post(*, emoji: str, title: str, narrative: str, why_it_matters: str
 
     lines = [f"{emoji} <b>{esc(title)}</b>", ""]
     lines.append(esc(narrative))
-    lines.append("")
-    lines.append(esc(why_it_matters))
+
+    if why_it_matters:
+        lines.append("")
+        lines.append(esc(why_it_matters))
 
     if history_line:
         lines.append("")

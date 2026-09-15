@@ -484,6 +484,61 @@ def compute_whale_movements_elements(conn, raw_item: dict, history: list) -> dic
     return {"history_line": history_line, "risk_line": risk_line, "source_name": "Etherscan"}
 
 
+# Shared JSON-schema block for web3_jobs/startup_jobs (2026-09-15, operator
+# direction) -- why_it_matters made OPTIONAL for these two categories
+# specifically, not every category (news/macro_news/gems_security keep it
+# mandatory in their own prompts -- implication IS the point there).
+#
+# What prompted this: a real generated startup_jobs post's second paragraph
+# just restated the salary and remote status from paragraph one, then
+# paraphrased the job description -- padding, because a straightforward
+# listing often genuinely has no implication to draw. The old prompt forced
+# one anyway ("EXACTLY one sentence... the comp, the company, or the scope
+# of the role" as fallback material), which is exactly what produced the
+# restatement once nothing about comp/company/scope was actually notable.
+#
+# Also fixes a second real, related problem in the same generated post:
+# circular narrative phrasing ("X is hiring a Social Comms person to handle
+# social media" -- restates the title, adds nothing). Both problems share
+# one root cause (the prompt gave the model nothing concrete to reach for
+# beyond the raw facts already listed above it), so both are fixed here
+# together with concrete criteria and a negative example, not just "try
+# harder" language.
+_JOBS_SCHEMA_BLOCK = """Return ONLY a JSON object (no markdown fence, no commentary) with exactly these
+three string fields:
+{{
+  "title": "one specific title naming the role and company — NOT a generic
+    label. No emoji.",
+  "narrative": "1-2 sentences: what the role actually involves and who it's
+    for. Must add context the title doesn't already give — what the company
+    does, why this role is opening, or what's distinctive about the work.
+    Never just restate the role/company named in the title in different
+    words — e.g. '{company} is hiring a {position} to handle social media'
+    says nothing the title didn't already say. If the listing itself gives
+    you nothing more specific than the title, describe the actual day-to-day
+    scope from the tags/description instead of paraphrasing the job title.",
+  "why_it_matters": "EXACTLY one sentence on what makes THIS SPECIFIC
+    listing worth a second look — ONLY if something genuinely clears that
+    bar: unusually strong comp for the role/level, a notable or recognizable
+    company, or a real signal about the market (e.g. a rare fully-remote
+    senior opening, a company hiring aggressively). If nothing here clears
+    that bar, return an empty string \\"\\" instead — do not restate the
+    salary, location, or role already covered in the narrative, and do not
+    manufacture significance. A plain, unremarkable listing with an empty
+    why_it_matters is the correct, expected output for most listings here,
+    not a failure to try harder."
+}}
+
+Do not mention scores or internal categorization. Never overstate or
+editorialize beyond what the facts above actually say — if salary isn't
+disclosed, say so plainly rather than guessing or hyping the opportunity.
+Do not restate a fact from the narrative in why_it_matters as if it were new
+insight — a repeated statement is not significance. No emoji anywhere in
+your output. Keep the combined narrative + why_it_matters (when present)
+under ~60 words — the whole post targets roughly 400-700 characters, shorter
+when why_it_matters is empty."""
+
+
 @register_prompt_builder("web3_jobs")
 def build_web3_jobs_prompt(cfg: dict, region_profile: str, raw_item: dict, history: list) -> str:
     p = raw_item["payload"]
@@ -491,6 +546,7 @@ def build_web3_jobs_prompt(cfg: dict, region_profile: str, raw_item: dict, histo
     salary_note = (
         f"${p.get('salary_min') or 0:,.0f}-${salary_max:,.0f}" if salary_max else "not disclosed"
     )
+    schema = _JOBS_SCHEMA_BLOCK.format(company=p.get("company"), position=p.get("position"))
 
     return f"""You are writing prose for a web3/crypto jobs Telegram channel. Voice: {cfg.get('voice', 'opportunity_framed')}.
 {cfg.get('prompt_notes', '')}
@@ -502,22 +558,7 @@ Facts about this listing:
 - Location: {p.get('location') or 'remote (no geographic restriction stated)'}
 - Tags: {', '.join(p.get('tags') or [])}
 
-Return ONLY a JSON object (no markdown fence, no commentary) with exactly these
-three string fields:
-{{
-  "title": "one specific title naming the role and company — NOT a generic
-    label. E.g. 'Senior Solidity Engineer role open at Chainlink', never
-    'New Web3 Job'. No emoji.",
-  "narrative": "1-2 sentences: what the role is and who it's for. Plain prose.",
-  "why_it_matters": "EXACTLY one sentence on what makes this worth a second
-    look — the comp, the company, or the scope of the role. No hype."
-}}
-
-Do not mention scores or internal categorization. Never overstate or
-editorialize beyond what the facts above actually say — if salary isn't
-disclosed, say so plainly rather than guessing or hyping the opportunity. No
-emoji anywhere in your output. Keep the combined narrative + why_it_matters
-under ~60 words — the whole post targets roughly 400-700 characters.
+{schema}
 """
 
 
@@ -538,12 +579,17 @@ def compute_web3_jobs_elements(conn, raw_item: dict, history: list) -> dict:
 @register_prompt_builder("startup_jobs")
 def build_startup_jobs_prompt(cfg: dict, region_profile: str, raw_item: dict, history: list) -> str:
     """Same shape as build_web3_jobs_prompt -- builder audience, not crypto,
-    per collectors/startup_jobs.py's inverse relevance gate."""
+    per collectors/startup_jobs.py's inverse relevance gate. Shares
+    _JOBS_SCHEMA_BLOCK's optional-why_it_matters + anti-circularity design
+    (see that constant's comment for the real generated post that prompted
+    it) -- only the surrounding framing (audience, no-crypto-language rule)
+    differs from web3_jobs."""
     p = raw_item["payload"]
     salary_max = p.get("salary_max") or 0
     salary_note = (
         f"${p.get('salary_min') or 0:,.0f}-${salary_max:,.0f}" if salary_max else "not disclosed"
     )
+    schema = _JOBS_SCHEMA_BLOCK.format(company=p.get("company"), position=p.get("position"))
 
     return f"""You are writing prose for a startup/tech jobs Telegram channel (audience:
 founders, indie hackers, people job-hunting at startups -- not a crypto
@@ -557,22 +603,9 @@ Facts about this listing:
 - Location: {p.get('location') or 'remote (no geographic restriction stated)'}
 - Tags: {', '.join(p.get('tags') or [])}
 
-Return ONLY a JSON object (no markdown fence, no commentary) with exactly these
-three string fields:
-{{
-  "title": "one specific title naming the role and company — NOT a generic
-    label. No emoji.",
-  "narrative": "1-2 sentences: what the role is and who it's for. Plain prose.",
-  "why_it_matters": "EXACTLY one sentence on what makes this worth a second
-    look — the comp, the company, or the scope of the role. No hype."
-}}
+{schema}
 
-Do not mention scores or internal categorization. Never overstate or
-editorialize beyond what the facts above actually say — if salary isn't
-disclosed, say so plainly rather than guessing or hyping the opportunity. No
-crypto framing or financial language. No emoji anywhere in your output. Keep
-the combined narrative + why_it_matters under ~60 words — the whole post
-targets roughly 400-700 characters.
+No crypto framing or financial language anywhere in your output.
 """
 
 
@@ -1404,7 +1437,12 @@ def _assemble(conn, category: str, raw_item: dict, history: list, llm_raw_output
         emoji=cfg.get("emoji") or "",
         title=parsed["title"],
         narrative=parsed["narrative"],
-        why_it_matters=parsed["why_it_matters"],
+        # .get(...) or None, not parsed["why_it_matters"] -- as of 2026-09-15
+        # this field is genuinely optional for some categories (see
+        # post_format.assemble_post's docstring); an LLM that follows those
+        # prompts' instructions returns "" when there's nothing to add, and
+        # that should render as nothing, not an empty paragraph.
+        why_it_matters=parsed.get("why_it_matters") or None,
         history_line=elements.get("history_line"),
         risk_line=elements.get("risk_line"),
         source_name=elements.get("source_name"),
