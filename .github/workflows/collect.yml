@@ -1,10 +1,18 @@
 name: Collect
 
 on:
-  schedule:
-    # Every 4 hours. GitHub Actions cron only fires reliably on public repos on
-    # the free plan (Section 4.1) — this repo must stay public for this to run.
-    - cron: "0 */4 * * *"
+  # Schedule trigger disabled 2026-09-15 (operator direction) -- collection
+  # moved to a Railway cron service (see railway.collect.json), same
+  # reasoning that already moved the approval poller off Actions: measured
+  # across the last 10 scheduled runs, this cron averaged a 5.4h gap against
+  # its intended 4h interval, never once actually hitting schedule (worst
+  # gap: 8.2h). File kept in the repo (not deleted) for workflow_dispatch --
+  # a manual "Run workflow" button still works for testing/one-off runs
+  # without needing to touch the Railway service. Re-enabling the schedule
+  # block here WOULD double-collect against the Railway cron job; don't,
+  # unless the Railway job is being retired first.
+  # schedule:
+  #   - cron: "0 */4 * * *"
   workflow_dispatch: {}   # manual "Run workflow" button for testing
 
 jobs:
