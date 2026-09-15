@@ -184,6 +184,62 @@ the one place to check.
   not — cannot actually run yet. Needs the operator's go-ahead before secrets
   are written into the repo's settings.
 
+- **Collection moved off GitHub Actions to a Railway cron service,
+  2026-09-15 -- the same cron-unreliability pattern that already moved the
+  approval poller, this time measured on `collect.yml` itself.** Diagnosed
+  a "6 hours, nothing received" report by pulling the actual gaps between
+  the last 10 scheduled `collect.yml` runs: 2.9h, 3.6h, 5.4h, 6.1h, 8.2h,
+  5.2h, 4.6h, 5.7h, 7.1h — averaging 5.4h against the intended 4h interval,
+  never once on schedule. Operator direction: move collection to Railway
+  too, same reasoning, since it's already proven reliable for the poller.
+
+  Set up as a second Railway service ("collect-cycle") in the same project,
+  connected to the same repo, running `scripts/collect_cycle.py` (already a
+  clean one-shot script -- collect → score → notify, then exit -- no code
+  changes needed) on Railway's native cron (`deploy.cronSchedule`,
+  5-minute-minimum granularity, container starts fresh per run and must
+  terminate cleanly, which this script already does).
+
+  **How it's actually configured, worth being explicit about since it's not
+  what a first read of the repo would suggest**: a `railway.collect.json`
+  Config-as-Code file was written and committed, mirroring the existing
+  `railway.json`'s pattern for the poller -- but Railway's API rejected
+  binding a NEW service to it (`railwayConfigFile`), returning "Config as
+  Code (railway.json / railway.toml) is deprecated... Use Infrastructure as
+  Code (.railway/railway.ts) instead" as a hard error, even though the
+  existing poller's `railway.json` keeps working under a 2026-12-01
+  grandfather clause. Rather than doing the Infrastructure-as-Code
+  migration under this ask's scope, the service's startCommand/
+  cronSchedule/restartPolicyType/builder were set directly via
+  `serviceInstanceUpdate` (Railway's own GraphQL API, the same one the CLI
+  itself uses) -- these are genuinely durable, service-level settings, not
+  a workaround; they don't reset on redeploy. `railway.collect.json` was
+  therefore removed rather than left in the repo looking like the live
+  config when it isn't bound to anything. If the poller's `railway.json`
+  ever needs the same treatment before 2026-12-01, expect the same
+  rejection and use the same direct-API path, or do the real
+  `.railway/railway.ts` migration then.
+
+  `.github/workflows/collect.yml`'s schedule trigger is commented out, not
+  deleted -- `workflow_dispatch` still works for manual runs. Re-enabling
+  the schedule would double-collect against the Railway job.
+
+  **Separate, real incident from the same work, not swept under this
+  entry**: checking whether the poller service already had
+  `ETHERSCAN_API_KEY` set (needed for the new collect-cycle service but not
+  the poller) via `railway variables --json` printed all six of that
+  service's real secret values in cleartext into the session transcript —
+  `DATABASE_URL` (with password), `DEEPSEEK_API_KEY`, `ETHERSCAN_API_KEY`,
+  `TELEGRAM_BOT_TOKEN`, and both Telegram IDs. A masked/table-view command
+  should have been used instead. Operator direction: rotate all three
+  credential-shaped values (DB password via Supabase, DeepSeek key,
+  Etherscan key) out of caution, same posture as the earlier Telegram token
+  incident. The new collect-cycle service's own variables are Railway
+  cross-service references (`${{crypto-content-bot.VAR}}`) by name, not
+  copied values -- set without the actual secret values ever being touched
+  a second time, and they'll pick up the rotated values automatically once
+  the poller service's are updated.
+
 ## Gems/security screening (Phase 2/3, built 2026-09-11)
 
 - **Pre-liquidity discovery gap — accepted tradeoff, not fixed.** Discovery
