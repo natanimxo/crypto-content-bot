@@ -31,13 +31,12 @@ and category_config.yaml's news.score_weights only has three keys
 (impact/novelty/actionability) -- credibility's weight is redistributed,
 not left dead.
 
-HOLD: every candidate this collector inserts is held=True unconditionally
-(HOLD_ALL_CANDIDATES below) -- operator direction 2026-09-11/12: the
-Hetzner approval-poller host is still pending verification, defi_yields and
-gems_security already have candidates waiting, and a fourth category adding
-to an already-unactionable queue isn't wanted. Flip HOLD_ALL_CANDIDATES to
-False (or release individually via scripts/hold_candidates.py) once that's
-resolved.
+HOLD: HOLD_ALL_CANDIDATES flipped to False 2026-09-15 (operator direction,
+applied identically across every category) -- the always-on Railway poller
+is now verified healthy, which was the entire reason every collector held
+unconditionally since 2026-09-11/12. New candidates flow to notify.py
+normally from here on; the existing held backlog is untouched and worked
+through manually via scripts/hold_candidates.py.
 """
 
 import logging
@@ -93,8 +92,12 @@ NOT_ORIGINAL_REPORTING_CATEGORIES = {
 DEDUP_WINDOW_HOURS = 12
 DEDUP_MERGE_THRESHOLD = 0.5
 
-# Operator direction 2026-09-11/12 -- see module docstring's HOLD section.
-HOLD_ALL_CANDIDATES = True
+# Flipped to False 2026-09-15 -- see collectors/defi_yields.py's comment
+# (same operator direction, applied identically across every category):
+# the always-on Railway poller is now verified healthy, which was the
+# entire reason every collector held unconditionally. Existing held rows
+# are untouched by this; only new candidates from here on are affected.
+HOLD_ALL_CANDIDATES = False
 
 
 def _is_original_reporting(tags: list[str]) -> bool:

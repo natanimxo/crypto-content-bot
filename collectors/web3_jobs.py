@@ -34,6 +34,13 @@ API_URL = "https://remoteok.com/api"
 # verified this UA works.
 REQUEST_HEADERS = {"User-Agent": "Mozilla/5.0"}
 
+# Flipped to False 2026-09-15 -- see collectors/defi_yields.py's comment
+# (same operator direction, applied identically across every category):
+# the always-on Railway poller is now verified healthy, which was the
+# entire reason every collector held unconditionally. Existing held rows
+# are untouched by this; only new candidates from here on are affected.
+HOLD_ALL_CANDIDATES = False
+
 
 def _fix_mojibake(value):
     """RemoteOK has a server-side encoding bug (live-confirmed 2026-09-10 on
@@ -287,10 +294,7 @@ def collect() -> int:
 
             state["details"]["not_relevant_filtered"] = not_relevant_count
 
-            # held=True (2026-09-12) -- see collectors/gems_security.py's
-            # comment: every collector holds unconditionally right now,
-            # regardless of category, until the Hetzner poller is verified.
-            inserted = insert_raw_items_batch(conn, source_id, CATEGORY, items, held=True)
+            inserted = insert_raw_items_batch(conn, source_id, CATEGORY, items, held=HOLD_ALL_CANDIDATES)
             state["details"]["inserted"] = inserted
 
             assigned = assign_channels_to_new_items(conn, CATEGORY)

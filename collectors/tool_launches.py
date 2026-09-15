@@ -38,9 +38,12 @@ Noise floor, not a full relevance gate (operator-approved) -- both sources
 are already meaningfully curated at the source (HN's own Show HN tagging,
 GitHub's own trending algorithm), unlike RemoteOK's noisy tag system.
 
-HOLD: every row this collector inserts is held=True unconditionally, same
-as gems_security/news -- nothing notifies until the Hetzner poller is
-verified (operator direction, ongoing through Phase 3).
+HOLD: HOLD_ALL_CANDIDATES flipped to False 2026-09-15 (operator direction,
+applied identically across every category) -- the always-on Railway poller
+is now verified healthy, which was the entire reason every collector held
+unconditionally since 2026-09-12. New candidates flow to notify.py normally
+from here on; the existing held backlog is untouched and worked through
+manually.
 """
 
 import logging
@@ -62,6 +65,8 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 logger = logging.getLogger(__name__)
 
 CATEGORY = "tool_launches"
+
+HOLD_ALL_CANDIDATES = False  # see module docstring's HOLD section
 
 HN_ALGOLIA_URL = "http://hn.algolia.com/api/v1/search_by_date"
 GITHUB_TRENDING_URL = "https://github.com/trending"
@@ -212,7 +217,7 @@ def collect() -> int:
 
             source_id = get_or_create_source(conn, CATEGORY, "hn_and_github_trending", "api+scrape",
                                               {"hn": HN_ALGOLIA_URL, "github": GITHUB_TRENDING_URL})
-            inserted = insert_raw_items_batch(conn, source_id, CATEGORY, items, held=True)
+            inserted = insert_raw_items_batch(conn, source_id, CATEGORY, items, held=HOLD_ALL_CANDIDATES)
             state["details"]["candidates"] = len(items)
             state["details"]["inserted"] = inserted
 

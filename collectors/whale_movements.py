@@ -33,6 +33,13 @@ logger = logging.getLogger(__name__)
 
 CATEGORY = "whale_movements"
 SOURCE_NAME = "etherscan_whale_watch"
+
+# Flipped to False 2026-09-15 -- see collectors/defi_yields.py's comment
+# (same operator direction, applied identically across every category):
+# the always-on Railway poller is now verified healthy, which was the
+# entire reason every collector held unconditionally. Existing held rows
+# are untouched by this; only new candidates from here on are affected.
+HOLD_ALL_CANDIDATES = False
 # Etherscan's V1 endpoint (api.etherscan.io/api) is deprecated — live-discovered
 # 2026-09-10, first real call against a funded key returned "You are using a
 # deprecated V1 endpoint, switch to Etherscan API V2". V2 is a unified multi-
@@ -395,15 +402,7 @@ def collect() -> int:
             state["details"]["stale_skipped"] = stale_skipped
             state["details"]["notable"] = len(items)
 
-            # held=True (2026-09-12): every collector holds unconditionally
-            # right now, not just the newest ones -- operator direction is
-            # that NOTHING notifies until the Hetzner poller is verified,
-            # regardless of which category a fresh candidate belongs to.
-            # See collectors/gems_security.py's same comment for the real
-            # gap this closes (this category predates the `held` mechanism
-            # and was never updated when it landed). Flip to conditional/off
-            # once the poller is confirmed.
-            inserted = insert_raw_items_batch(conn, source_id, CATEGORY, items, held=True)
+            inserted = insert_raw_items_batch(conn, source_id, CATEGORY, items, held=HOLD_ALL_CANDIDATES)
             state["details"]["inserted"] = inserted
             logger.info("whale_movements: fetched=%d notable=%d inserted=%d",
                         fetched_count, len(items), inserted)

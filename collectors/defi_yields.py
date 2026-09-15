@@ -27,6 +27,17 @@ API_URL = "https://yields.llama.fi/pools"
 # work. This just keeps obviously-untracked micro-pools out of raw_items entirely.
 MIN_TVL_USD = 100_000
 
+# HOLD_ALL_CANDIDATES flipped to False 2026-09-15 (operator direction): every
+# collector held unconditionally from 2026-09-12 until the always-on Railway
+# poller was verified running cleanly (confirmed 2026-09-15 -- healthy
+# long-poll cycles, correct token, real approve/reject/write round trips).
+# That was the entire reason to hold; the existing backlog (thousands of
+# rows across every category) stays held and gets worked through in manual
+# batches, but new candidates from here on flow to notify.py normally,
+# subject to the same review_threshold/cooldown_hours/soft_daily_cap this
+# category has always had.
+HOLD_ALL_CANDIDATES = False
+
 
 def _topic_key(pool: dict) -> str:
     return f"{pool.get('project', '')}|{pool.get('chain', '')}|{pool.get('symbol', '')}".lower()
@@ -100,10 +111,7 @@ def collect() -> int:
                 }
                 items.append((pool_id, payload))
 
-            # held=True (2026-09-12) -- see collectors/gems_security.py's
-            # comment: every collector holds unconditionally right now,
-            # regardless of category, until the Hetzner poller is verified.
-            inserted = insert_raw_items_batch(conn, source_id, CATEGORY, items, held=True)
+            inserted = insert_raw_items_batch(conn, source_id, CATEGORY, items, held=HOLD_ALL_CANDIDATES)
             state["details"]["inserted"] = inserted
             logger.info("defi_yields: fetched=%d inserted=%d", len(pools), inserted)
         return inserted

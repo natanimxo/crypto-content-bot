@@ -276,9 +276,12 @@ DEDUP_MERGE_THRESHOLD = 0.5
 # update would otherwise fill a cycle's per-topic slots on its own.
 MACRO_NEWS_PER_TOPIC_CYCLE_CAP = 2
 
-# Operator direction 2026-09-12 -- hold everything until the Hetzner
-# approval-poller host is verified, same as every other collector right now.
-HOLD_ALL_CANDIDATES = True
+# Flipped to False 2026-09-15 -- see collectors/defi_yields.py's comment
+# (same operator direction, applied identically across every category):
+# the always-on Railway poller is now verified healthy, which was the
+# entire reason every collector held unconditionally. Existing held rows
+# are untouched by this; only new candidates from here on are affected.
+HOLD_ALL_CANDIDATES = False
 
 
 def _entry_datetime(entry) -> datetime | None:

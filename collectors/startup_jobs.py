@@ -27,9 +27,12 @@ web3_jobs.py) -- deliberately duplicated instead, to avoid touching a
 working, already-relied-upon category mid-session for a DRY concern. Noted
 in BACKLOG.md as a real, low-priority follow-up.
 
-HOLD: every row this collector inserts is held=True unconditionally, same
-as every Phase 3 category -- nothing notifies until the Hetzner poller is
-verified.
+HOLD: HOLD_ALL_CANDIDATES flipped to False 2026-09-15 (operator direction,
+applied identically across every category) -- the always-on Railway poller
+is now verified healthy, which was the entire reason every collector held
+unconditionally since 2026-09-12. New candidates flow to notify.py normally
+from here on; the existing held backlog is untouched and worked through
+manually.
 """
 
 import logging
@@ -50,6 +53,8 @@ CATEGORY = "startup_jobs"
 SOURCE_NAME = "remoteok_general"
 API_URL = "https://remoteok.com/api"
 REQUEST_HEADERS = {"User-Agent": "Mozilla/5.0"}
+
+HOLD_ALL_CANDIDATES = False  # see module docstring's HOLD section
 
 
 # --- Duplicated from collectors/web3_jobs.py verbatim (same source, same
@@ -213,7 +218,7 @@ def collect() -> int:
 
             state["details"]["not_relevant_filtered"] = not_relevant_count
 
-            inserted = insert_raw_items_batch(conn, source_id, CATEGORY, items, held=True)
+            inserted = insert_raw_items_batch(conn, source_id, CATEGORY, items, held=HOLD_ALL_CANDIDATES)
             state["details"]["inserted"] = inserted
 
             logger.info(
