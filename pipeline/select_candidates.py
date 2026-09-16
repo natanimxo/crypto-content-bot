@@ -1,13 +1,41 @@
 """Turns scored raw_items into the list that actually gets notified to the
 operator. This is where Section 7's cooldown suppression and Section 9's
-soft-daily-cap holding happen — both deterministic, both before anything reaches
-an LLM.
+soft-cap pacing happen — both deterministic, both before anything reaches an
+LLM.
 
-An item can clear review_threshold and still not be notified this cycle, either
-because its topic was already surfaced within cooldown_hours, or because the
-channel already hit its soft_daily_cap for today — in both cases it's simply
-skipped, not marked as anything, so a later cycle (once the cooldown lapses, or
-tomorrow resets the cap) can pick it back up.
+An item can clear review_threshold and still not be notified this cycle,
+either because its topic was already surfaced within cooldown_hours, or
+because the channel/category already hit its soft_daily_cap for the trailing
+window -- in both cases it's simply skipped, not marked as anything, so a
+later cycle can pick it back up once cap headroom or cooldown allows it.
+
+CAP WINDOW, corrected 2026-09-16 (real incident, operator direction): this
+used to reset at UTC midnight ("today" = calendar date in UTC). For an
+operator at UTC+3, that's 3am local -- quota burns out during their evening,
+sits fully spent overnight while they sleep, then the WHOLE cap frees up at
+once the moment UTC rolls over, dumping everything that had backed up in one
+notification. Verified live, 2026-09-15/16: a run at 20:09 UTC (still
+"today" locally... no, still 2026-09-15 UTC) sent zero news items despite 9
+clearing threshold (cap already spent); the very next run, at 00:09 UTC
+(2026-09-16, cap freshly reset), sent 27 candidates across 3 channels in one
+burst. That's gating-then-flushing, the opposite of pacing.
+
+Fixed by moving from a calendar-day boundary to a rolling window
+(CAP_WINDOW_HOURS, trailing hours from now) -- capacity drains and refills
+continuously as old notifications age out of the window, so there's no
+single moment where the whole cap resets and no timezone to get right (or
+wrong) in the first place.
+
+STARVATION, same incident, a real and separate problem from the boundary
+itself (confirmed twice, by raw_item_id, not inferred): a candidate that
+clears threshold but loses out to the cap has no seniority under pure
+score-ranking -- every cycle re-ranks by score from scratch, so a mid-scoring
+item in a high-volume category (news: ~20/21 clearing threshold most cycles
+against a cap far below that) can lose to fresher, higher-scoring arrivals
+indefinitely. Not dropped, but "never selected" reads the same as "dropped"
+from the operator's side. Fixed with a small, capped age bonus added to a
+candidate's EFFECTIVE ranking score (see _age_bonus) -- never its stored or
+displayed score, only the order candidates are picked in.
 
 A fourth gate, `raw_items.held` (2026-09-11), is the odd one out: it's never
 set by anything in collect/score, only by the operator (scripts/hold_candidates.py)
@@ -17,8 +45,39 @@ doesn't happen automatically with time; it stays excluded until explicitly
 un-held.
 """
 
+from datetime import datetime, timezone
+
 from pipeline.db import dict_cursor
 from pipeline.score import load_category_config
+
+# Rolling window every soft cap (category- and channel-level) is measured
+# against, replacing the old UTC-calendar-day boundary. 24h, matching the
+# original "roughly a day's pacing" intent of soft_daily_cap -- the name
+# stays as-is (still reads naturally under a rolling interpretation); only
+# the boundary semantics changed.
+CAP_WINDOW_HOURS = 24.0
+
+# Anti-starvation age bonus -- added to a candidate's SCORE to get its
+# EFFECTIVE ranking score for cap-selection purposes only; never written
+# back to `scores.score`, never what's shown to the operator ("Score X/100"
+# in the notification is always the real, unmodified score). Deliberately
+# small and capped well below a typical "barely clears threshold" vs.
+# "genuinely excellent" score gap (real news candidates observed spanning
+# roughly 50-95) -- so a stale, mediocre candidate can gain enough ground to
+# beat something only modestly better after waiting, but can never leapfrog
+# something that's actually much better just by sitting around. +1 point per
+# 6h waited, capped at +12 after 3 days (~18 collection cycles at the
+# post-Railway 4h cadence) -- long enough to be a real, deliberate wait, not
+# noise from one slow cycle.
+AGE_BONUS_HOURS_PER_POINT = 6.0
+AGE_BONUS_MAX_POINTS = 12.0
+
+
+def _age_bonus(collected_at, now: datetime) -> float:
+    if not collected_at:
+        return 0.0
+    age_hours = max(0.0, (now - collected_at).total_seconds() / 3600)
+    return min(AGE_BONUS_MAX_POINTS, age_hours / AGE_BONUS_HOURS_PER_POINT)
 
 
 def _already_notified_ids(conn, category: str) -> set[int]:
@@ -50,27 +109,33 @@ def _topics_in_cooldown(conn, category: str, cooldown_hours: float) -> set[str]:
         return {row["topic_key"] for row in cur.fetchall() if row["topic_key"]}
 
 
-def _category_notified_today_count(conn, channel: str, category: str) -> int:
-    """How many items of this specific category were already notified to this
-    channel today — category_config.soft_daily_cap is a per-category pace, not a
-    channel-wide one (channel_config.soft_daily_cap is the separate combined cap,
-    applied by the caller across all of a channel's categories)."""
+def _category_notified_recent_count(conn, channel: str, category: str,
+                                     window_hours: float = CAP_WINDOW_HOURS) -> int:
+    """How many items of this specific category were notified to this channel
+    in the trailing `window_hours` — category_config.soft_daily_cap is a
+    per-category pace, not a channel-wide one (channel_config.soft_daily_cap
+    is the separate combined cap, applied in bot/notify.py across all of a
+    channel's categories -- see that module's _channel_notified_recent_count,
+    same rolling-window mechanism)."""
     with dict_cursor(conn) as cur:
         cur.execute(
             """SELECT COUNT(*) AS n
                FROM notifications nf
                JOIN raw_items r ON r.id = ANY(nf.candidate_raw_item_ids)
                WHERE nf.channel = %s AND r.category = %s
-                 AND nf.sent_at::date = (now() AT TIME ZONE 'utc')::date""",
-            (channel, category),
+                 AND nf.sent_at > now() - (%s || ' hours')::interval""",
+            (channel, category, window_hours),
         )
         return cur.fetchone()["n"] or 0
 
 
 def get_new_candidates(conn, category: str, channel: str) -> list[dict]:
-    """Return raw_items (with score + breakdown) that are new, clear threshold,
-    aren't in cooldown, and still fit under today's soft_daily_cap for this
-    channel — ordered highest score first."""
+    """Return raw_items (with score + breakdown + collected_at) that are new,
+    clear threshold, aren't in cooldown, and still fit under this channel's
+    rolling-window soft_daily_cap for the category — ordered by EFFECTIVE
+    score (real score + age bonus) descending, highest first. The stored/
+    returned `score` field is always the real one; the age bonus only
+    affects this ordering, see _age_bonus's docstring."""
     cfg = load_category_config(conn, category)
     threshold = float(cfg["review_threshold"])
     cooldown_hours = float(cfg["cooldown_hours"])
@@ -80,12 +145,11 @@ def get_new_candidates(conn, category: str, channel: str) -> list[dict]:
 
     with dict_cursor(conn) as cur:
         cur.execute(
-            """SELECT r.id AS raw_item_id, r.payload, s.score, s.score_breakdown
+            """SELECT r.id AS raw_item_id, r.payload, r.collected_at, s.score, s.score_breakdown
                FROM raw_items r
                JOIN scores s ON s.raw_item_id = r.id
                WHERE r.category = %s AND s.score >= %s AND r.held = FALSE
-                 AND (r.payload->>'assigned_channel' IS NULL OR r.payload->>'assigned_channel' = %s)
-               ORDER BY s.score DESC""",
+                 AND (r.payload->>'assigned_channel' IS NULL OR r.payload->>'assigned_channel' = %s)""",
             (category, threshold, channel),
         )
         rows = cur.fetchall()
@@ -99,10 +163,16 @@ def get_new_candidates(conn, category: str, channel: str) -> list[dict]:
             continue
         candidates.append(row)
 
+    # float(...) matters here, not cosmetic -- scores.score is NUMERIC, which
+    # psycopg2 returns as Decimal; Decimal + the plain float _age_bonus
+    # returns raises TypeError outright (verified live before shipping this).
+    now = datetime.now(timezone.utc)
+    candidates.sort(key=lambda row: float(row["score"]) + _age_bonus(row["collected_at"], now), reverse=True)
+
     soft_cap = cfg.get("soft_daily_cap")
     if soft_cap is not None:
-        already_today = _category_notified_today_count(conn, channel, category)
-        remaining = max(0, int(soft_cap) - already_today)
+        already_recent = _category_notified_recent_count(conn, channel, category)
+        remaining = max(0, int(soft_cap) - already_recent)
         candidates = candidates[:remaining]
 
     return candidates

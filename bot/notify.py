@@ -7,12 +7,26 @@ inline Approve/Edit/Reject row.
 Deliberately sends nothing when there are no new candidates: "you get pinged
 when there's something to post," not on a fixed schedule (Section 9's whole
 point, restated in Section 1's philosophy).
+
+CHANNEL-LEVEL CAP wired up 2026-09-16 (real gap, operator direction: "exactly
+the kind of silent no-op we've caught three times now") -- channel_config.
+soft_daily_cap has been documented since day one (see pipeline/
+select_candidates.py's own comment) as "the separate combined cap, applied by
+the caller across all of a channel's categories" -- but nothing ever actually
+read it here. A channel whose categories each stayed under their own
+per-category cap could still have every category fire in the same cycle and
+bundle into one oversized notification, with no channel-wide throttle at
+all. Fixed below in notify_channel, same rolling-window mechanism and the
+same age-bonus tie-break as the per-category cap (pipeline/select_candidates.
+_age_bonus) -- consistent pacing logic at both levels, not two different
+ideas of "soft cap."
 """
 
 import html
 import logging
 import os
 import sys
+from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -23,7 +37,7 @@ from pipeline.db import dict_cursor, get_conn  # noqa: E402
 from pipeline.llm import generate_triage  # noqa: E402
 from pipeline.run_log import run_log  # noqa: E402
 from pipeline.score import category_config_exists, load_category_config  # noqa: E402
-from pipeline.select_candidates import get_new_candidates  # noqa: E402
+from pipeline.select_candidates import CAP_WINDOW_HOURS, _age_bonus, get_new_candidates  # noqa: E402
 from pipeline.telegram_api import send_message  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -32,11 +46,26 @@ logger = logging.getLogger(__name__)
 
 def _get_channels(conn) -> list[dict]:
     with dict_cursor(conn) as cur:
-        cur.execute("SELECT channel, categories FROM channel_config")
+        cur.execute("SELECT channel, categories, soft_daily_cap FROM channel_config")
         return cur.fetchall()
 
 
-def notify_channel(conn, channel: str, categories: list[str]) -> int | None:
+def _channel_notified_recent_count(conn, channel: str, window_hours: float = CAP_WINDOW_HOURS) -> int:
+    """How many individual candidates (across every category) this channel
+    has been sent in the trailing `window_hours` -- one notification can
+    bundle several candidates, so this sums candidate_raw_item_ids' lengths,
+    not COUNT(*) of notification rows."""
+    with dict_cursor(conn) as cur:
+        cur.execute(
+            """SELECT COALESCE(SUM(array_length(candidate_raw_item_ids, 1)), 0) AS n
+               FROM notifications
+               WHERE channel = %s AND sent_at > now() - (%s || ' hours')::interval""",
+            (channel, window_hours),
+        )
+        return cur.fetchone()["n"] or 0
+
+
+def notify_channel(conn, channel: str, categories: list[str], soft_daily_cap: int | None = None) -> int | None:
     all_candidates = []  # list of (category, row)
     for category in categories:
         # channel_config can list categories from a future build phase (Section
@@ -50,6 +79,34 @@ def notify_channel(conn, channel: str, categories: list[str]) -> int | None:
             continue
         for row in get_new_candidates(conn, category, channel):
             all_candidates.append((category, row))
+
+    if not all_candidates:
+        return None
+
+    # Channel-wide cap, on top of each category's own already-applied cap --
+    # see module docstring. Same rolling-window + age-bonus tie-break as the
+    # per-category cap, applied across the combined, cross-category list so
+    # one channel's categories can't collectively overwhelm it even when each
+    # stayed under its own individual limit.
+    if soft_daily_cap is not None:
+        already_recent = _channel_notified_recent_count(conn, channel)
+        remaining = max(0, int(soft_daily_cap) - already_recent)
+        if len(all_candidates) > remaining:
+            # float(...) -- scores.score is NUMERIC/Decimal, _age_bonus returns
+            # a plain float; see pipeline/select_candidates.py's same cast for
+            # why this isn't cosmetic.
+            now = datetime.now(timezone.utc)
+            all_candidates.sort(
+                key=lambda pair: float(pair[1]["score"]) + _age_bonus(pair[1].get("collected_at"), now),
+                reverse=True,
+            )
+            trimmed = len(all_candidates) - remaining
+            all_candidates = all_candidates[:remaining]
+            logger.info(
+                "notify: channel=%s soft_daily_cap trimmed %d over-cap candidate(s) "
+                "(%d already sent in the last %.0fh, cap=%d)",
+                channel, trimmed, already_recent, CAP_WINDOW_HOURS, soft_daily_cap,
+            )
 
     if not all_candidates:
         return None
@@ -115,7 +172,7 @@ def run() -> None:
             channels = _get_channels(conn)
             sent = 0
             for ch in channels:
-                nid = notify_channel(conn, ch["channel"], ch["categories"])
+                nid = notify_channel(conn, ch["channel"], ch["categories"], ch.get("soft_daily_cap"))
                 if nid:
                     sent += 1
             state["details"]["notifications_sent"] = sent

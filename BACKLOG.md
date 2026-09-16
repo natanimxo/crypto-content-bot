@@ -240,6 +240,81 @@ the one place to check.
   a second time, and they'll pick up the rotated values automatically once
   the poller service's are updated.
 
+- **soft_daily_cap moved from a UTC-calendar-day boundary to a rolling 24h
+  window, and cap selection now uses an age-weighted effective score instead
+  of raw score, 2026-09-16 -- both real, confirmed problems, not
+  precautionary changes.** Operator (UTC+3) reported the daily cap's
+  behavior directly: quota exhausted during their evening, sat fully spent
+  overnight while they slept, then the WHOLE cap freed up the instant UTC
+  rolled over, dumping everything that had backed up in one notification --
+  live-verified 2026-09-15/16 (a 20:09 UTC run sent 0 news items despite 9
+  clearing threshold; the very next run, 00:09 UTC, sent 27 across 3
+  channels in one burst). Gate-then-flush, the opposite of pacing.
+  Considered shifting the reset hour to the operator's own local midnight
+  instead (their other proposed option) and rejected it: that only
+  relocates the burst, since most people's sleep window straddles their own
+  local midnight too -- it doesn't remove the gate-and-flush dynamic, just
+  moves which clock hour it happens at.
+
+  Fixed with a rolling window (`CAP_WINDOW_HOURS = 24`,
+  pipeline/select_candidates.py) -- both the per-category cap
+  (`_category_notified_recent_count`) and the channel-wide cap (below) now
+  count "sent in the trailing 24h" instead of "sent since the UTC calendar
+  date changed." Capacity drains and refills continuously; there's no
+  moment where the whole thing resets, and no timezone to get right (or
+  wrong) since there's no boundary at all. Confirmed against real data
+  post-fix: `news` and `hustle_to_million` both showed 0 remaining headroom
+  immediately after deploying, correctly reflecting that the OLD boundary
+  system had already let more through in the trailing 24h than the cap
+  allows (2x, in news' case, since it got a full quota under the old system
+  on both sides of a single UTC midnight) -- expected, temporary, self-heals
+  as those over-quota sends age past 24h. Not a bug.
+
+  **Second, separate problem confirmed twice (not inferred) via the same
+  incident**: traced specific `raw_item_id`s and proved over-cap candidates
+  are genuinely deferred, not dropped -- but deferred candidates have no
+  seniority under pure score-ranking, since every cycle re-ranks from
+  scratch. In a high-volume category (`news`: ~20/21 items clearing
+  threshold most cycles, cap far below that), a mid-scoring item can lose to
+  fresher, higher-scoring arrivals indefinitely -- "never selected" and
+  "dropped" look identical from the operator's side even though the DB
+  state differs. Fixed with `_age_bonus`: a small bonus added to a
+  candidate's EFFECTIVE ranking score only (never the stored/displayed
+  `scores.score`) that grows the longer it's sat eligible and unnotified --
+  +1 point per 6h waited, capped at +12 after 3 days. Deliberately capped
+  well below a typical "barely clears threshold" vs. "genuinely excellent"
+  gap (real news scores span roughly 50-95) so a stale mediocre candidate
+  can gain enough ground to beat something only modestly better after
+  waiting, but can never leapfrog something actually much better just by
+  sitting around -- verified with synthetic data before trusting it: a
+  72h-old score-52 candidate correctly beat fresh 58/60-scored candidates
+  (effective 64 vs 58/60) but a 95-scored fresh candidate stayed
+  untouchable regardless of how long anything else had waited.
+
+  Real bug caught before shipping, not after: `scores.score` is Postgres
+  `NUMERIC`, which psycopg2 returns as `Decimal` -- `Decimal + float`
+  (the plain-float `_age_bonus` return) raises `TypeError` outright,
+  confirmed by direct reproduction before it ever reached the sort call.
+  Both call sites (`select_candidates.get_new_candidates` and
+  `notify.notify_channel`) explicitly cast to `float(row["score"])` first.
+
+  **Channel-level cap wired up in the same pass**: `channel_config.
+  soft_daily_cap` had been documented since day one (pipeline/
+  select_candidates.py's own long-standing comment) as "the separate
+  combined cap, applied by the caller across all of a channel's
+  categories" -- but `bot/notify.py` never actually read it. A channel
+  whose every category individually stayed under its own cap could still
+  have all of them fire the same cycle and bundle into one oversized
+  notification, with nothing throttling the channel as a whole. Same
+  silent-no-op shape as the Telegram-token log leak and the
+  approval-with-no-write bug -- documented as enforced, never actually
+  wired. Fixed rather than removed (real, useful throttle): `bot/notify.py`
+  now sums each channel's total notified-candidate count over the same
+  rolling 24h window and trims the combined candidate list down to
+  whatever headroom remains, using the identical age-bonus effective-score
+  tie-break as the per-category cap -- one consistent pacing mechanism at
+  both levels, not two different ideas of "soft cap."
+
 ## Gems/security screening (Phase 2/3, built 2026-09-11)
 
 - **Pre-liquidity discovery gap — accepted tradeoff, not fixed.** Discovery
