@@ -47,8 +47,18 @@ un-held.
 
 from datetime import datetime, timezone
 
+from pipeline import entities as entity_lib
 from pipeline.db import dict_cursor
 from pipeline.score import load_category_config
+
+# Same value as collectors/news.py's and collectors/macro_news.py's own
+# DEDUP_MERGE_THRESHOLD (kept as a separate constant here, not imported --
+# pipeline/ is lower-level than collectors/, collectors import FROM
+# pipeline, not the other way around). Used for the cross-cycle same-story
+# dedup pass in get_new_candidates below; see its comment for why this
+# needs to exist as its own pass, separate from the collectors' own
+# same-cycle dedup.
+CROSS_CYCLE_DEDUP_THRESHOLD = 0.5
 
 # Rolling window every soft cap (category- and channel-level) is measured
 # against, replacing the old UTC-calendar-day boundary. 24h, matching the
@@ -162,6 +172,42 @@ def get_new_candidates(conn, category: str, channel: str) -> list[dict]:
         if topic_key and topic_key in cooling_down_topics:
             continue
         candidates.append(row)
+
+    # Cross-CYCLE same-story dedup (2026-09-16, real incident) -- collectors'
+    # own same-cycle dedup (collectors/news.py, collectors/macro_news.py)
+    # only compares candidates gathered within ONE collect() call; it has no
+    # way to catch a story a feed re-serves across SEPARATE collection
+    # cycles, each time as a "new" raw_item with its own external_id. Real
+    # case: "AI regulation faces political deadlock..." was collected from
+    # bbc_world and bbc_business 7h41m apart -- two different collect()
+    # runs -- and both ended up unheld and unnotified at the same time, so
+    # they bundled into the same digest. topic_key alone isn't safe for
+    # this (deliberately coarse, "same primary subject" not "same specific
+    # event" -- pipeline/entities.py) -- collapsing by it here would risk
+    # merging two genuinely different stories about the same broad subject.
+    # Uses the identical precision-first test as collection-time dedup
+    # instead (entity_lib.is_duplicate_story: exact title match OR a real
+    # fingerprint overlap), just applied across every currently-eligible,
+    # not-yet-notified candidate for this category, regardless of which
+    # cycle collected it. O(n^2) in the (small, per-category, per-cycle)
+    # candidate list -- fine at this scale.
+    deduped = []
+    for row in candidates:
+        p = row["payload"] or {}
+        title = p.get("title") or ""
+        ent = {
+            "tickers": set(p.get("tickers") or []),
+            "phrases": set(p.get("phrases") or []),
+            "figures": set(p.get("figures") or []),
+        }
+        if any(
+            entity_lib.is_duplicate_story(ent, title, kept["_ent"], kept["_title"], CROSS_CYCLE_DEDUP_THRESHOLD)
+            for kept in deduped
+        ):
+            continue
+        row["_ent"], row["_title"] = ent, title
+        deduped.append(row)
+    candidates = [{k: v for k, v in row.items() if k not in ("_ent", "_title")} for row in deduped]
 
     # float(...) matters here, not cosmetic -- scores.score is NUMERIC, which
     # psycopg2 returns as Decimal; Decimal + the plain float _age_bonus

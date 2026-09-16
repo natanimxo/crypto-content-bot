@@ -82,6 +82,46 @@ MIN_HN_POINTS = 5
 MIN_HN_COMMENTS = 2
 
 GITHUB_REPO_URL_RE = re.compile(r"github\.com/([\w.-]+/[\w.-]+)", re.IGNORECASE)
+
+# Relevance gate for the HN side only (operator direction 2026-09-16, real
+# incident) -- "Noise floor, not a full relevance gate" above was true for
+# WHICH tools surface, but never actually checked whether a Show HN post is
+# a tool at all. "Show HN: I made X" covers anything a poster built or
+# wrote -- confirmed live examples that cleared MIN_HN_POINTS/COMMENTS and
+# scored 60-65: "The bottom 50% of U.S. households are short after
+# essentials (BLS data)" and "Loss. a tiny satire about AI progress".
+#
+# Checked both before writing any rule, not assumed -- one turned out to
+# genuinely BE a tool (a real interactive household-finance dashboard with
+# adjustable parameters and charts, verified by loading the actual page;
+# its HN title just states a finding instead of describing the tool), the
+# other genuinely isn't (a satirical fake-corporate-AI landing page,
+# verified the same way). Scanned all 185 stored HN candidates for a
+# broader signal before picking rules: only 3 total hits across the whole
+# set for any of the patterns below -- this is a narrow, high-precision
+# gate on purpose, matching "noise floor" rather than trying to build a
+# comprehensive classifier off 2-3 examples.
+#
+# Two independently reliable signals, checked in the title (not the body,
+# same reasoning as macro_news's taxonomy gate -- a title is what a poster
+# chose to lead with):
+# 1. HN auto-appends [pdf]/[video]/[audio] when the linked URL is that file
+#    type -- mechanically reliable, and a bare document/media file is never
+#    itself a runnable tool (it might describe one, but the HN post IS the
+#    file, not a product).
+# 2. Explicit self-labeling as opinion/satire/essay -- a poster who titles
+#    their own post "a tiny satire about X" or "my thoughts on Y" is
+#    already telling you it isn't a tool; no reason to second-guess that.
+_NON_TOOL_SUFFIX_RE = re.compile(r"\[(pdf|video|audio)\]", re.IGNORECASE)
+_NON_TOOL_SELF_LABEL_RE = re.compile(
+    r"\b(satire|essay|op-ed|my thoughts|thoughts on|why i |reflections? on|"
+    r"the case (?:for|against)|in defense of)\b",
+    re.IGNORECASE,
+)
+
+
+def _is_likely_tool(title: str) -> bool:
+    return not (_NON_TOOL_SUFFIX_RE.search(title) or _NON_TOOL_SELF_LABEL_RE.search(title))
 # The actual bonus MAGNITUDE (deliberately mild -- see module docstring)
 # lives in pipeline/score.py alongside the rest of the scoring logic; this
 # collector only records the raw fact (also_trending_on_github /
@@ -166,6 +206,7 @@ def collect() -> int:
 
             items = []
             hn_filtered = 0
+            hn_not_a_tool = 0
             for hit in hn_hits:
                 points = hit.get("points") or 0
                 comments = hit.get("num_comments") or 0
@@ -173,6 +214,9 @@ def collect() -> int:
                     hn_filtered += 1
                     continue
                 title = (hit.get("title") or "").removeprefix("Show HN: ").removeprefix("Show HN:").strip()
+                if not _is_likely_tool(title):
+                    hn_not_a_tool += 1
+                    continue
                 url = hit.get("url") or f"https://news.ycombinator.com/item?id={hit.get('objectID')}"
                 repo = _extract_github_repo(hit.get("url"))
                 also_trending = repo in github_repo_names if repo else False
@@ -191,6 +235,7 @@ def collect() -> int:
                 items.append((f"hn:{hit.get('objectID')}", payload))
 
             state["details"]["hn_filtered"] = hn_filtered
+            state["details"]["hn_not_a_tool"] = hn_not_a_tool
 
             hn_repo_names = set()
             for hit in hn_hits:
@@ -222,8 +267,8 @@ def collect() -> int:
             state["details"]["inserted"] = inserted
 
             logger.info(
-                "tool_launches: hn_fetched=%d hn_filtered=%d github_fetched=%d candidates=%d inserted=%d",
-                len(hn_hits), hn_filtered, len(github_repos), len(items), inserted,
+                "tool_launches: hn_fetched=%d hn_filtered=%d hn_not_a_tool=%d github_fetched=%d candidates=%d inserted=%d",
+                len(hn_hits), hn_filtered, hn_not_a_tool, len(github_repos), len(items), inserted,
             )
         return inserted
     finally:

@@ -201,8 +201,15 @@ def collect() -> int:
                         gap_hours = abs((c["published_at"] - other["published_at"]).total_seconds()) / 3600
                         if gap_hours > DEDUP_WINDOW_HOURS:
                             continue
-                    overlap = entity_lib.fingerprint_overlap(c["entities"], other["entities"])
-                    if overlap >= DEDUP_MERGE_THRESHOLD:
+                    # is_duplicate_story, not fingerprint_overlap directly (2026-09-16 fix):
+                    # an exact title match OR fingerprint overlap, either sufficient --
+                    # see pipeline/entities.py's docstring for the live bug this closes
+                    # (a byte-identical headline from two outlets scored fingerprint_
+                    # overlap=0.0 because neither side had a ticker/figure to trip the
+                    # gate on, which phrase-based matching alone would never catch since
+                    # titles are deliberately excluded from phrase extraction).
+                    if entity_lib.is_duplicate_story(c["entities"], c["title"], other["entities"], other["title"],
+                                                       DEDUP_MERGE_THRESHOLD):
                         assigned[j] = True
                         merged_away += 1
                         c["also_covered_by"].append(other["source_name"])

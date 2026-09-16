@@ -169,9 +169,36 @@ _AI_POLICY_RE = re.compile(
     r"frontier model)\b",
     re.IGNORECASE,
 )
-_REGULATORY_RE = re.compile(
+_REGULATORY_SPECIFIC_RE = re.compile(
     r"\b(antitrust|doj lawsuit|ftc lawsuit|sec (?:charges|lawsuit|enforcement)|\bcftc\b|"
-    r"regulatory crackdown|landmark ruling|supreme court ruling|investigations?|regulations?)\b",
+    r"regulatory crackdown|landmark ruling|supreme court ruling)\b",
+    re.IGNORECASE,
+)
+# Bare "investigation"/"regulation" alone, added 2026-09-15 specifically to
+# catch a real on-brief story (Wired's "US Government Launched 3 Previously
+# Unreported Investigations of Polymarket Trades"), was too broad on its
+# own -- live bug, 2026-09-16: "Scoop: Top House Democrat launches
+# investigation into Donald Trump Jr.'s wedding" cleared this bucket on the
+# word alone and scored 74.2, zero economic implication for a reader. The
+# actual distinguishing signal in the Polymarket headline was never
+# "investigation" by itself, it was investigation + a market/financial
+# subject in the SAME title ("...Investigations of Polymarket Trades").
+# Requiring that co-occurrence now -- same compound-condition shape as
+# _CONFLICT_RE + _ECON_SPILLOVER_RE above, for the same reason: a bare
+# keyword this generic needs a subject-matter check, not just a synonym
+# list. Re-verified after tightening: still matches the Polymarket case
+# ("Investigations" + "Trades"); correctly excludes the Trump Jr. wedding
+# case (no market/financial term anywhere in that title). Traded away one
+# other previously-included item in the process (an Axios "OpenAI faces
+# Senate investigation into Hugging Face breach" story, which also named no
+# financial/market subject) -- accepted deliberately: precision over
+# recall is this category's whole posture, and that item was itself
+# borderline against the brief (general tech-company legal scrutiny, not
+# clearly "AI regulation or industry-shifting capability").
+_INVESTIGATION_OR_REGULATION_RE = re.compile(r"\b(investigations?|regulations?)\b", re.IGNORECASE)
+_REGULATORY_SUBJECT_RE = re.compile(
+    r"\b(trad(?:e|es|ing)|markets?|exchanges?|banks?|funds?|invest(?:or|ors|ment|ments)|"
+    r"securit(?:y|ies)|crypto|compan(?:y|ies)|corporate|financial|antitrust|monopoly)\b",
     re.IGNORECASE,
 )
 
@@ -194,7 +221,9 @@ def _matched_taxonomy_buckets(text: str) -> list[str]:
         buckets.append("conflict_spillover")
     if _AI_POLICY_RE.search(text):
         buckets.append("ai_policy")
-    if _REGULATORY_RE.search(text):
+    if _REGULATORY_SPECIFIC_RE.search(text) or (
+        _INVESTIGATION_OR_REGULATION_RE.search(text) and _REGULATORY_SUBJECT_RE.search(text)
+    ):
         buckets.append("regulatory")
     return buckets
 
@@ -371,8 +400,16 @@ def collect() -> int:
                         gap_hours = abs((c["published_at"] - other["published_at"]).total_seconds()) / 3600
                         if gap_hours > DEDUP_WINDOW_HOURS:
                             continue
-                    overlap = entity_lib.fingerprint_overlap(c["entities"], other["entities"])
-                    if overlap >= DEDUP_MERGE_THRESHOLD:
+                    # is_duplicate_story, not fingerprint_overlap directly (2026-09-16 fix,
+                    # real incident: "AI regulation faces political deadlock as calls grow
+                    # for Congress to act" from bbc_world/bbc_business, byte-identical
+                    # title+description, scored fingerprint_overlap=0.0 -- neither side
+                    # had a ticker/figure, which is common for policy/AI stories, and that
+                    # trips fingerprint_overlap's hard gate before phrase overlap is ever
+                    # checked). See pipeline/entities.py's is_duplicate_story/titles_match
+                    # docstrings for the full reasoning.
+                    if entity_lib.is_duplicate_story(c["entities"], c["title"], other["entities"], other["title"],
+                                                       DEDUP_MERGE_THRESHOLD):
                         assigned[j] = True
                         merged_away += 1
                         c["also_covered_by"].append(other["source_name"])

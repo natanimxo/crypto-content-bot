@@ -145,6 +145,50 @@ def fingerprint_overlap(a: dict, b: dict) -> float:
     return min(score, 1.0)
 
 
+def titles_match(title_a: str, title_b: str) -> bool:
+    """True if two headlines are, character-for-character (modulo case and
+    whitespace), the same headline -- the strongest possible same-story
+    signal there is, and one fingerprint_overlap structurally cannot see:
+    phrase extraction is deliberately run against DESCRIPTION only, never
+    TITLE (see extract_entities' docstring -- these feeds Title-Case every
+    headline word, which would make any 2+-word run in a title look like a
+    "phrase"). That's the right call for phrase extraction, but it means an
+    identical republished headline carries zero weight in fingerprint_
+    overlap's score.
+
+    Real bug, 2026-09-16: "AI regulation faces political deadlock as calls
+    grow for Congress to act" -- byte-identical title AND description from
+    bbc_world and bbc_business -- scored fingerprint_overlap=0.0 because
+    neither side had a ticker or figure (a policy/AI story, not a
+    market-moving one), which trips fingerprint_overlap's hard gate before
+    phrase overlap is ever even checked. This function is a separate,
+    independent, additive signal precisely for that gap: an EXACT title
+    match is checked instead of (not in place of) fingerprint_overlap, used
+    as an OR alongside it wherever same-story dedup happens.
+
+    Deliberately an EXACT match (normalized for case/whitespace only), not
+    a fuzzy similarity ratio -- a same-story signal this strong should stay
+    unambiguous. Loosening it to "close enough" risks merging two
+    genuinely different stories that happen to use similar wording, the
+    exact failure mode fingerprint_overlap's ticker/figure gate exists to
+    guard against in the first place."""
+    a = re.sub(r"\s+", " ", (title_a or "")).strip().lower()
+    b = re.sub(r"\s+", " ", (title_b or "")).strip().lower()
+    return bool(a) and a == b
+
+
+def is_duplicate_story(entities_a: dict, title_a: str, entities_b: dict, title_b: str,
+                        threshold: float) -> bool:
+    """The actual dedup test used everywhere in this codebase that needs to
+    ask "is this the same story" -- an exact title match (titles_match) OR
+    a real entity-fingerprint overlap (fingerprint_overlap >= threshold).
+    Either signal alone is sufficient; both are independently high-
+    precision. Centralized here so collectors/news.py, collectors/
+    macro_news.py, and pipeline/select_candidates.py's cross-cycle pass all
+    apply the identical test rather than three copies that could drift."""
+    return titles_match(title_a, title_b) or fingerprint_overlap(entities_a, entities_b) >= threshold
+
+
 def primary_entity(entities: dict) -> str | None:
     """The single most stable identifier for 'what is this story primarily
     about' -- used as topic_key (pipeline/score.py, select_candidates.py's

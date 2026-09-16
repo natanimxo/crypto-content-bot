@@ -444,6 +444,103 @@ the one place to check.
   semantic/embedding comparison could, a materially different approach
   (and not a zero-LLM-call one) not attempted here.
 
+## Content quality fixes from real-digest review (2026-09-16)
+
+Four issues from one operator review of real output -- three content
+quality, one structural (the fourth, web3_jobs source exhaustion, is
+tracked separately below under Hustle to Million rather than here, since
+it's a sourcing decision still pending operator direction, not a fix).
+
+- **Cross-outlet/cross-cycle dedup failed on an identical headline --
+  "AI regulation faces political deadlock as calls grow for Congress to
+  act", byte-identical title AND description from bbc_world and
+  bbc_business.** Two real, distinct root causes, not one:
+
+  1. `fingerprint_overlap` (pipeline/entities.py) hard-gates on ticker-or-
+     figure presence before ever checking phrase overlap -- and this story
+     had neither (a policy/AI deadlock piece, not a market-moving one),
+     so it scored 0.0 regardless of how much text actually matched.
+     Structural: phrase-only corroboration was never possible for content
+     lacking both signals, common for macro/policy stories, rare for
+     crypto ones (why this sat latent through news.py's build without
+     surfacing).
+  2. The two copies that actually landed in the same digest were
+     collected 7h41m apart, in separate `collect()` runs -- same-cycle
+     dedup (collectors/news.py, collectors/macro_news.py) only ever
+     compares candidates gathered within ONE run; it structurally cannot
+     catch a story a feed re-serves across separate collection cycles
+     before either copy is notified.
+
+  Fixed both. `pipeline/entities.py` gained `titles_match` (an exact,
+  case/whitespace-normalized title comparison -- titles are deliberately
+  excluded from `extract_entities`' phrase extraction, since these feeds
+  Title-Case every headline word, so an identical headline previously
+  carried zero weight in the fingerprint score) and `is_duplicate_story`
+  (title match OR fingerprint overlap, either sufficient), now used
+  everywhere same-story dedup happens instead of three copies that could
+  drift. Collection-time dedup in both collectors now calls
+  `is_duplicate_story` instead of `fingerprint_overlap` directly.
+  Selection-time (`pipeline/select_candidates.get_new_candidates`) gained
+  a NEW cross-cycle dedup pass using the identical test, applied across
+  every currently-eligible not-yet-notified candidate for a category
+  regardless of which cycle collected it -- deliberately NOT a topic_key
+  collapse (too coarse, "same primary subject" not "same specific event",
+  would risk merging genuinely different same-subject stories). Verified
+  against the real incident: the 4 actual duplicate raw_items in the live
+  DB collapse to 1 through the real code path, not a synthetic test.
+
+- **tool_launches had no gate for "is this actually a tool."** Real
+  examples: "The bottom 50% of U.S. households are short after essentials
+  (BLS data)" (score 64.5) and "Loss. a tiny satire about AI progress"
+  (score 60.0) both cleared HN's points/comments floor with nothing
+  checking whether the linked thing was software. "Show HN: I made X"
+  covers essays, data analyses, research papers, and jokes as readily as
+  real products.
+
+  Checked both flagged examples directly before writing any rule, not
+  assumed from the titles alone: loaded the actual linked pages. "Loss"
+  genuinely is a satirical fake-corporate-AI landing page (verified --
+  mock "rituals"/"omens" copy, no real functionality). The household-
+  finance one is NOT a false positive -- it's a genuine, real interactive
+  dashboard (adjustable income-concept/projection toggles, three real
+  charts) whose HN title just states its finding instead of describing
+  itself as a tool. Built the gate around what that comparison actually
+  showed rather than both examples: scanned all 185 stored HN candidates
+  first (only 3 total hits for any candidate pattern -- a narrow,
+  high-precision gate is the right scope here, not a broad classifier off
+  2 examples). Two signals, both mechanically or self-evidently reliable:
+  HN's own auto-appended `[pdf]/[video]/[audio]` suffix (a bare document/
+  media file is never itself a runnable tool), and explicit self-labeling
+  as opinion/satire/essay in the title (a poster who titles their post "a
+  tiny satire about X" is already telling you what it is). Re-verified
+  post-fix against the same 185 real rows: catches exactly the 2 genuine
+  non-tools, correctly preserves the household-finance dashboard, zero
+  other false positives or false negatives in the full set.
+
+- **macro_news's taxonomy gate cleared on incidental keywords, not
+  subject matter -- same class of bug as the earlier Axios full-body-text
+  finding.** "Scoop: Top House Democrat launches investigation into
+  Donald Trump Jr.'s wedding" scored 74.2, zero economic implication for
+  a reader, in the one category where that kind of false positive matters
+  most (a hard political-neutrality requirement). Root cause: the bare
+  `investigations?`/`regulations?` pattern added 2026-09-15 specifically
+  to catch a real, on-brief story (Wired's Polymarket-trading-
+  investigation piece) was never actually anchored to that story's real
+  distinguishing signal -- "investigation" co-occurring with a market/
+  financial subject in the same title ("...Investigations of Polymarket
+  Trades") -- so it matched ANY investigation into ANYONE, regardless of
+  subject. Fixed by requiring that co-occurrence, same compound-condition
+  shape as the existing conflict+economic-spillover bucket. Re-verified
+  against every currently-stored macro_news title, not just the one
+  reported case: 7 titles flip out of the regulatory bucket. One
+  deliberate, disclosed tradeoff -- an Axios "OpenAI faces Senate
+  investigation into Hugging Face breach" story also loses its only
+  matching bucket, accepted since it was itself borderline against the
+  brief (general tech-company legal scrutiny, not clearly "AI regulation
+  or industry-shifting capability") and precision over recall is this
+  category's whole posture. The Polymarket case itself was re-confirmed
+  to still match after tightening.
+
 ## Hustle to Million (Phase 3, 2026-09-12)
 
 - **`grants` deliberately out of scope, not just unbuilt.** Live-checked
@@ -532,6 +629,48 @@ the one place to check.
   need to land in two places and could silently drift), just not folded
   into this weekend's push. Low priority — both copies are small, stable,
   and already independently live-verified.
+
+- **`web3_jobs` source genuinely exhausted, confirmed not inferred --
+  CoinCraft and Alpha Edge Crypto have received nothing since Sept 10.**
+  Both channels feed only from `web3_jobs`; it hasn't yielded a new
+  candidate in 6 days despite fetching 55 listings every cycle. Checked
+  directly whether this is the relevance gate being too strict or the
+  source being dry: fetched RemoteOK's live crypto-tagged feed and
+  compared external_ids against what's already stored -- byte-for-byte
+  identical set of 13, every single cycle. Zero new postings on this feed
+  in 6 real days; the gate is correctly passing the same 13 real listings
+  every time, not rejecting anything new. Two of five channels have been
+  structurally dead since before this build session started, not because
+  of anything built this week.
+
+  Real options researched, not guessed:
+  - **Web3.career API** — free tier, real account signup required (token
+    auth). Live-checked the actual ToS, not just the marketing page: it
+    *requires* displaying `apply_url` as a live, followed hyperlink back
+    to web3.career (`rel="follow"` or no rel attribute — `rel="nofollow"`
+    or omitting the link risks API suspension) and prohibits modifying
+    that URL. This directly conflicts with this system's existing "no
+    hyperlinks anywhere" design decision (operator direction, 2026-09-10,
+    applied to every category since). Adopting this source means either
+    breaking their ToS (real suspension risk) or carving out a link-
+    exception specifically for this one category/source — a real,
+    load-bearing design question, not a minor detail.
+  - **Reconsider `airdrops`** — spec-mentioned, paused 2026-09-10 with no
+    source research ever done (unlike `grants`, which has a full
+    live-verified reasoning trail). Genuinely unresearched; would need
+    the same live-source-verification pass `grants` got before it's a
+    real option, not a decision that can be made today.
+  - **Route an existing live category to these two channels** — cheapest,
+    fastest (defi_yields/whale_movements/gems_security/news are all
+    already flowing well and over their own channels' caps). Real cost:
+    Alpha Edge Crypto and CoinCraft are spec'd as jobs channels
+    specifically; routing general crypto content there changes what
+    subscribers signed up for, not just what feeds it.
+
+  Deliberately not implemented — pending operator direction on which
+  option to pursue (or whether to reconsider what these two channels are
+  for). Explicit operator instruction: fix sourcing properly, don't lower
+  the relevance gate to manufacture volume from a genuinely dry source.
 
 ## Documentation
 
