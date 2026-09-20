@@ -7,33 +7,40 @@ the one place to check.
 
 ## Scoring
 
-- **DeFi yields: penalize implausible APY spikes instead of rewarding them.**
-  Live-observed 2026-09-09: pools with 200%+ APY and 100+ percentage-point
-  `apy_pct_7d` jumps (e.g. `raydium-amm WSOL-USDC`, `pepeteam-swaves SWAVES`)
-  scored 87-90/100 — as high as a healthy, stable yield. `impact` saturates at
-  33%+ APY with no ceiling-awareness, and `novelty` rewards a big 7d swing
-  regardless of direction or plausibility. In practice this pattern usually
-  signals unsustainable token emissions, not a real opportunity.
-  Candidate fix: a penalty when `apy` is far above the category's own rolling
-  median/percentile (relative, not a fixed cutoff — "high" depends on market
-  conditions), which needs a rolling stat over recent `raw_items`, not just the
-  single payload being scored. See TODO comment at
-  `pipeline/score.py::score_defi_yields`.
-  **Deliberately not implemented yet** — validate the MVP notify → approve →
-  write → labeled-delivery loop end-to-end first, before touching scoring weights.
-  (Validated 2026-09-10 — loop confirmed working; still not implemented, now
-  just genuinely next-up rather than blocked on validation.)
-  **Observed in the wild a second time, 2026-09-12** — no longer just
-  theorized from the 2026-09-09 sample: building the news category's
-  cross-category connection feature (pipeline/write_post.py) surfaced
-  `uniswap-v3 BRZ-USDT`, 43.5% APY, TVL $100,126 — $126 above the
-  category's own $100k collection floor — as an independently-notable
-  candidate (cleared `review_threshold=50` on its own). Exactly the shape
-  this gap predicts: a thin, high-APY pool scoring as if it were a
-  healthy, established one. Not fixed in that pass (out of scope — the
-  news feature's own fix was requiring genuine relatedness, not correcting
-  defi_yields' scoring), but this is now real evidence the gap actively
-  produces bad output today, not just a plausible future risk.
+- **DeFi yields: APY spikes and near-zero yields -- FIXED 2026-09-21
+  (`pipeline/score.py::_defi_components`); one residual plateau remains.**
+  Open since 2026-09-09; operator flagged it as producing visibly bad output.
+  Real diagnosis, which corrected the original theory: the 462%/367%/293%
+  pools that all scored exactly 79.5 were NOT emissions pools -- every one was
+  fee APY (`apy_base == apy`, no rewards) on ~$100k-TVL Uniswap pools, i.e. a
+  thin-liquidity fee burst annualized. Impact and novelty both saturated (a 7d
+  change ~= the whole APY) and credibility gave a free 60 for being
+  fee-driven. Separate bug: a 0.75% APY pool scored 51.0 (threshold 50) on
+  credibility 100 + novelty 50 (the no-history default) + actionability 85
+  with impact 2.2; a 0.73% pool scored 55.3 because a -23-point 7d drop read as
+  novelty 100.
+  Fix: (1) past 100% APY, impact and novelty decay by sqrt(100/apy), so 293%
+  and 462% differ and rank below healthy pools while TVL still lifts
+  credibility; (2) novelty and actionability scale by clamp(apy/8%), so a pool
+  with no meaningful yield cannot clear on non-yield components. Validated
+  against every decision the operator made: all 17 non-expired defi decisions
+  still clear threshold (86-240% APY approved items drop 89.5->70.5 and
+  87.9->66.6, still clearing); 462% -> 47.5, 0.75% -> 28.1, 4996% -> 28.0.
+  Not fixed by this, and worth knowing: 293% (54.6), 367% (50.9) and 352%
+  (51.5) still clear threshold narrowly -- they now rank at the bottom of a
+  digest, they aren't excluded. The operator approved the 367% pool, so a hard
+  exclusion wasn't justified by the data. Unnotified rows were rescored in
+  place (stored GoPlus credibility kept, no API calls, 6,319 changed);
+  already-notified rows keep the score they were sent with so calibration data
+  stays intact.
+  **Residual, not addressed:** 31-90% APY pools with a >=12.5-pt 7d swing
+  still saturate impact and novelty together, so ~50 unnotified pools tie at
+  79.6-80.0. That is the same plateau in a different band, and the operator's
+  decisions there don't separate them (approved 33%, 44%, 74%; rejected one
+  44%), so there's nothing to calibrate against. The relative-to-rolling-
+  percentile design from the original note is still the right next step if
+  this matters. Also unchanged: novelty is direction-blind (a yield collapse
+  earns the same novelty as a spike, now merely damped at very low yield).
 
 - **web3_jobs scores are near-constant; category currently has no real
   prioritization.** Surfaced 2026-09-11 while investigating why
@@ -191,6 +198,30 @@ the one place to check.
   position; not done. Operator is switching from ignoring to tapping Reject
   on cards they'd never post (2026-09-20), which is the cleaner fix -- each
   Reject is a real negative independent of reading order.
+
+- **Dedup gaps, 2026-09-21: fixed the re-send; paraphrase duplicates remain.**
+  Diagnosis of "titles_match and cross-cycle passes aren't catching these":
+  the BBC pairs (identical headline re-sent 1-3 days apart) DO match each
+  other under `is_duplicate_story` -- the cross-cycle pass just only ever
+  compared still-eligible, unnotified candidates, so once copy A was notified
+  copy B was compared against nothing (topic_key cooldown is only 12-24h).
+  Fixed in `get_new_candidates`: candidates are also compared against items
+  notified in the last 7 days (`NOTIFIED_DEDUP_LOOKBACK_DAYS`), EXACT title
+  only. Audited against every real sent pair in that window first: all 5
+  identical-title hits were true re-sends (incl. all three incident
+  headlines); all 5 fingerprint-only hits were different events, so
+  fingerprint is deliberately not used there.
+  **Not fixed: "Circle Launches Arc Mainnet" (thedefiant) vs "Circle debuts Arc
+  blockchain..." (coindesk).** They share only a weak ticker overlap (0.3 <
+  0.5), and extraction produced junk (false ticker `UNI`, phrases like "Circle.
+  More"). A proper-noun-overlap rule was built and measured: the loosest
+  setting that catches this pair flags 1,402 pairs across 10 days of real
+  news, merging distinct stories (separate Clarity Act developments,
+  "Standard Chartered on SKY" vs "on ARB"); every stricter setting misses
+  Circle. Shared names identify the topic, not the event, so it was removed.
+  Options if this matters: an LLM same-event check on only the borderline pairs
+  (>=2 shared proper nouns) -- costs a call per pair; or cap one item per
+  primary subject per digest. Entity extraction junk is a separate cleanup.
 
 ## Telegram / bot reliability
 

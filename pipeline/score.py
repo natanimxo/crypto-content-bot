@@ -70,26 +70,34 @@ def _log_scale(value: float, floor: float, ceiling: float,
     return out_min + frac * (out_max - out_min)
 
 
-@register_scorer("defi_yields")
-def score_defi_yields(conn, raw_item_id: int, payload: dict) -> dict:
-    """Breakdown components, each 0-100. See config/category_config.yaml for the
-    weights applied to these, and prompt_notes for how "impact" is meant to read
-    (mechanics, not hype).
+# --- defi_yields APY-spike / near-zero-yield fix (2026-09-21) ---------------
+# Two real, distinct failures, both measured on live data:
+#
+# 1. SPIKES. 462%/367%/293% APY pools all scored exactly 79.5: impact
+#    saturated at 33% APY, novelty saturated (a 7d change ~= the whole APY
+#    when the pool had ~nothing a week ago), and credibility handed a free 60
+#    for being fee-driven ("apy_base == apy"). They were NOT emissions pools
+#    (the old TODO's guess) -- they were ~$100k-TVL Uniswap pools, i.e. a
+#    tiny-liquidity fee burst annualized. Fix: past APY_PLAUSIBLE_PCT, impact
+#    and novelty decay smoothly (sustain = sqrt(plausible/apy)), so 293% and
+#    462% differ and both rank below a healthy pool; TVL still lifts
+#    credibility, which is why a 214%/$20M pool the operator approved keeps a
+#    high score while a 462%/$100k one does not.
+# 2. NEAR-ZERO YIELD. A 0.75% APY pool scored 51.0 (>= threshold 50) with
+#    impact 2.2: credibility 100 (huge TVL) + novelty 50 (the no-7d-history
+#    default) + actionability 85 carried it. Novelty and actionability are
+#    only meaningful if the yield is worth acting on, so both are scaled by
+#    yield_relevance = clamp(apy / MIN_MEANINGFUL_APY_PCT). Also fixes a pool
+#    at 0.73% APY scoring 55.3 because its 7d change of -23 points read as
+#    "novelty 100".
+# Constants are scorer-internal calibration, like the old "33% saturates".
+APY_PLAUSIBLE_PCT = 100.0
+MIN_MEANINGFUL_APY_PCT = 8.0
 
-    TODO(scoring): live-observed on 2026-09-09 — very high/spiking APY (e.g.
-    200%+ apy with 100+ percentage-point apy_pct_7d jumps, see raydium-amm
-    WSOL-USDC and pepeteam-swaves SWAVES in that run's real candidates) currently
-    scores as highly as a healthy, stable yield: `impact` saturates at 33%+ APY
-    with no ceiling-awareness, and `novelty` explicitly rewards a big 7d swing
-    with no sense of direction or plausibility. In practice this pattern usually
-    means unsustainable token emissions, not a real opportunity — the two should
-    probably be distinguished. Candidate fix: a penalty when apy is far above
-    the category's own rolling median/percentile (not a fixed cutoff, since
-    "high" is relative to market conditions) — needs a rolling stat over recent
-    raw_items, not just the single payload. Deliberately NOT implemented yet —
-    the MVP notify/approve/write/publish loop needs to be fully validated first
-    before touching scoring weights.
-    """
+
+def _defi_components(payload: dict, goplus_eval: dict) -> dict:
+    """Pure component scoring for defi_yields (no DB / network) -- the goplus
+    verdict is passed in so this can be re-run offline against stored breakdowns."""
     apy = payload.get("apy") or 0.0
     apy_base = payload.get("apy_base") or 0.0
     apy_reward = payload.get("apy_reward") or 0.0
@@ -98,60 +106,50 @@ def score_defi_yields(conn, raw_item_id: int, payload: dict) -> dict:
     il_risk = (payload.get("il_risk") or "").lower()
     stablecoin = bool(payload.get("stablecoin"))
 
-    # Impact: how large the yield itself is, log-scaled so a 8%->16% move matters
-    # more than a 60%->68% one at the extreme end.
-    impact = _clamp(apy * 3.0)  # 33%+ APY saturates this component
+    sustain = min(1.0, (APY_PLAUSIBLE_PCT / apy) ** 0.5) if apy > 0 else 1.0
+    yield_relevance = _clamp(apy / MIN_MEANINGFUL_APY_PCT, 0.0, 1.0)
 
-    # Novelty: a real week-over-week swing is more worth reading about than a
-    # yield that's been flat forever. No history yet (apy_pct_7d missing) reads
-    # as moderately novel rather than zero, so a brand-new pool isn't penalized.
-    if apy_pct_7d is None:
-        novelty = 50.0
-    else:
-        novelty = _clamp(abs(apy_pct_7d) * 8.0)
+    # Impact: linear to 100 at 33% APY, plateau to APY_PLAUSIBLE_PCT, then decays.
+    impact = _clamp(apy * 3.0) * sustain
 
-    # Credibility: reward-token-driven APY is far less trustworthy than base
-    # (real fee) APY, and TVL is the market's own vote of confidence.
+    # Novelty: week-over-week swing; missing history reads as moderately novel
+    # (brand-new pool). Damped for implausible spikes and for negligible yields.
+    novelty = 50.0 if apy_pct_7d is None else _clamp(abs(apy_pct_7d) * 8.0)
+    novelty *= sustain * yield_relevance
+
+    # Credibility: base (fee) APY beats reward-token APY; TVL is the market's vote.
     base_share = apy_base / apy if apy else 0.0
     credibility = _clamp(base_share * 60.0 + min(tvl, 20_000_000) / 20_000_000 * 40.0)
-
-    # GoPlus retrofit, 2026-09-11 -- this gap has been open since day one
-    # (BACKLOG.md): the very first digest surfaced 214%/240% APY pools
-    # scoring in the high 80s with nothing checking whether the underlying
-    # tokens were honeypots. A confirmed red flag (honeypot, hidden owner,
-    # owner-mintable, etc.) on ANY underlying token hard-caps credibility low
-    # regardless of how good the APY/TVL numbers look -- a 200%+ APY pool on
-    # a honeypot token is the textbook setup this check exists to catch, not
-    # a "slightly less credible" opportunity. An UNCHECKED token (unmapped
-    # chain, no GoPlus data at all) is real uncertainty, not a clean bill of
-    # health -- capped more moderately, reflecting "we don't know" rather
-    # than "we know it's fine" (operator direction 2026-09-11: unknown is
-    # never coded as clear). See pipeline/goplus.py's evaluate_pool() --
-    # stashed whole in the breakdown so write_post.py's risk_line reads the
-    # same verdict scoring saw, rather than re-deriving it later.
-    goplus_eval = goplus.evaluate_pool(conn, payload.get("chain"), payload.get("underlying_tokens") or [])
+    # GoPlus (2026-09-11): confirmed red flag hard-caps; unchecked is uncertainty,
+    # capped moderately -- unknown is never coded as clear.
     if goplus_eval["has_red_flag"]:
         credibility = min(credibility, 10.0)
     elif not goplus_eval["tokens_checked"]:
         credibility = min(credibility, 50.0)
 
-    # Actionability: penalize pools DefiLlama itself flags as high IL risk unless
-    # they're a stablecoin pair, where IL risk is close to moot.
-    if il_risk == "yes" and not stablecoin:
-        actionability = 30.0
-    else:
-        actionability = 85.0
+    # Actionability: high-IL non-stable pools penalized; pure emissions penalized;
+    # scaled down when the yield is too small to act on.
+    actionability = 30.0 if (il_risk == "yes" and not stablecoin) else 85.0
     if apy_reward and apy_base == 0:
-        # 100% emissions-driven yield — actionable only for very fast movers.
         actionability = _clamp(actionability - 25.0)
+    actionability *= yield_relevance
 
     return {
         "impact": round(impact, 1),
         "novelty": round(novelty, 1),
         "credibility": round(credibility, 1),
         "actionability": round(actionability, 1),
-        "goplus": goplus_eval,
     }
+
+
+@register_scorer("defi_yields")
+def score_defi_yields(conn, raw_item_id: int, payload: dict) -> dict:
+    """Breakdown components, each 0-100. See config/category_config.yaml for the
+    weights, and the APY-spike comment above _defi_components for the
+    plausibility/near-zero-yield handling (fixed 2026-09-21; the old TODO(scoring)
+    on this function, open since 2026-09-09, is resolved)."""
+    goplus_eval = goplus.evaluate_pool(conn, payload.get("chain"), payload.get("underlying_tokens") or [])
+    return {**_defi_components(payload, goplus_eval), "goplus": goplus_eval}
 
 
 # whale_movements impact scale: $2M (the collection floor, category_config.
