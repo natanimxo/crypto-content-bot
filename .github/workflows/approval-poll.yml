@@ -1,7 +1,18 @@
 name: Approval Poll
 
 on:
-  schedule:
+  # SCHEDULE DISABLED 2026-09-20. The approval poller runs always-on on Railway
+  # now (scripts/poller_daemon.py, service `crypto-content-bot`). This workflow
+  # was left scheduled by mistake after that move -- and since Telegram allows
+  # only ONE active getUpdates long-poll per bot, every scheduled run here
+  # competed with the Railway poller for the same update queue: 20/20 recent
+  # scheduled runs failed with "409 Conflict", and each run that opened a
+  # long-poll could knock the Railway poller into its retry backoff (a tap
+  # landing in that window is at risk of being delayed or lost). Kept for
+  # manual workflow_dispatch only -- do NOT re-enable the schedule while the
+  # Railway poller is running. The long history comment below is left as the
+  # record of why cron could never hold for this job.
+  # schedule:
     # TEMPORARY EXPERIMENT, started 2026-09-10 ~23:00 UTC (operator direction):
     # */5 was configured but never actually honored at anything close to that
     # rate -- measured via `gh run list --json event,createdAt` filtered to
@@ -21,7 +32,7 @@ on:
     # Revert to */5 -- or escalate to */30, or move this workflow off GitHub
     # Actions' scheduler entirely -- once there's a few hours of real
     # scheduled-run data to compare against the */5 baseline above.
-    - cron: "*/15 * * * *"
+    # - cron: "*/15 * * * *"
   workflow_dispatch: {}
 
 # Live-diagnosed 2026-09-10/11: a tapped button's callback_query can vanish

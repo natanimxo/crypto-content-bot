@@ -179,7 +179,7 @@ def _fetch_preview(conn, preview_id: int):
 
 
 def _label_header(conn, category: str, channel: str) -> str:
-    """'🌾 DEFI YIELDS → CoinCraft' — sits at the very top of what reaches
+    """'🌾 DEFI YIELDS → Alpha Edge Crypto' — sits at the very top of what reaches
     the operator, since (2026-09-10) they copy/forward this text themselves and
     need to know at a glance which of the 5 channels it's for."""
     cfg = load_category_config(conn, category)

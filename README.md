@@ -9,7 +9,7 @@ See [HANDOFF.md](HANDOFF.md) for a fresh-session-oriented summary of current
 state, known bugs/fixes, and open issues.
 
 **Build status (Section 16):** Phase 1 (MVP) complete and validated end-to-end —
-DeFi yields (DefiLlama, free/keyless) → CoinCraft (originally Crypto Notebook; rerouted 2026-09-20). Phase 2 is underway,
+DeFi yields (DefiLlama, free/keyless) → Alpha Edge Crypto (originally Crypto Notebook; rerouted 2026-09-20). Phase 2 is underway,
 one category at a time per Section 0's discipline: whale movements (Etherscan,
 watches known exchange hot wallets) → Crypto Wall Street, and web3 jobs
 (RemoteOK) → Alpha Edge Crypto / CoinCraft, are both live as of 2026-09-10/11.
@@ -41,7 +41,7 @@ the free plan.
 
 **The bot never posts to a channel itself** (changed 2026-09-10, per operator
 direction). The final message the operator receives has a label at the very
-top — e.g. `🌾 DEFI YIELDS → CoinCraft` — so it's clear at a glance which
+top — e.g. `🌾 DEFI YIELDS → Alpha Edge Crypto` — so it's clear at a glance which
 of the 5 channels it's for; the operator copies/forwards it themselves, then
 taps "Mark as sent" to log it in `posts` for history/dedup. `pipeline/publish.py`
 still exists but only records that decision — no Telegram send happens there.

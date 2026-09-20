@@ -48,19 +48,39 @@ differentiators this whole design serves:
 collect → score → notify → (operator approves via Telegram) → write → operator forwards manually
 ```
 
-Zero persistent infrastructure — the entire compute layer is two GitHub
-Actions workflows plus a Supabase Postgres database:
+Compute runs on **Railway** (moved off GitHub Actions 2026-09-14/15 — see
+Section 4.1 for why), with a Supabase Postgres database. One Railway
+project, two services built from this same repo:
 
-- **`collect.yml`** (every 4h): runs `scripts/collect_cycle.py`, which for
-  every live category calls `collect()` → `score_new_items()`, then runs
-  `bot/notify.py` once at the end across all channels.
-- **`approval-poll.yml`** (every 5min, long-polling for ~4.5 of those
-  minutes — see Section 9): runs `bot/approval_poller.py`, which drives the
-  whole approve/edit/reject → write → "mark as sent" state machine.
+- **`collect-cycle`** — a Railway **cron** service (`0 */4 * * *`, 5-minute
+  minimum granularity; the container starts fresh per run and must exit when
+  done): runs `scripts/collect_cycle.py`, which for every live category calls
+  `collect()` → `score_new_items()`, then runs `bot/notify.py` once at the end
+  across all channels. Its start command and schedule are set directly on the
+  service through Railway's API (Railway rejects binding a *new* service to a
+  Config-as-Code file), and its env vars are cross-service references
+  (`${{crypto-content-bot.VAR}}`) to the poller's values, so a rotated
+  credential is updated in one place.
+- **`crypto-content-bot`** — an **always-on worker** (restart policy `ALWAYS`,
+  configured by `railway.json`): runs `scripts/poller_daemon.py`, which loops
+  `bot/approval_poller.py`'s `run()` forever. Each `run()` is one
+  `getUpdates` long-poll (270s, Section 9) plus processing, so the gap between
+  polls is effectively zero. It drives the whole approve/edit/reject → write →
+  "mark as sent" state machine, including a per-cycle sweep that retries any
+  approval left `approved` with no preview (Section 9).
 
-No server process runs between invocations. All state (what's been
-collected, scored, notified, approved, written, sent) lives in Postgres so
-each cron firing is a fresh, stateless process picking up exactly where the
+The GitHub Actions workflows still exist but are **manual-only**
+(`workflow_dispatch`): `collect.yml`'s and `approval-poll.yml`'s `schedule:`
+triggers are commented out. This is load-bearing, not tidiness — Telegram
+allows exactly one active `getUpdates` long-poll per bot, so a scheduled
+`approval-poll.yml` run competes with the Railway poller for the same update
+queue (it was left scheduled for ~6 days after the move: 20/20 runs failed
+with `409 Conflict`, and each one risked delaying or losing a tap), and a
+scheduled `collect.yml` would double-collect. Do not re-enable either.
+
+The compute processes hold no state between invocations: everything (what's
+been collected, scored, notified, approved, written, sent) lives in Postgres,
+so a restarted poller or a fresh cron container picks up exactly where the
 last one left off.
 
 ## Section 3 — Channels
@@ -75,8 +95,8 @@ via `category_config_exists()` until built.
 | Channel | Display name | Categories (live) | Region profile |
 |---|---|---|---|
 | `crypto_wall_street` | Crypto Wall Street | `whale_movements`, `news` | `default` |
-| `alpha_edge_crypto` | Alpha Edge Crypto | `gems_security`, `web3_jobs` (shared via alternation) | `us` |
-| `coincraft` | CoinCraft | `defi_yields`, `web3_jobs` (shared via alternation) | `default` |
+| `alpha_edge_crypto` | Alpha Edge Crypto | `defi_yields`, `web3_jobs` (shared via alternation) | `us` |
+| `coincraft` | CoinCraft | `gems_security`, `web3_jobs` (shared via alternation) | `default` |
 | `hustle_to_million` | Hustle to Million | `tool_launches`, `startup_jobs`, `macro_news` (2026-09-12); `grants` deliberately out of scope, see below | `default` |
 
 **Alternation.** `web3_jobs` is the first category shared across two
@@ -91,12 +111,17 @@ recomputed later.
 **Rebalance, 2026-09-20 (operator direction).** `crypto_notebook` removed
 entirely (hand-written, not fed by the pipeline; `scripts/seed_config.py`
 now prunes DB channels absent from the YAML so removal actually takes
-effect). `gems_security` moved to `alpha_edge_crypto` and `defi_yields` to
+effect). `defi_yields` moved to `alpha_edge_crypto` and `gems_security` to
 `coincraft` -- one category each on purpose, so each channel keeps a distinct
-identity (they're priced separately for ads); `web3_jobs` stays shared across
+identity (they're priced separately for ads). `defi_yields` went to Alpha Edge
+(the highest-priced, US-heavy crypto channel, ~13k subs, which needs steady
+volume for advertisers) after a first assignment put the rare-by-design
+`gems_security` there instead -- a low-volume feed on the volume-sensitive
+channel was backwards; `web3_jobs` stays shared across
 both via `pipeline/channel_router.py`'s alternation (its RemoteOK source has
 been dry since Sept 10 -- see BACKLOG.md). Volume is asymmetric: `defi_yields`
-clears threshold ~7/day, `gems_security` ~0-2/day by design.
+clears threshold ~7/day, `gems_security` ~0-1/day by design, which is why it sits on the channel that
+doesn't depend on steady volume.
 
 `airdrops` was deliberately paused (operator direction 2026-09-10) rather
 than left in as a stub — no collector exists yet, so it's omitted entirely
@@ -144,11 +169,16 @@ floor-not-guarantee framing.
 
 ### 4.1 — Hosting requirement
 
-GitHub Actions' free tier only fires **scheduled** workflows reliably on
-**public** repos — a private repo's cron silently stops firing after 60 days
-of inactivity, and scheduled workflows on private repos consume billed
-minutes. This repo must stay public for `collect.yml`/`approval-poll.yml`'s
-`schedule:` triggers to work at all.
+**Superseded 2026-09-15.** This section originally required a public repo so
+GitHub Actions' free-tier cron would fire. Measured reality was worse than the
+restriction: scheduled Actions runs averaged a **5.4h gap against `collect.yml`'s
+4h target** (10 runs: 2.9h–8.2h, never once on schedule) and roughly **3.6–4.9h
+against approval polling's 5–15 minute target**, regardless of the interval
+requested (`*/15` was *worse* than `*/5`). Telegram drops an un-fetched
+`callback_query` well under 10 minutes (Section 9), so an unreliable scheduler
+cannot serve the approval loop at any setting. Both jobs now run on Railway
+(Section 2), whose first real cron ticks fired within ~1 minute of schedule.
+The repo no longer needs to be public for scheduling reasons.
 
 ### 4.2 — Default providers
 
@@ -379,7 +409,8 @@ instructions alone:
 
 ## Section 9 — Operator notification & approval flow
 
-**Digest** (`bot/notify.py`, runs once per `collect.yml` cycle): for each
+**Digest** (`bot/notify.py`, runs once per collect cycle — the last step of `scripts/collect_cycle.py` on
+the Railway `collect-cycle` cron): for each
 channel, gathers every category's new candidates
 (`select_candidates.get_new_candidates()`), and — only if there's at least
 one — sends **one** Telegram message bundling all of them, each with its own
@@ -390,11 +421,16 @@ whole message is built and the DB write (one `notifications` row + one
 succeeds — a failed send leaves candidates untouched for retry next cycle
 rather than silently marking them "already notified."
 
-**Polling** (`bot/approval_poller.py`, `approval-poll.yml`, every 5 minutes):
+**Polling** (`bot/approval_poller.py`, looped forever by `scripts/poller_daemon.py`
+on Railway):
 
-1. Long-polls `getUpdates` for ~4.5 of the 5-minute gap (`LONG_POLL_TIMEOUT_SECONDS
-   = 270`) — see the callback-expiry fix below for why this is long-polling
-   and not a quick check-once call.
+0. Sweeps for orphaned approvals first: any approval marked `approved` with no
+   `post_previews` row (its write failed or never ran) is retried before new
+   updates are read, so a failed LLM write self-heals on the next cycle instead
+   of leaving the item silently stuck.
+1. Long-polls `getUpdates` (`LONG_POLL_TIMEOUT_SECONDS = 270`), back-to-back —
+   see the callback-expiry fix below for why this is long-polling and not a
+   quick check-once call.
 2. Verifies the tapping user against `TELEGRAM_ALLOWED_USER_IDS` (Section 13)
    before doing anything.
 3. **Two-phase processing**: acknowledges (`answerCallbackQuery`) every tap
@@ -415,6 +451,13 @@ rather than silently marking them "already notified."
 7. **Mark as sent / Discard** — see Section 11.
 
 ### The callback-expiry bug and its fix (root-caused and fixed 2026-09-11)
+
+> **Historical note (2026-09-20):** the fix below was written for a 5-minute
+> GitHub Actions cron and describes `approval-poll.yml`'s job timeout and
+> `concurrency` group. The long-polling diagnosis and fix are still exactly
+> what the poller does; the *scheduler* it was written around is gone — the
+> poller is now an always-on Railway worker (Section 2), which closes the
+> "10-20 second blind window between cron firings" the text mentions.
 
 **Symptom**, reported independently across three categories: an operator tap
 on Approve sometimes simply did nothing — no ack, no error, no downstream
@@ -481,7 +524,7 @@ channel itself. Instead, once an item is approved and written
 Telegram messages**:
 
 1. **Routing header** — operator-only: `<label> → <channel display name>`
-   (e.g. "🌾 DEFI YIELDS → CoinCraft"), the score, and **Mark as
+   (e.g. "🌾 DEFI YIELDS → Alpha Edge Crypto"), the score, and **Mark as
    sent / Discard** buttons (or, during a Section 4.3 benchmark trial,
    **Mark A as sent / Mark B as sent / Discard**). This message is never
    meant to be forwarded — it carries buttons and internal metadata.
@@ -523,13 +566,17 @@ publish action, only records that the operator did.
   use `psycopg2.extras.execute_values` for one round trip per batch rather
   than one per row — with `defi_yields`' first run alone touching hundreds
   of rows, one-row-at-a-time inserts were the actual risk to
-  `collect.yml`'s 10-minute job timeout, not the collection/scoring logic
+  the collect cycle's runtime budget (then `collect.yml`'s 10-minute job timeout), not the collection/scoring logic
   itself.
 
 ## Section 13 — Secrets & security
 
-All credentials are GitHub Actions repository secrets, injected as env vars
-into both workflows — never committed (`.env` is gitignored;
+Credentials live in **Railway service variables** (the `crypto-content-bot`
+service holds the values; `collect-cycle` references them, Section 2). GitHub
+Actions repository secrets are only needed for manual `workflow_dispatch` runs
+of the now-unscheduled workflows and must be kept in sync by hand — they went
+stale after the 2026-09-15 credential rotation, which is the failure mode to
+watch. Injected as env vars — never committed (`.env` is gitignored;
 `.env.example` documents the shape with no real values). See
 [HANDOFF.md](HANDOFF.md) for the current list and where to obtain each one.
 
@@ -541,7 +588,7 @@ action is processed — the bot's chat is not itself a secret boundary
 ## Section 16 — Build phases
 
 - **Phase 1 (MVP)** — one category end-to-end, fully validated:
-  `defi_yields` → CoinCraft (originally Crypto Notebook; rerouted 2026-09-20). Complete.
+  `defi_yields` → Alpha Edge Crypto (originally Crypto Notebook; rerouted 2026-09-20). Complete.
 - **Phase 2** — additional categories, one at a time (Section 0's
   discipline), each verified against a real live cycle before the next
   starts:
@@ -552,7 +599,7 @@ action is processed — the bot's chat is not itself a secret boundary
      (structured data, no price verification, no editorial judgment
      required).
 - **Phase 3** — in progress, 2026-09-11/12:
-  3. `gems_security` → Alpha Edge Crypto (originally Crypto Notebook; rerouted 2026-09-20).
+  3. `gems_security` → CoinCraft (originally Crypto Notebook; rerouted 2026-09-20).
      Complete — see BACKLOG.md for the real, multi-round tuning history
      (TVL screening band, protocol-template dominance rule, the
      behavioral-vs-capability field split).

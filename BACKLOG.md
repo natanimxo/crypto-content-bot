@@ -674,8 +674,9 @@ it's a sourcing decision still pending operator direction, not a fix).
 
 ## Channel routing (2026-09-20)
 
-- **Rebalance: `crypto_notebook` removed, `gems_security` -> Alpha Edge Crypto,
-  `defi_yields` -> CoinCraft, `web3_jobs` stays shared via alternation.**
+- **Rebalance: `crypto_notebook` removed, `gems_security` and `defi_yields`
+  reassigned (first mapping below was SWAPPED the same day -- see the next
+  entry for the final one), `web3_jobs` stays shared via alternation.**
   Operator direction: Crypto Notebook is hand-written from now on, so nothing
   in this pipeline feeds it; one category each (not both shared) so each
   channel keeps a distinct identity -- they're priced separately for ads.
@@ -707,6 +708,46 @@ it's a sourcing decision still pending operator direction, not a fix).
   6 held gems rows scoring 52-61 exist as backlog to release manually.
   Leftover: 46 pending approvals and 8 pending previews still reference
   `crypto_notebook` -- not touched, still tappable.
+
+- **Mapping swapped same day: `defi_yields` -> Alpha Edge Crypto,
+  `gems_security` -> CoinCraft (final).** The volume asymmetry flagged in
+  the entry above was the deciding fact: Alpha Edge is the highest-priced
+  crypto channel (~13k subs, mostly US) and needs steady volume for
+  advertisers; putting the rare-by-design feed (`gems_security`, ~0-1/day)
+  there was backwards. `defi_yields` clears threshold ~7/day against a
+  category cap of 6 (trims ~1/day -- raise it if the channel should run
+  closer to its 12 cap); `gems_security` on CoinCraft is deliberately a
+  low-volume feed on the channel that doesn't depend on steady volume.
+  `defi_yields`' `region_profile` note is back on a 'us' channel, so
+  `build_defi_yields_prompt`'s per-region US note fires again alongside the
+  now-unconditional conservative rule in `prompt_notes`.
+
+  **The 46 pending approvals and 8 pending previews left on the old
+  `crypto_notebook` were cleared, deliberately NOT as 'rejected':**
+  `approvals.decision` is what `scripts/calibration_report.py` reads to
+  calibrate scoring, and 46 fake rejections of never-judged items would have
+  skewed exactly the reject-rate it exists to measure. Set to a new
+  `'expired'` decision instead (excluded from calibration's DECIDED set; the
+  poller only acts on 'pending'/'approved', so nothing else is affected;
+  schema comment updated). Previews -> the existing `'cancelled'`. Update
+  counts matched exactly (46/8) inside one transaction that asserted them
+  before committing. Their raw_items stay marked notified, so they won't
+  resurface on another channel.
+
+  **Found while rewriting spec Section 2 -- a live bug, not a doc issue:
+  `approval-poll.yml` was still on a `*/15` schedule, six days after the
+  poller moved to Railway.** Telegram allows one active `getUpdates`
+  long-poll per bot, so every scheduled Actions run competed with the
+  Railway poller for the same update queue: 20/20 recent scheduled runs
+  failed with `409 Conflict`, and each run that opened a long-poll could
+  knock the Railway poller into its 3-attempt retry and 15s backoff (a tap
+  landing in that window at risk of being delayed or lost). The operator had
+  asked for this to be disabled once the Railway poller was confirmed; that
+  never happened -- one more config that looked done and wasn't. Schedule
+  commented out (workflow_dispatch kept), same as `collect.yml`. Spec
+  Sections 2, 4.1, 9, 12, 13 rewritten for the Railway reality; 4.1's
+  "repo must stay public for cron" replaced with the measured
+  Actions-scheduler gaps that justified the move.
 
 ## Documentation
 

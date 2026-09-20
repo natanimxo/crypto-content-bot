@@ -156,7 +156,7 @@ CREATE TABLE IF NOT EXISTS approvals (
     id SERIAL PRIMARY KEY,
     notification_id INT REFERENCES notifications(id),
     raw_item_id INT REFERENCES raw_items(id),
-    decision TEXT NOT NULL,          -- 'pending', 'approved', 'edited', 'rejected'
+    decision TEXT NOT NULL,          -- 'pending', 'approved', 'edited', 'rejected', 'expired' (orphaned when its channel was retired; never judged, so NOT 'rejected' -- keeps calibration stats clean)
     edited_text TEXT,
     -- Extension beyond spec Section 6: message id of the "reply with corrected text"
     -- prompt sent after an Edit tap, so approval_poller.py can match an incoming

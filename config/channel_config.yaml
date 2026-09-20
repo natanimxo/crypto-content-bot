@@ -16,8 +16,8 @@
 # hand now, so nothing in this pipeline feeds it and it has no row here or in
 # the DB (scripts/seed_config.py prunes DB rows that aren't in this file, so
 # removing a channel here actually removes it, instead of leaving a stale row
-# that keeps getting routed to). gems_security -> alpha_edge_crypto and
-# defi_yields -> coincraft, ONE category each on purpose so each channel has a
+# that keeps getting routed to). defi_yields -> alpha_edge_crypto and
+# gems_security -> coincraft, ONE category each on purpose so each channel has a
 # distinct identity (they're priced separately for ads); web3_jobs stays
 # shared across both via pipeline/channel_router.py's alternation.
 # bot/notify.py skips any category that doesn't have a category_config row yet.
@@ -41,10 +41,10 @@ alpha_edge_crypto:
     # yet anyway (no collector/scorer), left out entirely rather than listed-
     # but-skipped so it's not silently doing nothing. Add it back here once
     # Section 16 Phase 2 actually builds the airdrops category.
-    - gems_security   # moved here from crypto_notebook 2026-09-20 -- security screening
-                       # suits this channel's US-heavy audience. Rare by design
-                       # (category soft_daily_cap: 4, ~0-2 real candidates/day) --
-                       # see BACKLOG.md for the volume implication.
+    - defi_yields     # moved here from crypto_notebook 2026-09-20 (first to coincraft, then
+                       # swapped same day): this is the highest-priced, US-heavy crypto
+                       # channel (~13k subs) and needs STEADY volume for advertisers --
+                       # defi_yields clears threshold ~7/day, gems_security ~0-1/day.
     - web3_jobs       # shared with coincraft via alternation; RemoteOK feed is dry
                        # right now (same 13 listings since Sep 10), left wired.
   region_profile: us
@@ -55,7 +55,9 @@ coincraft:
   display_name: "CoinCraft"
   categories:
     # airdrops paused — see alpha_edge_crypto's note above, same reasoning.
-    - defi_yields     # moved here from crypto_notebook 2026-09-20
+    - gems_security   # moved here from crypto_notebook 2026-09-20. Rare by design
+                       # (category soft_daily_cap: 4, ~0-1 real candidates/day) -- a
+                       # deliberate low-volume feed, kept off the volume-sensitive channel.
     - web3_jobs       # shared with alpha_edge_crypto via alternation (dry source, left wired)
   region_profile: default
   soft_daily_cap: 12

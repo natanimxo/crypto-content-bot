@@ -1,4 +1,4 @@
-"""gems/security screening collector (Phase 2/3, 2026-09-11) -- Alpha Edge Crypto
+"""gems/security screening collector (Phase 2/3, 2026-09-11) -- CoinCraft
 (originally Crypto Notebook; rerouted 2026-09-20).
 
 Discovery source (operator-approved plan): reuses the SAME DefiLlama /pools
