@@ -67,6 +67,15 @@ CROSS_CYCLE_DEDUP_THRESHOLD = 0.5
 # the boundary semantics changed.
 CAP_WINDOW_HOURS = 24.0
 
+# How far back a candidate is compared against items ALREADY NOTIFIED, to catch
+# a feed re-serving a story that already went out (real incident 2026-09-18..20:
+# identical BBC headlines re-sent 1-3 days apart, past the 12-24h topic_key
+# cooldown, because a fresh raw_item shares no id with the notified copy and
+# the in-pool dedup below never saw the notified one). 7 days: long enough to
+# cover multi-day feed re-serves, short enough that a genuinely recurring
+# headline ("Bitcoin falls below $X") is not suppressed forever.
+NOTIFIED_DEDUP_LOOKBACK_DAYS = 7
+
 # Anti-starvation age bonus -- added to a candidate's SCORE to get its
 # EFFECTIVE ranking score for cap-selection purposes only; never written
 # back to `scores.score`, never what's shown to the operator ("Score X/100"
@@ -117,6 +126,29 @@ def _topics_in_cooldown(conn, category: str, cooldown_hours: float) -> set[str]:
             (category, cooldown_hours),
         )
         return {row["topic_key"] for row in cur.fetchall() if row["topic_key"]}
+
+
+def _recently_notified_stories(conn, category: str, days: float = NOTIFIED_DEDUP_LOOKBACK_DAYS) -> list[dict]:
+    """(entities, title) of every item in this category notified within the
+    lookback, for the same-story test in get_new_candidates."""
+    with dict_cursor(conn) as cur:
+        cur.execute(
+            """SELECT DISTINCT r.id, r.payload
+               FROM notifications n
+               JOIN raw_items r ON r.id = ANY(n.candidate_raw_item_ids)
+               WHERE r.category = %s
+                 AND n.sent_at > now() - (%s || ' days')::interval""",
+            (category, days),
+        )
+        out = []
+        for row in cur.fetchall():
+            p = row["payload"] or {}
+            out.append({
+                "title": p.get("title") or "",
+                "ent": {"tickers": set(p.get("tickers") or []), "phrases": set(p.get("phrases") or []),
+                        "figures": set(p.get("figures") or [])},
+            })
+        return out
 
 
 def _category_notified_recent_count(conn, channel: str, category: str,
@@ -191,6 +223,10 @@ def get_new_candidates(conn, category: str, channel: str) -> list[dict]:
     # not-yet-notified candidate for this category, regardless of which
     # cycle collected it. O(n^2) in the (small, per-category, per-cycle)
     # candidate list -- fine at this scale.
+    # Also compared against items already NOTIFIED in the lookback window
+    # (NOTIFIED_DEDUP_LOOKBACK_DAYS): without that, a duplicate that lands in a
+    # LATER cycle than its twin's notification is compared against nothing.
+    notified_stories = _recently_notified_stories(conn, category)
     deduped = []
     for row in candidates:
         p = row["payload"] or {}
@@ -200,6 +236,13 @@ def get_new_candidates(conn, category: str, channel: str) -> list[dict]:
             "phrases": set(p.get("phrases") or []),
             "figures": set(p.get("figures") or []),
         }
+        # EXACT title only, not fingerprint: audited against every real sent
+        # pair in the 7-day window (2026-09-21) -- all 5 identical-title hits
+        # were genuine re-sends, but all 5 fingerprint-only hits were
+        # different events ("Bitcoin falls below $76k" vs "Fed rate hike";
+        # "House Democrats face divisions" vs "House passes bill").
+        if any(entity_lib.titles_match(title, n["title"]) for n in notified_stories):
+            continue
         if any(
             entity_lib.is_duplicate_story(ent, title, kept["_ent"], kept["_title"], CROSS_CYCLE_DEDUP_THRESHOLD)
             for kept in deduped
