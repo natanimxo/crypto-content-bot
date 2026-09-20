@@ -22,7 +22,9 @@ defi_yields:
 
   review_threshold: 50   # 0-100. Below this, an item never reaches an LLM at all (Section 7).
   cooldown_hours: 6      # suppress re-surfacing the same pool/protocol within this window
-  soft_daily_cap: 6      # per spec's suggested 4-8 range for Crypto Notebook (Section 17)
+  soft_daily_cap: 6      # was sized against Crypto Notebook's shared channel cap of 8; moved to
+                         # CoinCraft (its only live category besides dry web3_jobs) 2026-09-20.
+                         # Live volume ~7 clearing threshold/day, so 6 still binds sensibly.
 
   # Section 8 calls out "yield changes" by name as a structured category that
   # should use a plain Python template instead of a real LLM call for the triage
@@ -63,9 +65,13 @@ defi_yields:
     it's worth watching. Never use language that could read as investment advice —
     describe what the numbers show, not what the reader should do with their money.
     Measured tone throughout: no hype language, no "🚀 MOONING", no manufactured
-    urgency, no emoji beyond what the template itself adds. This channel is
-    region_profile 'us' — keep financial framing conservative and factual,
-    never anything that could read as a recommendation to deposit funds.
+    urgency, no emoji beyond what the template itself adds. Keep financial
+    framing conservative and factual on every channel, never anything that
+    could read as a recommendation to deposit funds. (Reworded 2026-09-20:
+    this used to say "This channel is region_profile 'us'" -- defi_yields
+    moved to CoinCraft, region_profile 'default', so the claim was false; the
+    conservative rule itself is kept unconditionally, stricter than the old
+    per-region note in write_post.build_defi_yields_prompt.)
 
 # Phase 2, category 2 of 2026-09-10 — whale_movements -> Crypto Wall Street.
 # Watches known exchange hot wallets (not speculative "whale" addresses — no
@@ -180,8 +186,8 @@ web3_jobs:
     language, no "AMAZING OPPORTUNITY", no manufactured urgency. Measured tone,
     no emoji beyond what the template itself adds.
 
-# Phase 2/3, 2026-09-11 — gems_security -> Crypto Notebook (shares the channel
-# with defi_yields). Discovery reuses defi_yields' own DefiLlama pool feed
+# Phase 2/3, 2026-09-11 — gems_security (originally Crypto Notebook; moved to
+# Alpha Edge Crypto 2026-09-20, sole security-screening feed for that channel). Discovery reuses defi_yields' own DefiLlama pool feed
 # (operator-approved plan) rather than a separate source — see
 # collectors/gems_security.py's module docstring for the full reasoning,
 # the rate-limit math, and pipeline/goplus.py for the live-measured GoPlus

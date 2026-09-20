@@ -65,17 +65,18 @@ last one left off.
 
 ## Section 3 — Channels
 
-Five target channels. Only the categories with a working collector are
+Four channels are fed by this pipeline (a fifth, Crypto Notebook, was
+removed 2026-09-20 -- the operator writes its content by hand, so it has no
+row in `channel_config` and nothing routes to it; see below). Only the categories with a working collector are
 actually seeded into `channel_config.categories` (see `config/channel_config.yaml`);
 the rest are listed there for record-keeping but skipped by `bot/notify.py`
 via `category_config_exists()` until built.
 
 | Channel | Display name | Categories (live) | Region profile |
 |---|---|---|---|
-| `crypto_notebook` | Crypto Notebook | `defi_yields` | `us` |
 | `crypto_wall_street` | Crypto Wall Street | `whale_movements`, `news` | `default` |
-| `alpha_edge_crypto` | Alpha Edge Crypto | `web3_jobs` | `us` |
-| `coincraft` | CoinCraft | `web3_jobs` | `default` |
+| `alpha_edge_crypto` | Alpha Edge Crypto | `gems_security`, `web3_jobs` (shared via alternation) | `us` |
+| `coincraft` | CoinCraft | `defi_yields`, `web3_jobs` (shared via alternation) | `default` |
 | `hustle_to_million` | Hustle to Million | `tool_launches`, `startup_jobs`, `macro_news` (2026-09-12); `grants` deliberately out of scope, see below | `default` |
 
 **Alternation.** `web3_jobs` is the first category shared across two
@@ -86,6 +87,16 @@ assigns each *individual item* to exactly one of the two at collection time
 and testable: the same listing can never reach both channels, and which
 channel a given item went to is recorded permanently on the row, not
 recomputed later.
+
+**Rebalance, 2026-09-20 (operator direction).** `crypto_notebook` removed
+entirely (hand-written, not fed by the pipeline; `scripts/seed_config.py`
+now prunes DB channels absent from the YAML so removal actually takes
+effect). `gems_security` moved to `alpha_edge_crypto` and `defi_yields` to
+`coincraft` -- one category each on purpose, so each channel keeps a distinct
+identity (they're priced separately for ads); `web3_jobs` stays shared across
+both via `pipeline/channel_router.py`'s alternation (its RemoteOK source has
+been dry since Sept 10 -- see BACKLOG.md). Volume is asymmetric: `defi_yields`
+clears threshold ~7/day, `gems_security` ~0-2/day by design.
 
 `airdrops` was deliberately paused (operator direction 2026-09-10) rather
 than left in as a stub — no collector exists yet, so it's omitted entirely
@@ -470,7 +481,7 @@ channel itself. Instead, once an item is approved and written
 Telegram messages**:
 
 1. **Routing header** — operator-only: `<label> → <channel display name>`
-   (e.g. "🌾 DEFI YIELDS → Crypto Notebook"), the score, and **Mark as
+   (e.g. "🌾 DEFI YIELDS → CoinCraft"), the score, and **Mark as
    sent / Discard** buttons (or, during a Section 4.3 benchmark trial,
    **Mark A as sent / Mark B as sent / Discard**). This message is never
    meant to be forwarded — it carries buttons and internal metadata.
@@ -530,7 +541,7 @@ action is processed — the bot's chat is not itself a secret boundary
 ## Section 16 — Build phases
 
 - **Phase 1 (MVP)** — one category end-to-end, fully validated:
-  `defi_yields` → Crypto Notebook. Complete.
+  `defi_yields` → CoinCraft (originally Crypto Notebook; rerouted 2026-09-20). Complete.
 - **Phase 2** — additional categories, one at a time (Section 0's
   discipline), each verified against a real live cycle before the next
   starts:
@@ -541,7 +552,7 @@ action is processed — the bot's chat is not itself a secret boundary
      (structured data, no price verification, no editorial judgment
      required).
 - **Phase 3** — in progress, 2026-09-11/12:
-  3. `gems_security` → Crypto Notebook (shares the channel with defi_yields).
+  3. `gems_security` → Alpha Edge Crypto (originally Crypto Notebook; rerouted 2026-09-20).
      Complete — see BACKLOG.md for the real, multi-round tuning history
      (TVL screening band, protocol-template dominance rule, the
      behavioral-vs-capability field split).
@@ -569,8 +580,8 @@ Suggested `soft_daily_cap` ranges used when the live categories were tuned
 (not a hard rule — categories/channels can deviate with reasoning, as
 `defi_yields` did at 6-8):
 
-- Crypto-focused channels (Crypto Notebook, Crypto Wall Street, Alpha Edge
-  Crypto, CoinCraft): 4–15, tuned per channel/category based on realistic
+- Crypto-focused channels (Crypto Wall Street, Alpha Edge Crypto,
+  CoinCraft): 4–15, tuned per channel/category based on realistic
   source volume (`defi_yields` 6-8, `whale_movements` 12, `web3_jobs` 8-12).
 - Non-crypto channel (Hustle to Million): 6 channel-wide, with each of its
   three categories also carrying its own tighter per-category cap

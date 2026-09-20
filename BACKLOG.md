@@ -672,6 +672,42 @@ it's a sourcing decision still pending operator direction, not a fix).
   for). Explicit operator instruction: fix sourcing properly, don't lower
   the relevance gate to manufacture volume from a genuinely dry source.
 
+## Channel routing (2026-09-20)
+
+- **Rebalance: `crypto_notebook` removed, `gems_security` -> Alpha Edge Crypto,
+  `defi_yields` -> CoinCraft, `web3_jobs` stays shared via alternation.**
+  Operator direction: Crypto Notebook is hand-written from now on, so nothing
+  in this pipeline feeds it; one category each (not both shared) so each
+  channel keeps a distinct identity -- they're priced separately for ads.
+  `scripts/seed_config.py` was upsert-only, so deleting a channel from the
+  YAML would have done nothing to the DB (row and routing stayed live -- the
+  same silent-no-op shape as the channel-cap and token-log bugs); it now
+  prunes DB channels absent from the YAML. No FKs point at `channel_config`
+  and old notifications/approvals/previews store `channel` as plain text, so
+  pruning orphans nothing (old cards fall back to the raw slug in labels).
+
+  Checked, not assumed: (1) alternation is unaffected -- it only ever touches
+  `web3_jobs`, is driven by a hardcoded list in `pipeline/channel_router.py`
+  (not derived from `channel_config`), and that list still matches the DB
+  exactly; a channel going from one category to two, or two to one, never
+  enters that code path. (2) `defi_yields`' prompt_notes hardcoded "This
+  channel is region_profile 'us'" -- false after the move (CoinCraft is
+  'default'), and `build_defi_yields_prompt`'s per-region US note stops
+  firing too. Reworded to keep the conservative never-recommend-deposits
+  rule unconditionally (stricter than before) without the false claim.
+  (3) Soft caps: category caps untouched (defi 6, gems 4); channel cap 12 on
+  both now exceeds each channel's live category sum, so it's non-binding
+  until web3_jobs revives (Alpha: 4+8=12; CoinCraft: 6+8=14).
+
+  **Volume asymmetry, the real consequence of the mapping:** `defi_yields`
+  clears threshold ~7/day (226 unheld in 4 days, 29 >=50) -- CoinCraft gets
+  6 cards on the very next cycle. `gems_security` is rare by design: 27 rows
+  in 6 days, and since the scoring fix none of the unheld ones cleared 50
+  (latest 21-48). Alpha Edge will receive ~0-1/day, effectively still quiet;
+  6 held gems rows scoring 52-61 exist as backlog to release manually.
+  Leftover: 46 pending approvals and 8 pending previews still reference
+  `crypto_notebook` -- not touched, still tappable.
+
 ## Documentation
 
 - **Update the technical spec doc** to reflect two implemented decisions that

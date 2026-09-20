@@ -8,15 +8,19 @@
 # (see pipeline/publish.py); the operator copies/forwards the labeled text
 # themselves after tapping "Mark as sent". display_name IS actively used — it's
 # the human-readable half of the label header every post arrives with (e.g.
-# "🌾 DEFI YIELDS → Crypto Notebook"), since the operator needs to know at a
+# "🌾 DEFI YIELDS → CoinCraft"), since the operator needs to know at a
 # glance which channel a post is for when copying it themselves.
 #
-# All 5 channels from spec Section 3 are listed here so the mapping is recorded
-# in one place, but only crypto_notebook is "live" for this build phase
-# (Section 0/16) — its categories list has a real entry with a working
-# collector. The other four list their spec'd categories for reference;
-# bot/notify.py skips any category that doesn't have a category_config row yet,
-# so seeding these now is safe and doesn't touch the live defi_yields pipeline.
+# Channel -> category mapping, rebalanced 2026-09-20 (operator direction):
+# crypto_notebook was REMOVED entirely -- the operator writes its content by
+# hand now, so nothing in this pipeline feeds it and it has no row here or in
+# the DB (scripts/seed_config.py prunes DB rows that aren't in this file, so
+# removing a channel here actually removes it, instead of leaving a stale row
+# that keeps getting routed to). gems_security -> alpha_edge_crypto and
+# defi_yields -> coincraft, ONE category each on purpose so each channel has a
+# distinct identity (they're priced separately for ads); web3_jobs stays
+# shared across both via pipeline/channel_router.py's alternation.
+# bot/notify.py skips any category that doesn't have a category_config row yet.
 #
 # chat_ids below were given explicitly by the operator (not inferred from any
 # ordering) — confirmed correct as of the mapping they provided.
@@ -30,18 +34,6 @@ crypto_wall_street:
   soft_daily_cap: 12   # spec Section 17 suggestion: 8-15 for crypto channels
   chat_id: "-1001200205264"
 
-crypto_notebook:
-  display_name: "Crypto Notebook"
-  categories:
-    - defi_yields
-    - gems_security   # added 2026-09-11 — see config/category_config.yaml's
-                       # gems_security section for the full editorial/rate-limit
-                       # design; soft_daily_cap: 4 there is a separate, tighter
-                       # cap on top of this channel-wide one
-  region_profile: us
-  soft_daily_cap: 8
-  chat_id: "-1002905948541"
-
 alpha_edge_crypto:
   display_name: "Alpha Edge Crypto"
   categories:
@@ -49,7 +41,12 @@ alpha_edge_crypto:
     # yet anyway (no collector/scorer), left out entirely rather than listed-
     # but-skipped so it's not silently doing nothing. Add it back here once
     # Section 16 Phase 2 actually builds the airdrops category.
-    - web3_jobs
+    - gems_security   # moved here from crypto_notebook 2026-09-20 -- security screening
+                       # suits this channel's US-heavy audience. Rare by design
+                       # (category soft_daily_cap: 4, ~0-2 real candidates/day) --
+                       # see BACKLOG.md for the volume implication.
+    - web3_jobs       # shared with coincraft via alternation; RemoteOK feed is dry
+                       # right now (same 13 listings since Sep 10), left wired.
   region_profile: us
   soft_daily_cap: 12
   chat_id: "-1001992993907"
@@ -58,7 +55,8 @@ coincraft:
   display_name: "CoinCraft"
   categories:
     # airdrops paused — see alpha_edge_crypto's note above, same reasoning.
-    - web3_jobs
+    - defi_yields     # moved here from crypto_notebook 2026-09-20
+    - web3_jobs       # shared with alpha_edge_crypto via alternation (dry source, left wired)
   region_profile: default
   soft_daily_cap: 12
   chat_id: "-1002704031424"

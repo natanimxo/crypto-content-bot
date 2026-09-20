@@ -1,4 +1,5 @@
-"""gems/security screening collector (Phase 2/3, 2026-09-11) -- Crypto Notebook.
+"""gems/security screening collector (Phase 2/3, 2026-09-11) -- Alpha Edge Crypto
+(originally Crypto Notebook; rerouted 2026-09-20).
 
 Discovery source (operator-approved plan): reuses the SAME DefiLlama /pools
 feed defi_yields already collects, rather than a separate "new token" feed --

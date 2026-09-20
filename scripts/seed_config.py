@@ -100,6 +100,18 @@ def seed_channels(conn, path: str):
                 ),
             )
             print(f"  channel_config: {channel}")
+
+        # Prune DB rows for channels no longer in the YAML (2026-09-20). This
+        # was upsert-only before, so deleting a channel from the YAML did
+        # NOTHING to the DB -- the row (and its category routing) stayed live,
+        # a silent no-op of exactly the kind this project keeps catching.
+        # Historical notifications/approvals/previews reference `channel` as
+        # plain TEXT (no FK), so pruning can't orphan or cascade anything;
+        # pipeline/publish.get_channel_display_name falls back to the raw slug.
+        cur.execute("SELECT channel FROM channel_config WHERE NOT (channel = ANY(%s))", (list(channels.keys()),))
+        for (stale,) in cur.fetchall():
+            cur.execute("DELETE FROM channel_config WHERE channel = %s", (stale,))
+            print(f"  channel_config: PRUNED '{stale}' (not in YAML)")
     conn.commit()
 
 
