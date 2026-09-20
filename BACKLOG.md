@@ -224,8 +224,8 @@ the one place to check.
   primary subject per digest. Entity extraction junk is a separate cleanup.
   **Decision 2026-09-21 (operator): per-digest subject cap, no LLM check** --
   a non-deterministic call inside a filter can silently suppress real news and
-  can't be debugged like the scoring. BUILT: `SUBJECT_CAP_CATEGORIES` (news,
-  macro_news) in `select_candidates.py`, keyed on `entities.lead_subject`
+  can't be debugged like the scoring. BUILT: `SUBJECT_CAP_CATEGORIES` (news and
+  macro_news at first; NARROWED TO macro_news ONLY the same day, see below) in `select_candidates.py`, keyed on `entities.lead_subject`
   (first capitalized non-filler headline word), best effective score wins.
   Two findings while building: (1) `topic_key` could NOT be the key -- the
   Circle pair's were `UNI` vs `USDC`, some rows carry GUID/URL keys, and a
@@ -238,6 +238,23 @@ the one place to check.
   (three separate Bitcoin stories in one digest, three SEC stories). Watch
   item: a perpetually busy subject (Bitcoin) could keep deferring its second
   story; the age bonus is the only counterweight.
+  **Revised same day -- cap removed from `news`, kept on `macro_news`.**
+  Operator raised the Bitcoin starvation risk and asked whether news should
+  have it at all. Replayed 10 days of real news arrivals (303 above-threshold,
+  6 cycles/day, 10/day cap): Bitcoin was 5% of arrivals (14 of 303), NOT
+  dominant -- the top lead word is generic "crypto" (20), itself a flaw in
+  this key (it would group unrelated "Crypto.com..." / "Crypto market..."
+  stories). Bitcoin backlog peaked at 7 (vs 5 uncapped) and did not grow
+  unboundedly, but cap=1 raised Bitcoin's median wait 8.9h -> 27.0h and cost
+  it 3 of 11 sends. cap=2 replayed IDENTICAL to no cap and would not have
+  caught the two-item Circle pair, so it is not an option. The bottleneck is
+  the daily cap, not the subject cap (213 of 303 arrivals unsent either way).
+  Replay is approximate (ignores cooldown/holds). Kept on macro_news, where
+  volume is low (16 eligible vs a 6/day cap) and deferral is cheap: real
+  repeats there ("Interest rates held..." x2; three Fed rate-hike pieces) sit
+  alongside three distinct AI-regulation op-eds, so precision is mediocre even
+  there -- it spaces things out, it doesn't prove duplication. Per operator,
+  a repeat is preferred to losing a distinct angle.
 
 ## Telegram / bot reliability
 

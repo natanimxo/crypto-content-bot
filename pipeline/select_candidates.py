@@ -83,11 +83,15 @@ NOTIFIED_DEDUP_LOOKBACK_DAYS = 7
 # no similarity rule could separate them from distinct same-topic stories
 # without merging 1,402 pairs, so this caps by subject instead -- deterministic
 # and auditable, at the accepted cost of also spacing out genuinely distinct
-# same-subject stories (audited on 117 sent items: 9 would be spaced out, incl.
-# separate Bitcoin and SEC stories). Capped-out items are DEFERRED, not dropped:
+# same-subject stories. Capped-out items are DEFERRED, not dropped:
 # they stay unnotified and eligible next cycle (age bonus applies), so this
 # never silently discards news -- it only limits one digest to one per subject.
-SUBJECT_CAP_CATEGORIES = {"news", "macro_news"}
+SUBJECT_CAP_CATEGORIES = {"macro_news"}
+# `news` was removed from this set 2026-09-21 after a 10-day replay of real
+# arrivals at the 10/day cap: cap=1 raised Bitcoin's median wait 8.9h -> 27.0h
+# and cost it 3 of 11 sends; cap=2 replayed identically to no cap AND would not
+# have caught the Circle pair (only two items). Multiple angles on one event are
+# the story on a big news day; a cosmetic repeat is the cheaper failure.
 
 # Anti-starvation age bonus -- added to a candidate's SCORE to get its
 # EFFECTIVE ranking score for cap-selection purposes only; never written
