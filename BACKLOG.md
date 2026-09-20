@@ -139,6 +139,59 @@ the one place to check.
   exist). The `INSTITUTIONAL_SENT_TX_THRESHOLD` heuristic is the deliberate
   safety net for what this list doesn't cover by name.
 
+- **Score looks flat against operator judgment for `whale_movements` --
+  NOT actionable yet, n is too thin. Recheck at 15-20 decisions.** First
+  real calibration pull (2026-09-20, after `scripts/calibration_report.py`
+  was rewritten to count ignored cards as negatives): 5 accepted cards
+  averaged score 59.8; the ones left ignored averaged 59.0 (pending, all
+  ages) / 60.3 (ignored >=3 days) / 59.5 (>=1 day). AUC (the chance an
+  accepted card out-scored an ignored one; 0.5 = the score says nothing
+  about the operator's choice) is 0.50 at a 3-day ignore cutoff and 0.54 at
+  1 day -- stable across cutoffs, so it isn't an artifact of where the line
+  is drawn. By score band the acted-on rate is 1/5, 2/6, 2/6: flat. The
+  report auto-flags it ("NOT tracking") but tags the verdict THIN, which is
+  the honest reading -- 5 accepted vs 12-14 ignored cannot separate "the
+  score is uninformative" from noise, and no scoring change should be made
+  off it. Contrast: `tool_launches` (AUC 0.87) and `news` (0.76) show the
+  score clearly tracking the operator's picks, so this is a `whale_movements`
+  property, not a general artifact of the method.
+
+  One lead to look at when there's more data, not a conclusion: accepted
+  whale cards average novelty 48 vs 25-29 for ignored ones, while ignored
+  cards average HIGHER impact (66 vs 45) -- i.e. the operator may be picking
+  on "unusual for this wallet" rather than on transfer size, which is the
+  opposite of `impact` carrying the most weight. Worth checking whether
+  that holds at 15-20 decisions before touching the 0.30/0.30/0.20/0.20
+  weights. Until then: leave the scorer alone.
+
+- **`scripts/calibration_report.py` rewritten 2026-09-20 to use ignored
+  cards as a real negative signal.** The operator approves or ignores and
+  almost never taps Reject (first pull: 50 decisions, seven of eight
+  categories with zero rejections, 81 of 105 undecided cards >2 days old),
+  so the old report -- which treated 'pending' as "no data yet" -- was
+  discarding the most useful data being generated and could not compute an
+  accept rate that meant anything. Now: pending past a cutoff (default 3
+  days, `--days N`) counts as ignored; too-recent and `expired` cards are
+  excluded and shown separately (expired stays out deliberately: rejecting
+  the 46 Crypto Notebook orphans would have poisoned these stats). Per
+  category it prints the implicit accept rate, acted-on rate by score
+  tercile, top-vs-lower-half-of-digest rate, and an AUC with an explicit
+  verdict (thresholds: >=0.65 tracks, <=0.55 flagged, <5 per side no
+  verdict, <20 total tagged THIN). The cutoff is sanity-checked in the
+  output itself: observed time-to-decision is median 0.3d / p75 0.5d / p90
+  1.1d, so 3 days mislabels almost nothing as ignored.
+
+  **Built-in caveat, printed with every report because it's real:** digests
+  list cards highest-score first, so "acts on high scores" and "reads from
+  the top and runs out of time" are the same observation, and an ignored
+  card may simply never have been reached. Only picks from the LOWER half
+  of a digest are evidence of content-driven choice (currently 2 of 8 news,
+  2 of 6 tool_launches, 1 of 7 macro_news accepted cards). Only a
+  deliberately shuffled digest order could fully separate score from
+  position; not done. Operator is switching from ignoring to tapping Reject
+  on cards they'd never post (2026-09-20), which is the cleaner fix -- each
+  Reject is a real negative independent of reading order.
+
 ## Telegram / bot reliability
 
 - ~~Unresolved: callback_query taps sometimes don't appear in getUpdates, or
