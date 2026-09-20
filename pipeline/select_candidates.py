@@ -76,6 +76,19 @@ CAP_WINDOW_HOURS = 24.0
 # headline ("Bitcoin falls below $X") is not suppressed forever.
 NOTIFIED_DEDUP_LOOKBACK_DAYS = 7
 
+# Per-digest subject cap: at most ONE candidate per lead subject
+# (entity_lib.lead_subject) in a category's selection, highest effective score
+# wins. Headline-driven categories only. Real case 2026-09-17: "Circle Launches
+# Arc Mainnet" and "Circle debuts Arc blockchain..." shipped in one digest;
+# no similarity rule could separate them from distinct same-topic stories
+# without merging 1,402 pairs, so this caps by subject instead -- deterministic
+# and auditable, at the accepted cost of also spacing out genuinely distinct
+# same-subject stories (audited on 117 sent items: 9 would be spaced out, incl.
+# separate Bitcoin and SEC stories). Capped-out items are DEFERRED, not dropped:
+# they stay unnotified and eligible next cycle (age bonus applies), so this
+# never silently discards news -- it only limits one digest to one per subject.
+SUBJECT_CAP_CATEGORIES = {"news", "macro_news"}
+
 # Anti-starvation age bonus -- added to a candidate's SCORE to get its
 # EFFECTIVE ranking score for cap-selection purposes only; never written
 # back to `scores.score`, never what's shown to the operator ("Score X/100"
@@ -257,6 +270,17 @@ def get_new_candidates(conn, category: str, channel: str) -> list[dict]:
     # returns raises TypeError outright (verified live before shipping this).
     now = datetime.now(timezone.utc)
     candidates.sort(key=lambda row: float(row["score"]) + _age_bonus(row["collected_at"], now), reverse=True)
+
+    if category in SUBJECT_CAP_CATEGORIES:
+        seen_subjects, capped = set(), []
+        for row in candidates:  # already sorted best-first
+            subject = entity_lib.lead_subject((row["payload"] or {}).get("title"))
+            if subject is not None and subject in seen_subjects:
+                continue
+            if subject is not None:
+                seen_subjects.add(subject)
+            capped.append(row)
+        candidates = capped
 
     soft_cap = cfg.get("soft_daily_cap")
     if soft_cap is not None:

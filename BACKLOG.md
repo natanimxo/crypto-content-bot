@@ -222,6 +222,22 @@ the one place to check.
   Options if this matters: an LLM same-event check on only the borderline pairs
   (>=2 shared proper nouns) -- costs a call per pair; or cap one item per
   primary subject per digest. Entity extraction junk is a separate cleanup.
+  **Decision 2026-09-21 (operator): per-digest subject cap, no LLM check** --
+  a non-deterministic call inside a filter can silently suppress real news and
+  can't be debugged like the scoring. BUILT: `SUBJECT_CAP_CATEGORIES` (news,
+  macro_news) in `select_candidates.py`, keyed on `entities.lead_subject`
+  (first capitalized non-filler headline word), best effective score wins.
+  Two findings while building: (1) `topic_key` could NOT be the key -- the
+  Circle pair's were `UNI` vs `USDC`, some rows carry GUID/URL keys, and a
+  topic_key cap would have removed 25 of 60 sent news items; (2) capped items
+  are DEFERRED, not dropped (they stay unnotified and eligible next cycle, age
+  bonus applies), so it spaces a subject out rather than deleting it -- which
+  also means a duplicate Circle story can still arrive in a LATER digest; this
+  limits repeats per digest, it does not detect that two stories are the same.
+  Cost, audited on 117 sent items: 9 would have been spaced out, some genuine
+  (three separate Bitcoin stories in one digest, three SEC stories). Watch
+  item: a perpetually busy subject (Bitcoin) could keep deferring its second
+  story; the age bonus is the only counterweight.
 
 ## Telegram / bot reliability
 

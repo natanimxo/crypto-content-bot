@@ -189,6 +189,23 @@ def is_duplicate_story(entities_a: dict, title_a: str, entities_b: dict, title_b
     return titles_match(title_a, title_b) or fingerprint_overlap(entities_a, entities_b) >= threshold
 
 
+_SUBJECT_SKIP = {"the", "a", "an", "new", "how", "why", "what", "who", "is", "are", "as",
+                 "us", "uk", "after", "here", "this", "these", "top"}
+
+
+def lead_subject(title: str) -> str | None:
+    """The headline's first capitalized non-filler word, lowercased -- the
+    subject key for the per-digest subject cap (select_candidates.py). Used
+    instead of topic_key because topic_key is unusable for this: the real
+    Circle/Arc pair had topic_keys 'UNI' and 'USDC' (junk from ticker
+    extraction), and some rows carry a GUID/URL. Deliberately coarse and
+    deterministic: it says 'same lead subject', never 'same event'."""
+    for w in re.findall(r"[A-Za-z][A-Za-z0-9'-]+", title or ""):
+        if w[0].isupper() and w.lower() not in _SUBJECT_SKIP:
+            return w.lower()
+    return None
+
+
 def primary_entity(entities: dict) -> str | None:
     """The single most stable identifier for 'what is this story primarily
     about' -- used as topic_key (pipeline/score.py, select_candidates.py's
