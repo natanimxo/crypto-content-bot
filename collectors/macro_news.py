@@ -250,9 +250,20 @@ _STOCK_PICKING_RE = re.compile(
     re.IGNORECASE,
 )
 
+# BBC labels a video-companion post with a leading "Watch:"/"Listen:" instead
+# of a separate content type field -- real example, 2026-09-22: "Watch: Why
+# has the Federal Reserve raised interest rates?" landed as a no-links text
+# post that just names the video, same failure shape as tool_launches'
+# [video]-suffix filter (_NON_TOOL_SUFFIX_RE) for HN. Checked as a PREFIX,
+# not a substring, on purpose -- a story that merely mentions a video partway
+# through its own headline is still a real story.
+_VIDEO_PREFIX_RE = re.compile(r"^(watch|listen|in pictures|video)\s*:", re.IGNORECASE)
+
 
 def _is_excluded(title: str) -> bool:
     if title.strip().startswith(("I ", "I've", "I'm")):
+        return True
+    if _VIDEO_PREFIX_RE.match(title.strip()):
         return True
     return bool(_PERSONAL_FINANCE_RE.search(title) or _STOCK_PICKING_RE.search(title))
 

@@ -43,8 +43,25 @@ choosing to pace a release -- e.g. "send me a few first so I can gauge write
 quality before the rest." Unlike the other three, releasing a held item
 doesn't happen automatically with time; it stays excluded until explicitly
 un-held.
+
+PER-CYCLE PACING, 2026-09-22 (real incident, operator direction): the rolling
+24h window fixed the calendar-boundary burst above, but nothing stopped one
+cycle from spending the ENTIRE remaining 24h headroom at once and then
+sending nothing for the rest of the day -- replay of 10 real days showed 30
+of 60 news cycles sending zero. Fixed with a per-cycle cap derived from
+CYCLES_PER_DAY, bounding a single cycle to its fair share of the remaining
+window (see that constant's comment).
+
+FRESHNESS, same date, a separate real incident: a 6-day-old story ("The Fed
+is expected to raise interest rates...", covering a 2026-09-16 decision,
+delivered 2026-09-22) carried the full starvation-fix age bonus meant for
+"good but unlucky," not "stale." For news/macro_news/whale_movements the age
+bonus is now off entirely and a hard age cutoff applies, both keyed on the
+item's OWN timestamp, not collected_at -- see NO_AGE_BONUS_CATEGORIES and
+FRESHNESS_MAX_AGE_HOURS.
 """
 
+import math
 from datetime import datetime, timezone
 
 from pipeline import entities as entity_lib
@@ -67,6 +84,23 @@ CROSS_CYCLE_DEDUP_THRESHOLD = 0.5
 # the boundary semantics changed.
 CAP_WINDOW_HOURS = 24.0
 
+# Real collect-cycle cadence (Railway cron, `0 */4 * * *` -- see
+# intelligence-bot-spec-v2.md Section on collect-cycle). Used only to derive
+# CYCLES_PER_DAY below; not itself a gate.
+CYCLE_HOURS = 4.0
+
+# PER-CYCLE PACING, 2026-09-22 (real incident, operator direction): the
+# rolling 24h cap (above) is the right OVERALL ceiling, but nothing previously
+# stopped one cycle from spending the entire day's remaining headroom at once
+# and then sending nothing for the other ~5 cycles of the day -- a busy
+# category's backlog cleared in one burst instead of a steady drip.
+# CYCLES_PER_DAY / this divisor bounds how much of the REMAINING 24h headroom
+# a single cycle may use; the 24h count in get_new_candidates is still what
+# actually enforces the daily total, this only spreads it out across the day.
+# ceil(), not floor -- a cap of 4 with 6 cycles/day must still allow 1/cycle,
+# not round down to 0.
+CYCLES_PER_DAY = 24.0 / CYCLE_HOURS
+
 # How far back a candidate is compared against items ALREADY NOTIFIED, to catch
 # a feed re-serving a story that already went out (real incident 2026-09-18..20:
 # identical BBC headlines re-sent 1-3 days apart, past the 12-24h topic_key
@@ -83,9 +117,11 @@ NOTIFIED_DEDUP_LOOKBACK_DAYS = 7
 # no similarity rule could separate them from distinct same-topic stories
 # without merging 1,402 pairs, so this caps by subject instead -- deterministic
 # and auditable, at the accepted cost of also spacing out genuinely distinct
-# same-subject stories. Capped-out items are DEFERRED, not dropped:
-# they stay unnotified and eligible next cycle (age bonus applies), so this
-# never silently discards news -- it only limits one digest to one per subject.
+# same-subject stories. Capped-out items are DEFERRED, not dropped: they stay
+# unnotified and eligible next cycle -- subject to FRESHNESS_MAX_AGE_HOURS
+# like everything else in this category now (2026-09-22), no age bonus -- so
+# this never silently discards news, it only limits one digest to one per
+# subject.
 SUBJECT_CAP_CATEGORIES = {"macro_news"}
 # `news` was removed from this set 2026-09-21 after a 10-day replay of real
 # arrivals at the 10/day cap: cap=1 raised Bitcoin's median wait 8.9h -> 27.0h
@@ -108,12 +144,57 @@ SUBJECT_CAP_CATEGORIES = {"macro_news"}
 AGE_BONUS_HOURS_PER_POINT = 6.0
 AGE_BONUS_MAX_POINTS = 12.0
 
+# Categories where the age bonus is WRONG, not just unnecessary -- fixed
+# 2026-09-22, real incident: "The Fed is expected to raise interest rates for
+# the first time in 3 years" -- a preview of a decision made 2026-09-16 --
+# was delivered 2026-09-22, six days later, carrying the FULL +12 age bonus
+# that put it ahead of same-cycle arrivals. The age bonus exists to stop a
+# genuinely good candidate from losing forever to a churn of fresher,
+# marginally-higher-scoring ones (Section 9's starvation fix) -- that
+# reasoning only holds for categories where a stale candidate is still just
+# as good as a fresh one (a job posting, a tool, a yield pool). For
+# time-sensitive categories, older is WORSE, not owed a turn for waiting; see
+# FRESHNESS_MAX_AGE_HOURS below for the harder cutoff on the same principle.
+NO_AGE_BONUS_CATEGORIES = {"news", "macro_news", "whale_movements"}
+
+# Hard eligibility cutoff for the same three categories, keyed on the
+# ARTICLE'S/TRANSFER'S OWN TIMESTAMP (payload published_at / timestamp), not
+# collected_at -- collected_at only says when OUR pipeline saw it, which is
+# exactly what let the six-day-old Fed story above look "fresh" by the old
+# age-bonus math. Values matched to each collector's own MAX_AGE_HOURS
+# (collectors/news.py, collectors/macro_news.py: 48; collectors/
+# whale_movements.py: WHALE_MAX_AGE_HOURS 24) -- not new numbers, just the
+# same "this stops mattering" line already drawn at collection time, now also
+# enforced at SELECTION time so a candidate that was fresh when collected but
+# has since aged out while stuck behind the soft cap gets dropped rather than
+# sent stale. A duplicate constant, not an import, for the same reason
+# CROSS_CYCLE_DEDUP_THRESHOLD is -- collectors import from pipeline, not the
+# reverse.
+FRESHNESS_MAX_AGE_HOURS = {"news": 48.0, "macro_news": 48.0, "whale_movements": 24.0}
+
 
 def _age_bonus(collected_at, now: datetime) -> float:
     if not collected_at:
         return 0.0
     age_hours = max(0.0, (now - collected_at).total_seconds() / 3600)
     return min(AGE_BONUS_MAX_POINTS, age_hours / AGE_BONUS_HOURS_PER_POINT)
+
+
+def _published_at(category: str, payload: dict) -> datetime | None:
+    """The item's own timestamp for freshness purposes -- news/macro_news
+    store an ISO string (`published_at`, from the feed entry); whale_movements
+    stores a unix epoch (`timestamp`, the transaction's own block time)."""
+    payload = payload or {}
+    if category == "whale_movements":
+        ts = payload.get("timestamp")
+        return datetime.fromtimestamp(ts, tz=timezone.utc) if ts else None
+    raw = payload.get("published_at")
+    if not raw:
+        return None
+    try:
+        return datetime.fromisoformat(raw)
+    except ValueError:
+        return None
 
 
 def _already_notified_ids(conn, category: str) -> set[int]:
@@ -213,6 +294,9 @@ def get_new_candidates(conn, category: str, channel: str) -> list[dict]:
         )
         rows = cur.fetchall()
 
+    max_age_hours = FRESHNESS_MAX_AGE_HOURS.get(category)
+    now = datetime.now(timezone.utc)
+
     candidates = []
     for row in rows:
         if row["raw_item_id"] in already_notified:
@@ -220,6 +304,10 @@ def get_new_candidates(conn, category: str, channel: str) -> list[dict]:
         topic_key = (row["payload"] or {}).get("topic_key")
         if topic_key and topic_key in cooling_down_topics:
             continue
+        if max_age_hours is not None:
+            published_at = _published_at(category, row["payload"])
+            if published_at and (now - published_at).total_seconds() > max_age_hours * 3600:
+                continue
         candidates.append(row)
 
     # Cross-CYCLE same-story dedup (2026-09-16, real incident) -- collectors'
@@ -272,8 +360,14 @@ def get_new_candidates(conn, category: str, channel: str) -> list[dict]:
     # float(...) matters here, not cosmetic -- scores.score is NUMERIC, which
     # psycopg2 returns as Decimal; Decimal + the plain float _age_bonus
     # returns raises TypeError outright (verified live before shipping this).
-    now = datetime.now(timezone.utc)
-    candidates.sort(key=lambda row: float(row["score"]) + _age_bonus(row["collected_at"], now), reverse=True)
+    # No age bonus at all for NO_AGE_BONUS_CATEGORIES -- see that constant's
+    # comment; ranking there is real score only, oldest-first ties broken by
+    # score alone rather than letting staleness buy rank.
+    apply_age_bonus = category not in NO_AGE_BONUS_CATEGORIES
+    candidates.sort(
+        key=lambda row: float(row["score"]) + (_age_bonus(row["collected_at"], now) if apply_age_bonus else 0.0),
+        reverse=True,
+    )
 
     if category in SUBJECT_CAP_CATEGORIES:
         seen_subjects, capped = set(), []
@@ -289,7 +383,13 @@ def get_new_candidates(conn, category: str, channel: str) -> list[dict]:
     soft_cap = cfg.get("soft_daily_cap")
     if soft_cap is not None:
         already_recent = _category_notified_recent_count(conn, channel, category)
-        remaining = max(0, int(soft_cap) - already_recent)
+        remaining_24h = max(0, int(soft_cap) - already_recent)
+        # Per-cycle pacing: this cycle may use at most ceil(daily_cap /
+        # CYCLES_PER_DAY) of that remaining headroom, never more -- the 24h
+        # count above stays the true ceiling, this only stops one cycle from
+        # spending all of it. See CYCLES_PER_DAY's comment above.
+        per_cycle_cap = math.ceil(int(soft_cap) / CYCLES_PER_DAY)
+        remaining = min(remaining_24h, per_cycle_cap)
         candidates = candidates[:remaining]
 
     return candidates

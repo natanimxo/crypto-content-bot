@@ -190,7 +190,17 @@ def is_duplicate_story(entities_a: dict, title_a: str, entities_b: dict, title_b
 
 
 _SUBJECT_SKIP = {"the", "a", "an", "new", "how", "why", "what", "who", "is", "are", "as",
-                 "us", "uk", "after", "here", "this", "these", "top"}
+                 "us", "uk", "after", "here", "this", "these", "top",
+                 # video/media lead-ins -- a headline-style prefix, never the
+                 # subject. Real leak, 2026-09-22: three separate interest-rate
+                 # stories got three different keys instead of colliding, one
+                 # of them "Watch: Why has the Federal Reserve raised interest
+                 # rates?" extracting 'watch'. (BBC's "Watch:"-prefixed posts
+                 # are also excluded outright at collection now -- see
+                 # collectors/macro_news.py's _is_excluded -- this entry stays
+                 # as a second layer for any title that keeps the word without
+                 # the exact "Watch:" prefix, e.g. mid-sentence.)
+                 "watch", "listen", "video", "photos", "podcast"}
 
 
 def lead_subject(title: str) -> str | None:
@@ -199,10 +209,18 @@ def lead_subject(title: str) -> str | None:
     instead of topic_key because topic_key is unusable for this: the real
     Circle/Arc pair had topic_keys 'UNI' and 'USDC' (junk from ticker
     extraction), and some rows carry a GUID/URL. Deliberately coarse and
-    deterministic: it says 'same lead subject', never 'same event'."""
+    deterministic: it says 'same lead subject', never 'same event'.
+
+    Strips a trailing possessive "'s" before the stopword check -- the other
+    half of the 2026-09-22 leak: "What's happening to UK interest rates..."
+    extracted 'what's' verbatim, which isn't in _SUBJECT_SKIP (only 'what'
+    is), so it slipped through as its own subject instead of being filtered.
+    Stripping first also means "Trump's Fed pick..." collides with a plain
+    "Trump ..." headline on 'trump' instead of splitting into two keys."""
     for w in re.findall(r"[A-Za-z][A-Za-z0-9'-]+", title or ""):
-        if w[0].isupper() and w.lower() not in _SUBJECT_SKIP:
-            return w.lower()
+        stem = w[:-2] if w.lower().endswith("'s") else w
+        if stem and stem[0].isupper() and stem.lower() not in _SUBJECT_SKIP:
+            return stem.lower()
     return None
 
 

@@ -256,6 +256,74 @@ the one place to check.
   there -- it spaces things out, it doesn't prove duplication. Per operator,
   a repeat is preferred to losing a distinct angle.
 
+## Delivery pacing and freshness (2026-09-22)
+
+- **Per-cycle pacing -- one cycle could spend a whole day's cap in one burst,
+  then go silent.** Operator's diagnosis was exactly right and confirmed by
+  replay of 10 days of real news arrivals (cap=10/day, 6 cycles/day, no age
+  bonus): 30 of 60 cycles sent nothing, the other half sent up to 5 at once.
+  Fixed: a per-cycle cap (`pipeline/select_candidates.py`, derived from
+  `CYCLES_PER_DAY`) bounds a single
+  cycle to `ceil(soft_daily_cap / CYCLES_PER_DAY)` of the REMAINING rolling-
+  24h headroom -- the 24h count is still the real ceiling, this only spreads
+  it across the day instead of letting one cycle claim it all. Same replay
+  with the fix: 1 of 60 cycles empty, max 2/cycle, matching the "1-3 per
+  cycle" the operator asked for. `CYCLES_PER_DAY` is derived from
+  `CYCLE_HOURS = 4.0` (the real Railway cron cadence), not hardcoded per
+  category.
+
+- **Freshness for time-sensitive categories -- FIXED.** Real incident: "The
+  Fed is expected to raise interest rates for the first time in 3 years" --
+  covering a decision made 2026-09-16 -- was delivered 2026-09-22, six days
+  later, carrying the full +12 age bonus (which exists to stop starvation, not
+  to reward staleness). For `news`, `macro_news`, `whale_movements`: (1) the
+  age bonus no longer applies at all (`NO_AGE_BONUS_CATEGORIES`) -- ranking is
+  real score only; (2) a hard eligibility cutoff, keyed on the item's OWN
+  timestamp (`published_at` for news/macro, the transaction's own block
+  `timestamp` for whale -- NOT `collected_at`, which only says when our
+  pipeline saw it and is exactly what let a 6-day-old story look "fresh"),
+  drops a candidate once it's older than `FRESHNESS_MAX_AGE_HOURS` (48h news/
+  macro, 24h whale -- matched to each collector's own existing MAX_AGE_HOURS/
+  WHALE_MAX_AGE_HOURS collect-time cutoff, not new numbers). Confirmed against
+  the real Fed rows (230305, 230308): both now excluded, 166.8h and 168.6h
+  old at test time. Age bonus and starvation-fix reasoning is kept as-is for
+  the evergreen categories (`startup_jobs`, `web3_jobs`, `tool_launches`,
+  `defi_yields`) -- a stale job posting or yield pool is still just as good as
+  a fresh one. `gems_security` wasn't named by the operator either way; left
+  in the age-bonus group on the reasoning that a real honeypot/rug-risk
+  finding stays just as true days later (unlike a news event, which is
+  superseded) -- worth a direct confirm if that reasoning is wrong.
+
+- **BBC "Watch:" video posts -- filtered, same shape as tool_launches' HN
+  [video] filter.** Real example: "Watch: Why has the Federal Reserve raised
+  interest rates?" -- a no-links text post that only names a video, not a
+  story of its own. `collectors/macro_news.py::_is_excluded` now also
+  rejects a leading `Watch:`/`Listen:`/`In pictures:`/`Video:` prefix.
+  Prefix-only match, deliberately -- a story that mentions a video partway
+  through its own headline is still real.
+
+- **Macro subject cap letting through near-duplicates via filler-word leaks
+  -- fixed.** Three separate interest-rate stories got three different
+  `lead_subject` keys instead of colliding: "Watch: Why has the Federal
+  Reserve..." extracted `watch` (a video-prefix, not a subject -- now also
+  caught at collection by the fix above, but `lead_subject`'s own skip list
+  is a second, independent layer); "What's happening to UK interest
+  rates..." extracted `what's` verbatim (only bare `what` was in the skip
+  list, so the possessive form slipped through as its own key). Fixed in
+  `pipeline/entities.py::lead_subject`: strips a trailing `'s` before the
+  stopword check (also improves general precision -- "Trump's Fed pick..."
+  now collides with a plain "Trump ..." headline instead of splitting into
+  two keys), and the skip list gained `watch`/`listen`/`video`/`photos`/
+  `podcast`. **Not fixed, and out of scope of what was reported:** BBC's
+  sentence-case style capitalizes the true first word of a headline
+  regardless of whether it's a proper noun -- "Interest rates hold
+  expected..." still extracts `interest`, a real subject-key collision this
+  mechanism can't distinguish from a genuine "Interest [rate policy]" story
+  without a stopword list that would have to guess every common headline-
+  opener. Left as a known limitation of the "first capitalized word"
+  heuristic, not a filler-word gap; worth a proper-noun-aware approach if it
+  keeps showing up.
+
 ## Telegram / bot reliability
 
 - ~~Unresolved: callback_query taps sometimes don't appear in getUpdates, or
