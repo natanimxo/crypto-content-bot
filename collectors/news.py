@@ -48,6 +48,7 @@ import feedparser
 from dotenv import load_dotenv
 
 from pipeline import entities as entity_lib
+from pipeline.channel_router import assign_channels_to_new_items
 from pipeline.db import get_conn
 from pipeline.run_log import run_log
 from pipeline.store import get_or_create_source, insert_raw_items_batch
@@ -277,11 +278,21 @@ def collect() -> int:
             state["details"]["inserted"] = inserted
             state["details"]["held"] = HOLD_ALL_CANDIDATES
 
+            # Shared across crypto_wall_street and alpha_edge_crypto since
+            # 2026-09-30 (operator direction) -- news clears 35+/day against a
+            # single channel's 10/day cap, real volume going unused while
+            # Alpha Edge had no news of its own. Same round-robin mechanism as
+            # web3_jobs (pipeline/channel_router.py); no-op before that date's
+            # config change (SHARED_CATEGORY_CHANNELS lookup returns None for
+            # a category that isn't listed there).
+            assigned = assign_channels_to_new_items(conn, CATEGORY)
+            state["details"]["channel_assigned"] = assigned
+
             logger.info(
                 "news: fetched=%d not_original_filtered=%d too_old_filtered=%d merged_away=%d "
-                "candidates=%d inserted=%d",
+                "candidates=%d inserted=%d channel_assigned=%d",
                 fetched_total, not_original_filtered, too_old_filtered, merged_away,
-                len(items), inserted,
+                len(items), inserted, assigned,
             )
         return inserted
     finally:

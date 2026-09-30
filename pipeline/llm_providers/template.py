@@ -122,6 +122,19 @@ def render_macro_news(raw_item: dict) -> str:
     return " ".join(parts)
 
 
+@register_template("hacks_exploits")
+def render_hacks_exploits(raw_item: dict) -> str:
+    p = raw_item["payload"]
+    tvl = p.get("protocol_tvl_usd")
+    parts = [
+        f"{p.get('protocol_name')}: ${p.get('amount_usd', 0):,.0f} lost ({p.get('classification') or 'unclassified'})",
+        f"TVL ${tvl:,.0f}" if tvl is not None else "TVL not tracked",
+    ]
+    if p.get("chain"):
+        parts.append(p["chain"])
+    return " · ".join(parts)
+
+
 @register_template("startup_jobs")
 def render_startup_jobs(raw_item: dict) -> str:
     p = raw_item["payload"]

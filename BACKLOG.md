@@ -857,6 +857,130 @@ it's a sourcing decision still pending operator direction, not a fix).
   for). Explicit operator instruction: fix sourcing properly, don't lower
   the relevance gate to manufacture volume from a genuinely dry source.
 
+## Channel routing (2026-09-30)
+
+- **News shared crypto_wall_street <-> alpha_edge_crypto via alternation;
+  new `hacks_exploits` category added to coincraft; `defi_yields` stays
+  alpha_edge_crypto-only (operator direction: "highest-priced channel,
+  steady volume is what I'm selling on it").** Real headroom check before
+  building anything, live-queried 2026-09-30: news clears review_threshold
+  ~35/day against a single channel's 10/day cap; single-channel sent was
+  already averaging only 8/day (some days as low as 4), well under even that
+  one cap -- volume was being generated and thrown away, not a thin source.
+  Splitting defi_yields with coincraft was ALSO evaluated (replay of 21 real
+  days: each side would land ~4.6-4.8/day vs today's single-channel 5.9,
+  combined output nearly doubling) -- genuinely viable, but rejected per
+  operator direction rather than on the numbers; `hacks_exploits` fills
+  coincraft's gap instead, at zero cost to Alpha Edge.
+
+  Cross-channel duplicate suppression needed NO new code, verified live
+  rather than assumed: `_recently_notified_stories`/`_topics_in_cooldown`
+  (pipeline/select_candidates.py) already query notifications with no
+  `channel` filter at all, so once EITHER channel sends a story, the other's
+  very next `get_new_candidates` call (same run() loop, same cycle) already
+  sees it as notified and suppresses an exact-title repeat -- confirmed with
+  a live synthetic test (two throwaway raw_items, identical title, opposite
+  assigned_channel; the second channel correctly excluded the item once the
+  first's notification was inserted; test rows deleted after). What this
+  does NOT catch, same residual gap as within one channel: two outlets
+  covering the same event under different headlines (weak fingerprint
+  overlap only) -- operator explicitly accepted this cost ("both are crypto
+  channels with overlapping subscribers, some people will see the same story
+  twice... acceptable for the volume").
+
+  **Real pre-existing bug found and fixed while wiring this, not
+  introduced by it:** crypto_wall_street's channel-level soft_daily_cap (12)
+  was ALREADY silently trimming news below its own 10/day category cap --
+  live-queried: exactly 12 items/day on 9 of the last 14 days (news' 10 +
+  whale_movements' realistic ~4-6/day -- its nominal 12 cap is never
+  actually approached -- summed to 14-16, over the channel's own 12). Raised
+  to 16 (news' cap 10 + whale's realistic ceiling, not its unused nominal
+  one). alpha_edge_crypto's channel cap raised 12 -> 16 for the same reason,
+  pre-emptively this time: defi_yields(6) + news(10) could reach 16, and
+  leaving the channel cap at 12 would let it silently trim INTO defi_yields'
+  volume some cycles depending on which category scored higher that cycle --
+  exactly the "steady volume" guarantee the operator said not to touch.
+  coincraft's channel cap (12) was left alone -- combined real demand there
+  (gems_security ~0.5/week + hacks_exploits ~1.5-2.6/week + web3_jobs dry)
+  stays well under it.
+
+  **`hacks_exploits` source research, done live before proposing it, not
+  assumed:** DefiLlama's `/raises` (funding rounds) API, evaluated first,
+  returned HTTP 402 -- now paywalled, dead end. Snapshot's governance
+  GraphQL API is free and live but nearly all noise without a hand-curated
+  "DAOs that matter" watchlist (a `first: 5, orderBy: created` pull surfaced
+  `legonft.eth` and `rocketstarfoundation.eth` alongside real DAOs) -- same
+  curated-list-rot risk already rejected for `grants` (see that section),
+  not built. `airdrops` re-checked live rather than left at "genuinely
+  unresearched": still a dead end, confirmed today -- airdrops.io has no
+  JSON API (WordPress site, scraping-only, same ToS/fragility problem as
+  Product Hunt), CoinMarketCap's airdrop data is paid-tier only.
+  DefiLlama's `/hacks` API survived the check: free, no auth, same
+  already-trusted vendor as defi_yields, robots.txt open, one-shot fetch
+  (no pagination), 1,290 historical incidents. Threshold chosen ($500k, over
+  a $1M alternative): $500k -> ~0.72/day (90d window) / ~0.64/day (180d,
+  matches review_threshold=50's real cadence below); $1M -> ~0.47/day --
+  $500k keeps this from reading as barely-there combined with gems_security.
+
+  **Scoring -- the operator's core ask ("a small exploit on a major protocol
+  may matter more than a large one on something nobody uses") is a real,
+  validated BLEND, not just documented as an intent:** `impact` =
+  0.65*log_scale(amount) + 0.35*log_scale(protocol's current TVL, via
+  DefiLlama's `/protocols`, joined by `defillamaId` -- confirmed live,
+  522/538 hacks that carry an id resolve to a real tracked protocol).
+  Real concrete pair from live data: a $1.34M hack on Raydium AMM ($1.3B TVL)
+  scores 55.8 total and clears review_threshold=50 on prominence alone
+  despite a modest dollar figure; a $320M hack on an untracked target
+  (Liquid Network, no DefiLlama TVL data at all) scores 67.1 -- still ranks
+  higher for the larger real damage, but nowhere near the ~240x gap raw
+  dollar amount alone would produce, which is the tempering effect asked
+  for. Untracked targets (538/1290 -- wallets, bridges, chains, gambling
+  platforms DefiLlama doesn't track TVL for, not just obscure protocols;
+  COLDCARD $116M and Liquid Network $320M are real examples) default
+  prominence to a neutral 50, never coded as low or high -- a short
+  "known major exchanges" list was considered and rejected: the untracked
+  set is too varied for a name list to meaningfully help, same curated-list-
+  rot shape already rejected four times.
+
+  `review_threshold` kept at 50, the same convention every other category
+  uses -- deliberately NOT tuned down to manufacture volume (operator's own
+  2026-09-16 direction: "fix sourcing properly rather than lower a
+  threshold"). Real combined cadence at 50: hacks_exploits ~1.5-2.6/week +
+  gems_security's own real rate (~0.5/week, 1 incident in the last 14 days)
+  = roughly 2-3/week for the whole channel's second slot -- thin, reported
+  honestly as such rather than inflated.
+
+  `soft_daily_cap: 4`, not an arbitrary "small" number -- sized to the worst
+  real day found in 90 days of history (2026-09-24 had 4 qualifying
+  incidents same day: Bitget, Duelbits, Limit Break, Payy Network).
+
+  Certainty discipline (operator: "same as gems -- report what's confirmed,
+  don't speculate on cause or blame"), enforced structurally, not just in
+  the prompt: `pipeline/write_post.py`'s new `check_no_speculation` guard
+  (same checked-write/retry/RuntimeError mechanism as gems_security's
+  overclaim guard and macro_news's neutrality guard) bans hedge-words that
+  smuggle in an unconfirmed claim ("allegedly", "apparently", "probably an
+  inside job") and any claim about an attacker's identity or motive -- there
+  is no such field anywhere in DefiLlama's data, so any such claim in a
+  draft is invented, not reported. Classification/technique ARE allowed as
+  fact, since those are DefiLlama's own categorization of what happened, not
+  our speculation about why.
+
+  Backlog bootstrap, real and worth knowing: the first `collectors.
+  hacks_exploits.collect()` run inserted 744 historical rows (unheld, same
+  "poller's healthy, don't hold by default" posture every category has used
+  since 2026-09-15); 293 clear review_threshold, but the 14-day freshness
+  cutoff (`FRESHNESS_MAX_AGE_HOURS['hacks_exploits']`) narrowed that to
+  exactly 1 real candidate eligible to notify on day one (Bitget, $387M,
+  score 90.3) -- confirms the freshness gate does its job against a bulk
+  historical backfill, not just against a slow trickle. Similarly, adding
+  `news` to `SHARED_CATEGORY_CHANNELS` doesn't retroactively split existing
+  unassigned rows on its own -- `assign_channels_to_new_items` only assigns
+  rows with `assigned_channel IS NULL`, which was every one of the 768
+  existing news rows (alternation is new) -- so the very first post-change
+  run assigns the ENTIRE historical backlog in one pass, same bootstrap
+  mechanism web3_jobs went through originally, not a bug.
+
 ## Channel routing (2026-09-20)
 
 - **Rebalance: `crypto_notebook` removed, `gems_security` and `defi_yields`

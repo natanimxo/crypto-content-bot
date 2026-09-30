@@ -488,3 +488,109 @@ macro_news:
     adopting either side's framing. No crypto framing, no financial-advice
     language, no price predictions. Measured tone: no hype, no manufactured
     urgency, no emoji beyond what the template itself adds.
+
+hacks_exploits:
+  # Added 2026-09-30 (operator direction) -- confirmed post-hack incidents
+  # (DefiLlama's /hacks), complementing gems_security's pre-hack token risk
+  # screening on the same channel (CoinCraft) without splitting defi_yields
+  # away from alpha_edge_crypto. See collectors/hacks_exploits.py's module
+  # docstring for the source research (raises API now paywalled, Snapshot
+  # governance too noisy without a curated DAO list) and BACKLOG for the
+  # full threshold/cadence comparison.
+  score_weights:
+    impact: 0.45          # BLEND of dollar amount and protocol prominence
+                            # (current TVL, when DefiLlama tracks the target) --
+                            # the operator's explicit ask: "a small exploit on
+                            # a major protocol may matter more than a large one
+                            # on something nobody uses." Weighted highest, same
+                            # "the severity question IS the news value" logic
+                            # every other category gives its own top component.
+                            # Validated against real data: a $1.34M hack on
+                            # Raydium AMM ($1.3B TVL) scores 55.8 total, clearing
+                            # review_threshold on prominence alone despite a
+                            # modest dollar figure; see pipeline/score.py's
+                            # _hacks_impact for the exact blend.
+    credibility: 0.20       # data COMPLETENESS, not "did this happen" --
+                            # DefiLlama's own inclusion already vets that (this
+                            # isn't a live automated check the way GoPlus is).
+                            # Highest when the target resolves to a real,
+                            # currently-tracked protocol (verifiable TVL, not
+                            # just a self-reported number); lower when it
+                            # doesn't (a wallet/bridge/chain/gambling platform
+                            # DefiLlama never tracked TVL for in the first
+                            # place -- still real, just less cross-checked).
+    novelty: 0.20           # age-decayed within the 14-day freshness window
+                            # (pipeline/select_candidates.py's
+                            # FRESHNESS_MAX_AGE_HOURS) -- DefiLlama's own feed
+                            # lags real-world hacks by a few days, so this is
+                            # deliberately longer than news' 48h.
+    actionability: 0.15     # unresolved (funds not yet returned) scores
+                            # higher than resolved/recovered. Honestly a
+                            # near-constant in practice -- live-checked
+                            # 2026-09-30: only 1 of 116 qualifying (>=$500k)
+                            # incidents in the last 90 days had recovered
+                            # funds recorded at all. Documented plainly rather
+                            # than left looking like an unnoticed bug, the way
+                            # gems_security's actionability once was.
+
+  review_threshold: 50   # same convention as every other category -- deliberately
+                           # NOT lowered to manufacture volume (operator direction,
+                           # 2026-09-16 content-quality review: "fix sourcing
+                           # properly rather than lower a threshold"). Real cadence
+                           # at 50, live-checked against 180 real days: ~0.22/day
+                           # (~1.5/week); combined with gems_security's own real
+                           # rate (~0.5/week), CoinCraft's two categories together
+                           # land around 2/week -- thin, but real and honestly
+                           # reported as such, not stretched.
+  # topic_key is the protocol's own name (collectors/hacks_exploits.py's
+  # _topic_key) -- a short cooldown, just long enough to absorb DefiLlama
+  # occasionally re-emitting the same incident, short enough that a genuinely
+  # separate later hack on the same protocol isn't suppressed.
+  cooldown_hours: 24
+  soft_daily_cap: 4       # rare-and-notable posture, same as gems_security/
+                           # whale_movements -- but live-checked against a real
+                           # cluster (2026-09-24 had 4 qualifying incidents in
+                           # one day: Bitget, Duelbits, Limit Break, Payy
+                           # Network), so 4 isn't an arbitrary "small" number,
+                           # it's sized to the worst real day seen so far.
+
+  triage_model: template   # structured findings (amount/classification/chain),
+                             # no synthesis needed -- same reasoning as defi_yields
+  write_model: deepseek-v4-flash
+  write_benchmark_status: trial   # brand new category, no real drafts yet -- unlike
+                                    # every other category here (all settled_deepseek
+                                    # from an earlier trial), this one starts in
+                                    # dual-preview mode (bot/approval_poller.py checks
+                                    # this exact value) so the operator can compare
+                                    # DeepSeek vs Sonnet on real hacks_exploits output
+                                    # before settling on one, same as every other
+                                    # category's own bootstrap presumably did.
+
+  label: "💥 HACK/EXPLOIT REPORT"
+
+  emoji: "💥"
+  display_label: "Hacks & Exploits"
+  hashtags:
+    - "#CryptoHack"
+    - "#DeFiSecurity"
+
+  voice: educational
+  # No history_line (a confirmed past incident isn't a recurring signal the
+  # way a wallet's past moves are -- same reasoning gems_security/web3_jobs
+  # already use). See build_hacks_exploits_prompt (pipeline/write_post.py)
+  # for the full certainty-discipline rule set: report only what DefiLlama's
+  # data confirms (amount, classification, chain, technique), never infer or
+  # state an attacker's identity or motive -- there is no such field in the
+  # source data, and check_no_speculation (pipeline/write_post.py) is a
+  # structural guard on the actual generated output, same "code-level check,
+  # not just a prompt instruction" discipline as gems_security's overclaim
+  # guard and macro_news's neutrality guard.
+  prompt_notes: >
+    Report what DefiLlama's own data confirms: the protocol, the amount, the
+    classification/technique (its own categorization, safe to state as fact),
+    the chain. Never speculate on who was responsible or why, never invent or
+    imply an attacker's identity, and never guess at a cause beyond the
+    stated classification. If funds were recovered, say so factually; if not,
+    don't editorialize about the odds of recovery. No hype, no "DYOR" advice-
+    giving beyond stating the fact of the incident. No emoji beyond what the
+    template itself adds.

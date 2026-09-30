@@ -752,6 +752,105 @@ def score_macro_news(conn, raw_item_id: int, payload: dict) -> dict:
     }
 
 
+# hacks_exploits weights (operator-approved plan, 2026-09-30). Core ask, and
+# the reason `impact` is a BLEND rather than dollar-amount alone: "a small
+# exploit on a major protocol may matter more than a large one on something
+# nobody uses." Weighted at 0.45 -- same "the severity question IS the news
+# value" reasoning news/whale_movements/gems_security all give their own
+# highest-weighted component, just applied to a blend of two signals instead
+# of one here. Rest of the weight split is deliberately lopsided toward that
+# one blend: credibility/novelty/actionability are all real here but
+# narrower than in other categories (DefiLlama itself already vets these as
+# confirmed incidents, so "credibility" is about data completeness, not
+# whether this happened at all -- see _hacks_credibility's docstring).
+HACKS_EXPLOITS_AMOUNT_FLOOR = 500_000       # matches the collector's own MIN_AMOUNT_USD
+HACKS_EXPLOITS_AMOUNT_CEILING = 300_000_000  # Bitget ($387M) and Liquid Network ($320M)
+                                               # are real recent examples above this --
+                                               # deliberately not raised to match them
+                                               # exactly, a few outliers saturating the
+                                               # ceiling is fine, that's what "ceiling" means
+HACKS_EXPLOITS_TVL_FLOOR = 1_000_000
+HACKS_EXPLOITS_TVL_CEILING = 5_000_000_000
+HACKS_EXPLOITS_UNKNOWN_TVL_PROMINENCE = 50.0  # neutral midpoint, not low or high --
+                                                # "unknown is never coded as clear," same
+                                                # discipline as GoPlus's unchecked-token cap
+HACKS_EXPLOITS_MAX_AGE_HOURS = 336.0  # 14 days -- see pipeline/select_candidates.py's
+                                        # FRESHNESS_MAX_AGE_HOURS, same number, kept in
+                                        # sync manually (collectors import from pipeline,
+                                        # not the other way around, same reason every
+                                        # other cross-module constant here is duplicated
+                                        # rather than imported)
+
+
+def _hacks_impact(payload: dict) -> float:
+    dollar = _log_scale(payload.get("amount_usd") or 0.0,
+                         HACKS_EXPLOITS_AMOUNT_FLOOR, HACKS_EXPLOITS_AMOUNT_CEILING)
+    tvl = payload.get("protocol_tvl_usd")
+    prominence = (
+        _log_scale(tvl, HACKS_EXPLOITS_TVL_FLOOR, HACKS_EXPLOITS_TVL_CEILING)
+        if tvl is not None else HACKS_EXPLOITS_UNKNOWN_TVL_PROMINENCE
+    )
+    return round(0.65 * dollar + 0.35 * prominence, 1)
+
+
+def _hacks_credibility(payload: dict) -> float:
+    """Not "is this real" -- DefiLlama's inclusion in the feed already
+    vets that, this isn't a live automated check the way GoPlus/gems_security
+    is. What varies here is data COMPLETENESS: a defillamaId that resolved to
+    a real, currently-tracked protocol (verifiable prominence, not just a
+    self-reported dollar figure) is the most corroborated case; a
+    defillamaId that didn't resolve (protocol delisted/renamed since) is a
+    step down; no defillamaId at all (a wallet, bridge, chain, or gambling
+    platform DefiLlama doesn't track TVL for in the first place) is real but
+    the least independently cross-checked."""
+    if payload.get("protocol_tvl_usd") is not None:
+        return 100.0
+    if payload.get("defillama_id"):
+        return 70.0
+    return 60.0
+
+
+def _hacks_novelty(payload: dict) -> float:
+    """Age-decay within the freshness window (pipeline/select_candidates.py
+    drops anything older than HACKS_EXPLOITS_MAX_AGE_HOURS outright, same
+    value here) -- floored at 30, not 0, since anything still eligible to be
+    scored at all is still a first-time surfacing, not stale enough to
+    exclude but also not owed the same "just happened" novelty as an hour-old
+    report."""
+    published_at = payload.get("published_at")
+    if not published_at:
+        return 30.0
+    try:
+        age_hours = (datetime.now(timezone.utc) - datetime.fromisoformat(published_at)).total_seconds() / 3600
+    except ValueError:
+        return 30.0
+    age_hours = max(0.0, age_hours)
+    return max(30.0, 100.0 - (age_hours / HACKS_EXPLOITS_MAX_AGE_HOURS) * 70.0)
+
+
+def _hacks_actionability(payload: dict) -> float:
+    """Real signal, honestly a near-constant one in practice -- live-checked
+    2026-09-30: of 116 qualifying (>=$500k) incidents in the last 90 days,
+    only 1 had `returnedFunds` populated at all. Documented plainly rather
+    than left looking like a bug the way gems_security's actionability once
+    was (BACKLOG): funds recovery is genuinely rare, this isn't miscounting
+    anything, it just won't discriminate much until that changes."""
+    return 40.0 if payload.get("returned_funds") else 80.0
+
+
+@register_scorer("hacks_exploits")
+def score_hacks_exploits(conn, raw_item_id: int, payload: dict) -> dict:
+    """Breakdown -- all four components, no external API call at score time
+    (protocol TVL is resolved and stored on the payload at collection time,
+    see collectors/hacks_exploits.py's module docstring for why)."""
+    return {
+        "impact": _hacks_impact(payload),
+        "novelty": round(_hacks_novelty(payload), 1),
+        "credibility": _hacks_credibility(payload),
+        "actionability": _hacks_actionability(payload),
+    }
+
+
 def score_new_items(conn, category: str) -> int:
     """Score every raw_item in this category that doesn't have a score row yet.
     Returns the number scored."""

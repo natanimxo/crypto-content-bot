@@ -2,7 +2,9 @@
 Section 3's alternation — Airdrops and Web3 jobs are eligible for both Alpha
 Edge Crypto and CoinCraft, and "each individual item is assigned to exactly
 one of the two channels ... never both"). First real use, 2026-09-10, for
-web3_jobs.
+web3_jobs. Extended 2026-09-30 to `news` (crypto_wall_street /
+alpha_edge_crypto) -- same mechanism, different pair of channels; see
+SHARED_CATEGORY_CHANNELS.
 
 Deterministic round-robin per category, tracked in `channel_alternation`
 (existing table from initial scaffolding, unused until now) — assignment
@@ -21,7 +23,27 @@ from pipeline.db import dict_cursor
 # returns None for them and callers skip assignment entirely.
 SHARED_CATEGORY_CHANNELS = {
     "web3_jobs": ["alpha_edge_crypto", "coincraft"],
+    # 2026-09-30 (operator direction, real headroom -- news clears review_
+    # threshold ~35/day against a single channel's 10/day cap): crypto_wall_
+    # street listed first so it keeps first-assignment priority, matching
+    # where all of news' history already lives -- alternation only changes
+    # what happens to NEW items from here on, see assign_channel's docstring.
+    "news": ["crypto_wall_street", "alpha_edge_crypto"],
 }
+
+# Cross-channel duplicate suppression for a SHARED category needs no extra
+# code, and it's worth writing down why rather than leaving it to be
+# rediscovered: pipeline/select_candidates.py's exact-title notified-lookback
+# (_recently_notified_stories) and topic_key cooldown (_topics_in_cooldown)
+# both query notifications/raw_items filtered on category alone, with NO
+# channel in the WHERE clause -- so once EITHER channel sends a story, the
+# OTHER channel's very next get_new_candidates call (same run() loop, same
+# cycle -- bot/notify.py processes channels sequentially and commits each
+# notification before moving to the next) already sees it as notified and
+# suppresses an exact-title repeat. What this does NOT catch, same as within
+# one channel: two outlets covering the same event under different headlines
+# (weak fingerprint overlap only) -- see BACKLOG's Circle/Arc writeup. That
+# residual gap is the one accepted cost of this split, not a new one.
 
 
 def assign_channel(conn, category: str) -> str | None:

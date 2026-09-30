@@ -845,8 +845,36 @@ def _find_neutrality_violations(parsed: dict) -> list[str]:
     return issues
 
 
+# Speculation guard (hacks_exploits, 2026-09-30) -- same checked-write
+# mechanism as the gems_security overclaim guard and the macro_news
+# neutrality guard, per operator direction: "same certainty discipline as
+# gems -- report what's confirmed, don't speculate on cause or blame."
+# DefiLlama's /hacks data has no attacker-identity field and no motive field
+# at all -- anything the model says about WHO did it or WHY is invented, not
+# reported. Classification/technique ARE safe to state as fact (DefiLlama's
+# own categorization of what happened, not our speculation about why), so
+# this only bans naming/blaming an unconfirmed party and hedge-words that
+# smuggle in an unconfirmed claim as if it were established.
+_SPECULATION_PATTERNS = [re.compile(p, re.IGNORECASE) for p in [
+    r"\ballegedly\b", r"\ballegations?\b", r"\bapparently\b", r"\brumor(?:ed)?\b",
+    r"\bsuspected? (?:to be|of|is|was)\b", r"\bit'?s (?:believed|thought|speculated)\b",
+    r"\b(?:probably|likely|possibly|may have|might have|could have) (?:been )?"
+    r"(?:an? )?(?:inside job|rug pull|intentional|malicious insiders?)\b",
+    r"\bthe (?:attacker|hacker|thief)('s)? (?:motive|goal|intention|identity)\b",
+    r"\bteam (?:is|was|are|were) (?:likely|probably|suspected)\b",
+]]
+
+
+def _find_speculation_issues(parsed: dict) -> list[str]:
+    """Checked against title/narrative/why_it_matters, same fields every
+    other structural guard in this module checks."""
+    text = " ".join(str(parsed.get(k, "")) for k in ("title", "narrative", "why_it_matters"))
+    return [p.pattern for p in _SPECULATION_PATTERNS if p.search(text)]
+
+
 def _generate_checked_write(conn, category: str, prompt: str, *, model_override: str | None = None,
-                             source_excerpt: str | None = None, check_neutrality: bool = False) -> str:
+                             source_excerpt: str | None = None, check_neutrality: bool = False,
+                             check_no_speculation: bool = False) -> str:
     """llm.generate_write, but refuses to let an overclaiming, (when
     source_excerpt is given) reproduced, or (when check_neutrality is set)
     politically-loaded draft through. One retry with a stricter reminder
@@ -859,6 +887,8 @@ def _generate_checked_write(conn, category: str, prompt: str, *, model_override:
         hits = _find_overclaims(parsed) + _find_reproduction_issues(parsed, source_excerpt)
         if check_neutrality:
             hits += _find_neutrality_violations(parsed)
+        if check_no_speculation:
+            hits += _find_speculation_issues(parsed)
         return hits
 
     raw = llm.generate_write(conn, category, prompt, model_override=model_override)
@@ -869,13 +899,16 @@ def _generate_checked_write(conn, category: str, prompt: str, *, model_override:
             "\n\nSTRICT REMINDER: your previous draft either (a) used language claiming or "
             "implying certainty this data doesn't support (words like 'safe', 'legit', "
             "'guaranteed', 'risk-free', 'no risk'), (b) reproduced or too-closely paraphrased "
-            "the source material instead of summarizing it in your own words, or (c) used "
+            "the source material instead of summarizing it in your own words, (c) used "
             "loaded characterizations of a political actor, asserted a government's motive "
-            "without attribution, or told a government/policymaker what it should do. Fix all "
-            "that apply: state only what the data supports, write your own summary, report what "
-            "happened and its plausible economic implications without taking a side or "
-            "characterizing anyone's motives, and never recommend a course of action to a "
-            "policymaker or reader -- describe, don't advocate."
+            "without attribution, or told a government/policymaker what it should do, or (d) "
+            "speculated about who was responsible for an incident or why, or hedged an "
+            "unconfirmed claim as if it were established ('allegedly', 'apparently', "
+            "'probably an inside job'). Fix all that apply: state only what the data supports, "
+            "write your own summary, report what happened and its plausible implications "
+            "without taking a side or characterizing anyone's motives, never recommend a "
+            "course of action to a policymaker or reader, and never name or imply who caused "
+            "an incident or why -- describe only what's confirmed."
         )
         raw = llm.generate_write(conn, category, stricter_prompt, model_override=model_override)
         hits = _check(raw)
@@ -967,6 +1000,79 @@ def compute_gems_security_elements(conn, raw_item: dict, history: list) -> dict:
     risk_line = ". ".join(parts) + "."
 
     return {"history_line": None, "risk_line": risk_line, "source_name": "GoPlus Token Security API"}
+
+
+@register_prompt_builder("hacks_exploits")
+def build_hacks_exploits_prompt(cfg: dict, region_profile: str, raw_item: dict, history: list) -> str:
+    """Certainty discipline is structural here, not just a tone request
+    (operator direction, 2026-09-30, same as gems_security): the prompt hands
+    the LLM only what DefiLlama itself confirms -- amount, classification,
+    chain, technique, whether funds were recovered -- and there is
+    structurally no attacker-identity or motive field anywhere in this
+    payload for the model to draw on, so any such claim is invented, not
+    reported. check_no_speculation (pipeline/write_post.py's
+    _generate_checked_write) is the code-level enforcement; this prompt is
+    the first layer, not the only one."""
+    p = raw_item["payload"]
+    tvl = p.get("protocol_tvl_usd")
+    tvl_note = f"${tvl:,.0f}" if tvl is not None else "not tracked by DefiLlama"
+    returned = p.get("returned_funds")
+    recovery_note = f"${returned:,.0f} recovered" if returned else "no funds recovered as of this report"
+
+    return f"""You are writing prose for a crypto security/education channel. Voice: {cfg.get('voice', 'educational')}.
+{cfg.get('prompt_notes', '')}
+
+Facts about this incident (confirmed by DefiLlama's own incident tracker, not your judgment):
+- Protocol/platform: {p.get('protocol_name')}
+- Amount lost: ${p.get('amount_usd', 0):,.0f}
+- Chain: {p.get('chain') or 'not specified'}
+- DefiLlama's own classification: {p.get('classification') or 'unclassified'}
+- Technique (DefiLlama's own categorization): {p.get('technique') or 'not specified'}
+- This protocol's current tracked TVL: {tvl_note}
+- Recovery status: {recovery_note}
+
+Return ONLY a JSON object (no markdown fence, no commentary) with exactly these
+three string fields:
+{{
+  "title": "one specific title naming the protocol and the dollar amount --
+    e.g. 'Protocol X loses $2.3M in oracle manipulation exploit'. No emoji.",
+  "narrative": "2-3 sentences: what happened, on this specific incident, using
+    ONLY the facts above. State the classification/technique as DefiLlama's
+    own finding, not your own theory. Never name or imply who was
+    responsible or why -- there is no such confirmed information here.",
+  "why_it_matters": "EXACTLY one sentence on why this specific incident is
+    worth knowing about -- the scale, or what it exposes about this
+    technique/protocol category in general. Not a generic 'always DYOR'
+    platitude."
+}}
+
+Hard rules, no exceptions: never speculate on who caused this or why; never
+use hedge-words that smuggle in an unconfirmed claim ("allegedly",
+"apparently", "probably an inside job", "suspected to be"); never say a
+recovery is "likely" or "unlikely" beyond the recovery status given above;
+never tell the reader what to do with their own money. No emoji anywhere in
+your output. Keep the combined narrative + why_it_matters under ~70 words.
+"""
+
+
+@register_post_computer("hacks_exploits")
+def compute_hacks_exploits_elements(conn, raw_item: dict, history: list) -> dict:
+    """No history_line -- a confirmed past incident isn't a recurring signal
+    the way a wallet's past moves are (same reasoning gems_security/
+    web3_jobs already use). risk_line states the confirmed facts plainly, same
+    "unknown is never coded as clear" posture as gems_security's own
+    risk_line: an untracked protocol says so, it doesn't go silent."""
+    p = raw_item["payload"]
+    tvl = p.get("protocol_tvl_usd")
+    parts = [f"DefiLlama: ${p.get('amount_usd', 0):,.0f} lost, classified as {p.get('classification') or 'unclassified'}"]
+    if p.get("chain"):
+        parts.append(f"chain: {p['chain']}")
+    parts.append(f"protocol TVL: ${tvl:,.0f}" if tvl is not None else "protocol TVL not tracked by DefiLlama")
+    if p.get("returned_funds"):
+        parts.append(f"${p['returned_funds']:,.0f} recovered")
+    risk_line = "; ".join(parts) + "."
+
+    return {"history_line": None, "risk_line": risk_line, "source_name": "DefiLlama"}
 
 
 @register_prompt_builder("news")
@@ -1467,6 +1573,11 @@ def _build_prompt_and_history(conn, category: str, channel: str, raw_item: dict)
 # _generate_checked_write's check_neutrality param.
 NEUTRALITY_CHECKED_CATEGORIES = {"macro_news"}
 
+# Categories whose written output gets checked against
+# _find_speculation_issues -- see that function's docstring and
+# _generate_checked_write's check_no_speculation param.
+SPECULATION_CHECKED_CATEGORIES = {"hacks_exploits"}
+
 
 def generate_post(conn, category: str, channel: str, raw_item: dict) -> str:
     """Single-variant write, using whatever write_model is currently configured."""
@@ -1475,6 +1586,7 @@ def generate_post(conn, category: str, channel: str, raw_item: dict) -> str:
     raw = _generate_checked_write(
         conn, category, prompt, source_excerpt=source_excerpt,
         check_neutrality=category in NEUTRALITY_CHECKED_CATEGORIES,
+        check_no_speculation=category in SPECULATION_CHECKED_CATEGORIES,
     )
     return _assemble(conn, category, raw_item, history, raw)
 
@@ -1488,8 +1600,9 @@ def generate_post_variants(conn, category: str, channel: str, raw_item: dict) ->
     prompt, history = _build_prompt_and_history(conn, category, channel, raw_item)
     source_excerpt = (raw_item.get("payload") or {}).get("description")
     check_neutrality = category in NEUTRALITY_CHECKED_CATEGORIES
-    raw_deepseek = _generate_checked_write(conn, category, prompt, model_override="deepseek-v4-flash", source_excerpt=source_excerpt, check_neutrality=check_neutrality)
-    raw_sonnet = _generate_checked_write(conn, category, prompt, model_override="claude-sonnet-5", source_excerpt=source_excerpt, check_neutrality=check_neutrality)
+    check_no_speculation = category in SPECULATION_CHECKED_CATEGORIES
+    raw_deepseek = _generate_checked_write(conn, category, prompt, model_override="deepseek-v4-flash", source_excerpt=source_excerpt, check_neutrality=check_neutrality, check_no_speculation=check_no_speculation)
+    raw_sonnet = _generate_checked_write(conn, category, prompt, model_override="claude-sonnet-5", source_excerpt=source_excerpt, check_neutrality=check_neutrality, check_no_speculation=check_no_speculation)
     return {
         "deepseek-v4-flash": _assemble(conn, category, raw_item, history, raw_deepseek),
         "claude-sonnet-5": _assemble(conn, category, raw_item, history, raw_sonnet),

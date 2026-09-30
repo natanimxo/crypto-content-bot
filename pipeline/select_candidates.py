@@ -155,7 +155,11 @@ AGE_BONUS_MAX_POINTS = 12.0
 # as good as a fresh one (a job posting, a tool, a yield pool). For
 # time-sensitive categories, older is WORSE, not owed a turn for waiting; see
 # FRESHNESS_MAX_AGE_HOURS below for the harder cutoff on the same principle.
-NO_AGE_BONUS_CATEGORIES = {"news", "macro_news", "whale_movements"}
+NO_AGE_BONUS_CATEGORIES = {"news", "macro_news", "whale_movements", "hacks_exploits"}
+# hacks_exploits added 2026-09-30 -- a confirmed past incident is the same
+# "older is worse, not owed a turn" shape as news/macro_news/whale_movements,
+# just on a longer real-world clock (DefiLlama's own feed lags by days, not
+# hours -- see FRESHNESS_MAX_AGE_HOURS below).
 
 # Hard eligibility cutoff for the same three categories, keyed on the
 # ARTICLE'S/TRANSFER'S OWN TIMESTAMP (payload published_at / timestamp), not
@@ -170,7 +174,16 @@ NO_AGE_BONUS_CATEGORIES = {"news", "macro_news", "whale_movements"}
 # sent stale. A duplicate constant, not an import, for the same reason
 # CROSS_CYCLE_DEDUP_THRESHOLD is -- collectors import from pipeline, not the
 # reverse.
-FRESHNESS_MAX_AGE_HOURS = {"news": 48.0, "macro_news": 48.0, "whale_movements": 24.0}
+FRESHNESS_MAX_AGE_HOURS = {
+    "news": 48.0, "macro_news": 48.0, "whale_movements": 24.0,
+    # 336h (14 days), matching pipeline/score.py's HACKS_EXPLOITS_MAX_AGE_HOURS
+    # (kept in sync manually, same cross-module-constant reasoning as every
+    # other duplicated constant in this file) -- longer than news' 48h
+    # because DefiLlama's own /hacks feed lags real-world incidents by a few
+    # days (live-observed, 2026-09-30: newest entry was already 3 days old at
+    # collection time), not because a hack matters longer than a headline.
+    "hacks_exploits": 336.0,
+}
 
 
 def _age_bonus(collected_at, now: datetime) -> float:

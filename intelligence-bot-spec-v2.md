@@ -94,19 +94,46 @@ via `category_config_exists()` until built.
 
 | Channel | Display name | Categories (live) | Region profile |
 |---|---|---|---|
-| `crypto_wall_street` | Crypto Wall Street | `whale_movements`, `news` | `default` |
-| `alpha_edge_crypto` | Alpha Edge Crypto | `defi_yields`, `web3_jobs` (shared via alternation) | `us` |
-| `coincraft` | CoinCraft | `gems_security`, `web3_jobs` (shared via alternation) | `default` |
+| `crypto_wall_street` | Crypto Wall Street | `whale_movements`, `news` (shared via alternation) | `default` |
+| `alpha_edge_crypto` | Alpha Edge Crypto | `defi_yields`, `news` (shared via alternation), `web3_jobs` (shared via alternation) | `us` |
+| `coincraft` | CoinCraft | `gems_security`, `hacks_exploits`, `web3_jobs` (shared via alternation) | `default` |
 | `hustle_to_million` | Hustle to Million | `tool_launches`, `startup_jobs`, `macro_news` (2026-09-12); `grants` deliberately out of scope, see below | `default` |
 
-**Alternation.** `web3_jobs` is the first category shared across two
-channels (`alpha_edge_crypto` and `coincraft`). `pipeline/channel_router.py`
-assigns each *individual item* to exactly one of the two at collection time
-(round-robin via the `channel_alternation` table), stored as
-`payload['assigned_channel']` on the raw_item — never both. Deterministic
-and testable: the same listing can never reach both channels, and which
-channel a given item went to is recorded permanently on the row, not
-recomputed later.
+**Alternation.** `web3_jobs` was the first category shared across two
+channels (`alpha_edge_crypto` and `coincraft`); `news` (`crypto_wall_street`
+/ `alpha_edge_crypto`) was added the same way 2026-09-30, see below.
+`pipeline/channel_router.py` assigns each *individual item* to exactly one of
+the two at collection time (round-robin via the `channel_alternation`
+table), stored as `payload['assigned_channel']` on the raw_item — never
+both. Deterministic and testable: the same listing can never reach both
+channels, and which channel a given item went to is recorded permanently on
+the row, not recomputed later.
+
+Cross-channel duplicate suppression for a shared category needs no separate
+mechanism: `pipeline/select_candidates.py`'s exact-title notified-lookback
+and topic_key cooldown both query notifications across every channel
+already (no channel filter in that SQL), so once either channel sends a
+story, the other's very next selection pass already sees it as notified.
+What this can't catch is two outlets covering the same event under
+different headlines — the same residual gap same-channel dedup already has.
+
+**2026-09-30 rebalance (operator direction).** `news` shared between
+`crypto_wall_street` and `alpha_edge_crypto` — real headroom (news clears
+review_threshold ~35/day against a single channel's 10/day cap; the single
+channel was already averaging only ~8/day sent, well under its own cap).
+`defi_yields` deliberately stays `alpha_edge_crypto`-only, NOT split with
+`coincraft` — evaluated and found viable on the numbers, rejected per
+operator direction ("highest-priced channel, steady volume is what I'm
+selling on it"). `coincraft`'s second slot got a new category instead,
+`hacks_exploits` (DefiLlama `/hacks`, confirmed post-incident reports,
+complementing `gems_security`'s pre-hack risk screening) rather than a
+share of `defi_yields` — same gap filled, zero cost to Alpha Edge. Both
+`crypto_wall_street` and `alpha_edge_crypto`'s channel-level `soft_daily_cap`
+raised 12 -> 16 in the same change — `crypto_wall_street`'s was already
+silently trimming news below its own per-category cap some days (live-
+verified, not assumed), and leaving `alpha_edge_crypto`'s at 12 risked the
+same trim eating into `defi_yields`' steady volume once news joined it. See
+BACKLOG's "Channel routing (2026-09-30)" entry for the full numbers.
 
 **Rebalance, 2026-09-20 (operator direction).** `crypto_notebook` removed
 entirely (hand-written, not fed by the pipeline; `scripts/seed_config.py`
@@ -612,7 +639,13 @@ action is processed — the bot's chat is not itself a secret boundary
      infrastructure against a non-crypto feed list, with a hard political-
      neutrality requirement enforced structurally (see Section 3).
   `grants` (Hustle to Million) deliberately out of scope, see Section 3.
-  `airdrops` (paused, see Section 3).
+  `airdrops` (paused, see Section 3; re-checked live 2026-09-30, still no
+  structured free source -- see BACKLOG's "Channel routing (2026-09-30)").
+  8. `hacks_exploits` → CoinCraft (added 2026-09-30, operator direction) --
+     DefiLlama `/hacks`, confirmed post-incident reports complementing
+     `gems_security`'s pre-hack risk screening. Complete — see BACKLOG.md
+     for the source research, threshold/cadence calibration, and the
+     protocol-prominence scoring blend.
 
 `scripts/collect_cycle.py`'s `COLLECTORS` dict and each channel's
 `category_config.categories` list are the single source of truth for what's
@@ -629,7 +662,13 @@ Suggested `soft_daily_cap` ranges used when the live categories were tuned
 
 - Crypto-focused channels (Crypto Wall Street, Alpha Edge Crypto,
   CoinCraft): 4–15, tuned per channel/category based on realistic
-  source volume (`defi_yields` 6-8, `whale_movements` 12, `web3_jobs` 8-12).
+  source volume (`defi_yields` 6-8, `whale_movements` 12, `web3_jobs` 8-12,
+  `news` 10, `hacks_exploits` 4 -- rare-and-notable, same posture as
+  `gems_security`). Channel-level caps (crypto_wall_street/alpha_edge_crypto
+  16, coincraft 12) are sized to the sum of their live categories' own
+  per-category caps, so the channel cap is a backstop, not the practical
+  bottleneck -- see BACKLOG's "Channel routing (2026-09-30)" for the real
+  trimming this caught.
 - Non-crypto channel (Hustle to Million): 6 channel-wide, with each of its
   three categories also carrying its own tighter per-category cap
   (`tool_launches` 8, `startup_jobs` 8, `macro_news` 4 — deliberately low,
