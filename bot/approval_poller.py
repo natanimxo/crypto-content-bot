@@ -10,6 +10,8 @@ Callback_data namespaces:
       approval_id, because notify.py only creates the approvals row AFTER its
       Telegram send succeeds — there's nothing to reference yet when the buttons
       are built. Looked up here as "the pending approval for this raw_item_id".
+  retry_write:<raw_item_id>  reject_failed:<raw_item_id>   — from the write-failure
+      alert (_alert_write_failed): Retry re-queues a failed write, Reject drops it.
   mark_sent_a:<preview_id>  mark_sent_b:<preview_id>  discard:<preview_id>   — from
       the post-write preview (this module), mark_sent_b only present during a
       benchmark trial. "Mark as sent" logs to `posts` for history/dedup — as of
@@ -28,6 +30,7 @@ from dotenv import load_dotenv  # noqa: E402
 
 from pipeline.alerts import check_and_alert  # noqa: E402
 from pipeline.db import dict_cursor, get_conn  # noqa: E402
+from pipeline.http import _redact  # noqa: E402
 from pipeline.publish import get_channel_display_name, mark_as_sent  # noqa: E402
 from pipeline.run_log import run_log  # noqa: E402
 from pipeline.score import load_category_config  # noqa: E402
@@ -58,6 +61,18 @@ logger = logging.getLogger(__name__)
 # starting. approval-poll.yml's job timeout and this value need to move
 # together — see that file's comment.
 LONG_POLL_TIMEOUT_SECONDS = 270  # 4m30s -- leaves headroom in a 6-minute job for setup + any writes
+
+# Bounded write retries (2026-10-06, real incident). The recovery sweep used to
+# retry an approved-with-no-preview approval on EVERY poll cycle with no limit
+# and no notice: hacks_exploits was misconfigured into benchmark-trial mode
+# (needs ANTHROPIC_API_KEY, never set on Railway), so 3 approvals failed ~19,000
+# times over 6 days -- each retry a paid DeepSeek call that succeeded before the
+# Sonnet half raised -- and the operator saw only silence, indistinguishable
+# from a tap that never registered. Now: retries are spaced, capped, and when
+# they run out (or the error is a config error that can never fix itself) the
+# operator gets a message saying exactly what failed, with a Retry button.
+MAX_WRITE_ATTEMPTS = 3
+WRITE_RETRY_MIN_GAP_SECONDS = 120
 
 
 def _allowed_user_ids() -> set:
@@ -149,7 +164,11 @@ def _fetch_orphaned_approvals(conn) -> list[dict]:
                JOIN scores s ON s.raw_item_id = r.id AND s.category = r.category
                JOIN notifications n ON n.id = a.notification_id
                LEFT JOIN post_previews p ON p.approval_id = a.id
-               WHERE a.decision = 'approved' AND p.id IS NULL"""
+               WHERE a.decision = 'approved' AND p.id IS NULL
+                 AND a.write_failed_at IS NULL
+                 AND (a.write_last_attempt_at IS NULL
+                      OR a.write_last_attempt_at < now() - (%s || ' seconds')::interval)""",
+            (WRITE_RETRY_MIN_GAP_SECONDS,),
         )
         return cur.fetchall()
 
@@ -274,6 +293,109 @@ def _generate_and_preview(conn, approval: dict):
         text = generate_post(conn, category, channel, raw_item)
         _send_preview_and_store(conn, approval["approval_id"], channel, category, approval["score"],
                                  cfg["write_model"], text)
+
+
+def _is_config_error(exc: Exception) -> bool:
+    """An error no amount of retrying can fix (a missing API key) -- fail
+    permanently and tell the operator immediately instead of burning retries."""
+    return isinstance(exc, RuntimeError) and "is not set" in str(exc)
+
+
+def _alert_write_failed(conn, approval: dict, attempts: int, error: str) -> None:
+    """Tell the operator, in plain words, that the write failed for good --
+    never leave a failed write looking like a tap that never registered.
+    write_failed_at is only set AFTER the message actually sends, so a
+    Telegram hiccup here leaves the approval retry-eligible (and re-alerts)
+    rather than silently marking it handled."""
+    title = (approval.get("payload") or {}).get("title") or f"approval #{approval['approval_id']}"
+    text = (
+        f"⚠️ <b>Write failed — no post was generated</b>\n"
+        f"{html.escape(title)}\n"
+        f"Category: {html.escape(str(approval['category']))} · approval #{approval['approval_id']}\n"
+        f"Tried {attempts}x. Last error:\n<code>{html.escape(error)}</code>\n\n"
+        f"Your Approve tap DID register. Tap Retry after the cause is fixed, or Reject to drop it."
+    )
+    keyboard = [[
+        {"text": "🔁 Retry write", "callback_data": f"retry_write:{approval['raw_item_id']}"},
+        {"text": "❌ Reject", "callback_data": f"reject_failed:{approval['raw_item_id']}"},
+    ]]
+    try:
+        send_message(_operator_chat_id(), text, reply_markup={"inline_keyboard": keyboard})
+    except Exception:
+        logger.exception("poll: could NOT send write-failure alert for approval_id=%s -- will retry",
+                         approval["approval_id"])
+        return
+    with dict_cursor(conn) as cur:
+        cur.execute("UPDATE approvals SET write_failed_at = now() WHERE id = %s", (approval["approval_id"],))
+    conn.commit()
+    logger.error("poll: approval_id=%s write permanently failed after %d attempt(s), operator alerted: %s",
+                 approval["approval_id"], attempts, error)
+
+
+def _record_write_failure(conn, approval: dict, exc: Exception) -> None:
+    error = _redact(f"{type(exc).__name__}: {exc}")[:600]
+    with dict_cursor(conn) as cur:
+        cur.execute(
+            """UPDATE approvals SET write_attempts = write_attempts + 1, write_last_attempt_at = now(),
+                      write_last_error = %s WHERE id = %s RETURNING write_attempts""",
+            (error, approval["approval_id"]),
+        )
+        attempts = cur.fetchone()["write_attempts"]
+    conn.commit()
+    if attempts >= MAX_WRITE_ATTEMPTS or _is_config_error(exc):
+        _alert_write_failed(conn, approval, attempts, error)
+
+
+def _attempt_write(conn, approval: dict) -> bool:
+    """The one place a write is attempted, for both a fresh tap and the
+    recovery sweep, so failure handling can't diverge between them."""
+    try:
+        _generate_and_preview(conn, approval)
+        return True
+    except Exception as exc:
+        logger.exception("poll: write failed for approval_id=%s", approval["approval_id"])
+        _record_write_failure(conn, approval, exc)
+        return False
+
+
+def _handle_retry_write(conn, raw_item_id: int, cq_id: str) -> dict | None:
+    """Operator tapped Retry on a write-failure alert: clear the failure state
+    and hand the approval back to run() for a fresh write."""
+    with dict_cursor(conn) as cur:
+        cur.execute(
+            """SELECT a.id AS approval_id, a.decision, a.raw_item_id, a.prompt_message_id,
+                      r.category, r.payload, r.collected_at, s.score, s.score_breakdown, n.channel
+               FROM approvals a
+               JOIN raw_items r ON r.id = a.raw_item_id
+               JOIN scores s ON s.raw_item_id = r.id AND s.category = r.category
+               JOIN notifications n ON n.id = a.notification_id
+               LEFT JOIN post_previews p ON p.approval_id = a.id
+               WHERE a.raw_item_id = %s AND a.decision = 'approved' AND p.id IS NULL""",
+            (raw_item_id,),
+        )
+        approval = cur.fetchone()
+    if not approval:
+        _safe_ack(cq_id, "Already handled.")
+        return None
+    with dict_cursor(conn) as cur:
+        cur.execute("UPDATE approvals SET write_attempts = 0, write_failed_at = NULL, write_last_attempt_at = NULL "
+                    "WHERE id = %s", (approval["approval_id"],))
+    conn.commit()
+    _safe_ack(cq_id, "Retrying write...")
+    return approval
+
+
+def _handle_reject_failed(conn, raw_item_id: int, cq_id: str) -> None:
+    with dict_cursor(conn) as cur:
+        cur.execute(
+            """UPDATE approvals a SET decision = 'rejected', decided_at = now()
+               WHERE a.raw_item_id = %s AND a.decision = 'approved'
+                 AND NOT EXISTS (SELECT 1 FROM post_previews p WHERE p.approval_id = a.id)""",
+            (raw_item_id,),
+        )
+        changed = cur.rowcount
+    conn.commit()
+    _safe_ack(cq_id, "Rejected." if changed else "Already handled.")
 
 
 def _handle_approve(conn, raw_item_id: int, cq_id: str) -> dict | None:
@@ -410,6 +532,10 @@ def handle_callback_query(conn, cq: dict) -> dict | None:
         _handle_mark_sent(conn, target_id, cq["id"], "b")
     elif action == "discard":
         _handle_discard(conn, target_id, cq["id"])
+    elif action == "retry_write":
+        return _handle_retry_write(conn, target_id, cq["id"])
+    elif action == "reject_failed":
+        _handle_reject_failed(conn, target_id, cq["id"])
     else:
         _safe_ack(cq["id"], "Unknown action.")
     return None
@@ -484,14 +610,10 @@ def run() -> None:
             orphaned = _fetch_orphaned_approvals(conn)
             recovered = 0
             for approval in orphaned:
-                try:
-                    _generate_and_preview(conn, approval)
+                if _attempt_write(conn, approval):
                     recovered += 1
                     logger.info("poll: recovered orphaned approval_id=%s (write had never succeeded)",
                                 approval["approval_id"])
-                except Exception:
-                    logger.exception("poll: recovery retry still failed for approval_id=%s -- will retry next cycle",
-                                     approval["approval_id"])
             state["details"]["orphaned_found"] = len(orphaned)
             state["details"]["orphaned_recovered"] = recovered
 
@@ -529,11 +651,8 @@ def run() -> None:
                     processed += 1
 
             for approval in deferred_approvals:
-                try:
-                    _generate_and_preview(conn, approval)
+                if _attempt_write(conn, approval):
                     logger.info("poll: generated write for approval_id=%s", approval["approval_id"])
-                except Exception:
-                    logger.exception("Failed generating post for approval_id=%s", approval["approval_id"])
 
             state["details"]["requested_offset"] = requested_offset
             state["details"]["fetched_update_ids"] = [u["update_id"] for u in updates]

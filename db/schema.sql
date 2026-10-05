@@ -165,6 +165,17 @@ CREATE TABLE IF NOT EXISTS approvals (
     decided_at TIMESTAMPTZ DEFAULT now()
 );
 
+-- Write-failure tracking (2026-10-06). An approval stuck at 'approved' with no
+-- preview was retried by bot/approval_poller.py's recovery sweep on EVERY poll
+-- cycle, forever -- real incident: a config error (hacks_exploits set to
+-- benchmark-trial mode with no ANTHROPIC_API_KEY on Railway) made 3 approvals
+-- fail ~19,000 times over 6 days, each retry a paid DeepSeek call, with the
+-- operator never told. These columns bound the retries and record why.
+ALTER TABLE approvals ADD COLUMN IF NOT EXISTS write_attempts INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE approvals ADD COLUMN IF NOT EXISTS write_last_attempt_at TIMESTAMPTZ;
+ALTER TABLE approvals ADD COLUMN IF NOT EXISTS write_failed_at TIMESTAMPTZ;  -- set once retries are exhausted AND the operator was told
+ALTER TABLE approvals ADD COLUMN IF NOT EXISTS write_last_error TEXT;
+
 -- Extension beyond spec Section 6: holds the generated post text between "Approve"
 -- and the final Publish/Cancel confirm (Section 9 step 4), including both variants
 -- during a category's DeepSeek-vs-Sonnet benchmark trial (Section 4.3).

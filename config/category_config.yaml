@@ -557,14 +557,14 @@ hacks_exploits:
   triage_model: template   # structured findings (amount/classification/chain),
                              # no synthesis needed -- same reasoning as defi_yields
   write_model: deepseek-v4-flash
-  write_benchmark_status: trial   # brand new category, no real drafts yet -- unlike
-                                    # every other category here (all settled_deepseek
-                                    # from an earlier trial), this one starts in
-                                    # dual-preview mode (bot/approval_poller.py checks
-                                    # this exact value) so the operator can compare
-                                    # DeepSeek vs Sonnet on real hacks_exploits output
-                                    # before settling on one, same as every other
-                                    # category's own bootstrap presumably did.
+  write_benchmark_status: settled_deepseek   # was `trial` at launch (2026-09-30) -- WRONG:
+                                    # trial mode (bot/approval_poller.py) generates BOTH a
+                                    # DeepSeek and a Sonnet draft, and Railway has no
+                                    # ANTHROPIC_API_KEY, so every Approve on this category
+                                    # failed at the Sonnet half (~19,000 silent retries
+                                    # over 6 days, see BACKLOG 2026-10-06). Flip back to
+                                    # `trial` only AFTER setting ANTHROPIC_API_KEY on the
+                                    # crypto-content-bot Railway service.
 
   label: "💥 HACK/EXPLOIT REPORT"
 

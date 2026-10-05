@@ -324,6 +324,54 @@ the one place to check.
   heuristic, not a filler-word gap; worth a proper-noun-aware approach if it
   keeps showing up.
 
+## Silent write failures (2026-10-06)
+
+- **Approve "not working" on `hacks_exploits` -- root cause was my launch
+  config, NOT the speculation guard; the real defect was that a failed write
+  was silent and retried forever.** Diagnosis, from the DB and Railway logs:
+  3 hacks approvals (Bitget 451, Astroport 462, Payy 499) sat at `approved`
+  with no preview; every poll cycle the recovery sweep retried them and logged
+  `RuntimeError: ANTHROPIC_API_KEY is not set`. I had launched the category
+  with `write_benchmark_status: trial` (2026-09-30) -- trial mode writes BOTH a
+  DeepSeek and a Sonnet draft, and Railway has no Anthropic key (HANDOFF.md
+  even says it's only needed for trial). So DeepSeek succeeded, Sonnet raised,
+  nothing was stored, repeat. 19,072 failed retries over 6 days -- each one a
+  paid DeepSeek call -- and the operator was told nothing. Every other category
+  is `settled_deepseek`, which is why only this one broke. Fixed: set
+  `settled_deepseek` (YAML + DB); the live poller then self-recovered all 3
+  previews within ~1 minute. A missing-key trial misconfig is exactly what a
+  launch check should have caught; I didn't check the env before choosing
+  `trial`.
+
+  **The guard was cleared with real drafts, not assumed:** 18 first-attempt
+  DeepSeek drafts (6 real incidents x 3, incl. Limit Break) -- `check_no_
+  speculation` fired 0 times, and none contained hedge words like "reportedly"
+  or "appears to". Worth knowing: those two phrases are NOT in its pattern
+  list, so it wouldn't catch them either; the list targets "allegedly",
+  "apparently", "suspected of", "probably an inside job", and attacker
+  motive/identity claims. The false-positive risk flagged on the neutrality
+  guard remains theoretical here, not observed.
+
+  **Loop fixed, and failures are now loud** (`bot/approval_poller.py`,
+  `approvals.write_attempts/write_last_attempt_at/write_failed_at/
+  write_last_error`): retries are spaced >=120s and capped at 3; a config
+  error ("... is not set") can't fix itself, so it fails permanently on the
+  FIRST attempt. On permanent failure the operator gets a Telegram message
+  naming the item, category, attempt count and the redacted error, with
+  **Retry write** and **Reject** buttons. `write_failed_at` is only set after
+  that message actually sends, so a Telegram hiccup re-alerts instead of
+  going quiet. The same `_attempt_write` handles both a fresh tap and the
+  sweep so the two can't diverge. Tested on throwaway rows: alert fires
+  exactly at attempt 3 (not before), the 120s gap holds, a failed approval
+  leaves the sweep for good, Retry resets state, success path unchanged.
+
+  **Not resolved: the Limit Break tap.** Approval 505 is still `pending` --
+  no Approve was ever recorded for it, and the tap path itself works (the
+  pending lookup returns it cleanly). Railway doesn't retain logs from the
+  tap time, so whether it reached the poller can't be proven. It's possible
+  the taps that "did nothing" were on the other three hacks cards. Re-tap it
+  to confirm.
+
 ## Telegram / bot reliability
 
 - ~~Unresolved: callback_query taps sometimes don't appear in getUpdates, or
