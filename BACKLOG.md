@@ -417,6 +417,41 @@ the one place to check.
   (see "Silent write failures") already bounds the specific loop that caused
   this. Revisit if an alert is ever ignored.
 
+## Removed: Anthropic provider and the A/B "benchmark trial" mode (2026-10-07)
+
+- **Operator direction: never using Anthropic, never bought credit, every
+  category is `settled_deepseek` -- clean it out so the 2026-10-06 failure
+  can't recur in that form.** Removed: `llm_providers/anthropic.py`;
+  `category_config.write_benchmark_status` (column, YAML, `seed_config.py`);
+  `generate_post_variants()` and the dual-generate/Version A-B preview path in
+  `bot/approval_poller.py`; the `write_benchmark` table; `post_previews.
+  variant_b_model/variant_b_text/content_b_message_id/chosen_variant`; the
+  `ANTHROPIC_API_KEY` env/docs/workflow references; the Anthropic cost branch
+  in `pipeline/llm_usage.py`. Kept: the provider abstraction
+  (`llm.generate_write`/`generate_triage`, `PROVIDERS`, `llm_providers/` with
+  deepseek, gemini, template) so a new provider is still one module plus one
+  registry line; `model_override` on `generate_write`; the gemini provider
+  (unused, but it's the second example of the abstraction -- say if you want
+  it gone too).
+- **Verified nothing depended on any of it before dropping (live DB):**
+  `write_benchmark` had 0 rows; 0 of 111 `post_previews` ever had a variant B
+  or a `content_b_message_id`; all 9 categories were `settled_deepseek`; no
+  DB view, foreign key, trigger or constraint referenced the table or the
+  columns; no script, calibration report or other code read them (grepped
+  repo-wide -- the only readers were `approval_poller.py`, `write_post.py`,
+  `llm.py` and `seed_config.py`, all updated). The trial mode was never used.
+- **Deploy order mattered and was followed:** the new code is compatible with
+  both the old and new schema (it simply stops reading/writing those
+  columns), so it was pushed and confirmed live on Railway FIRST, and the
+  `DROP`s (end of `db/schema.sql`, idempotent) ran only afterwards -- dropping
+  first would have crashed the live poller on `cfg["write_benchmark_status"]`
+  and its `post_previews` INSERT.
+- **Deliberately left:** `post_previews.variant_a_model/variant_a_text` keep
+  their names (renaming would touch the live poller and publish path for no
+  functional gain; the schema comment explains the leftover "_a"), and the
+  `mark_sent_a` callback name (already-sent preview buttons in Telegram carry
+  it). A stale `mark_sent_b` tap now just answers "Unknown action." Tested.
+
 ## Telegram / bot reliability
 
 - ~~Unresolved: callback_query taps sometimes don't appear in getUpdates, or

@@ -12,9 +12,10 @@ Callback_data namespaces:
       are built. Looked up here as "the pending approval for this raw_item_id".
   retry_write:<raw_item_id>  reject_failed:<raw_item_id>   — from the write-failure
       alert (_alert_write_failed): Retry re-queues a failed write, Reject drops it.
-  mark_sent_a:<preview_id>  mark_sent_b:<preview_id>  discard:<preview_id>   — from
-      the post-write preview (this module), mark_sent_b only present during a
-      benchmark trial. "Mark as sent" logs to `posts` for history/dedup — as of
+  mark_sent_a:<preview_id>  discard:<preview_id>   — from the post-write preview
+      (this module). The "_a" suffix is a leftover from the removed A/B trial
+      mode; kept because already-sent preview buttons carry that callback_data.
+      "Mark as sent" logs to `posts` for history/dedup — as of
       2026-09-10 the bot never posts to a channel itself (see pipeline/publish.py);
       the operator copies/forwards the labeled text themselves.
 """
@@ -35,7 +36,7 @@ from pipeline.publish import get_channel_display_name, mark_as_sent  # noqa: E40
 from pipeline.run_log import run_log  # noqa: E402
 from pipeline.score import load_category_config  # noqa: E402
 from pipeline.telegram_api import answer_callback_query, get_updates, send_message  # noqa: E402
-from pipeline.write_post import generate_post, generate_post_variants  # noqa: E402
+from pipeline.write_post import generate_post  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -64,10 +65,11 @@ LONG_POLL_TIMEOUT_SECONDS = 270  # 4m30s -- leaves headroom in a 6-minute job fo
 
 # Bounded write retries (2026-10-06, real incident). The recovery sweep used to
 # retry an approved-with-no-preview approval on EVERY poll cycle with no limit
-# and no notice: hacks_exploits was misconfigured into benchmark-trial mode
-# (needs ANTHROPIC_API_KEY, never set on Railway), so 3 approvals failed ~19,000
-# times over 6 days -- each retry a paid DeepSeek call that succeeded before the
-# Sonnet half raised -- and the operator saw only silence, indistinguishable
+# and no notice: hacks_exploits was misconfigured into a dual-model trial mode
+# (since removed entirely) that needed an API key Railway never had, so 3
+# approvals failed ~19,000 times over 6 days -- each retry a paid DeepSeek call
+# that succeeded before the second model raised -- and the operator saw only
+# silence, indistinguishable
 # from a tap that never registered. Now: retries are spaced, capped, and when
 # they run out (or the error is a config error that can never fix itself) the
 # operator gets a message saying exactly what failed, with a Retry button.
@@ -208,13 +210,12 @@ def _label_header(conn, category: str, channel: str) -> str:
 
 
 def _send_preview_and_store(conn, approval_id: int, channel: str, category: str, score,
-                             variant_a_model: str, variant_a_text: str,
-                             variant_b_model: str | None = None, variant_b_text: str | None = None) -> int:
-    """Sends TWO (or three, in a benchmark trial) separate Telegram messages
+                             variant_a_model: str, variant_a_text: str) -> int:
+    """Sends TWO separate Telegram messages
     (2026-09-10, STEP 1 of the delivery/formatting overhaul):
       1. A routing header — operator-only: label, channel, score, and the
          Mark as sent/Discard buttons. Never forwarded.
-      2. (+3.) The actual post(s) — already fully-formed HTML from
+      2. The actual post — already fully-formed HTML from
          pipeline.write_post (real <b>/<blockquote> tags baked in by
          post_format.assemble_post, NOT re-escaped here — escaping already-
          valid HTML again would corrupt it). No buttons, so it forwards
@@ -223,10 +224,9 @@ def _send_preview_and_store(conn, approval_id: int, channel: str, category: str,
     with dict_cursor(conn) as cur:
         cur.execute(
             """INSERT INTO post_previews
-                   (approval_id, channel, category, variant_a_model, variant_a_text,
-                    variant_b_model, variant_b_text, status)
-               VALUES (%s, %s, %s, %s, %s, %s, %s, 'pending') RETURNING id""",
-            (approval_id, channel, category, variant_a_model, variant_a_text, variant_b_model, variant_b_text),
+                   (approval_id, channel, category, variant_a_model, variant_a_text, status)
+               VALUES (%s, %s, %s, %s, %s, 'pending') RETURNING id""",
+            (approval_id, channel, category, variant_a_model, variant_a_text),
         )
         preview_id = cur.fetchone()["id"]
     conn.commit()
@@ -234,37 +234,21 @@ def _send_preview_and_store(conn, approval_id: int, channel: str, category: str,
     label_line = html.escape(_label_header(conn, category, channel))
     score_line = f"Score {score}/100" if score is not None else ""
 
-    if variant_b_model:
-        header_text = (
-            f"<b>{label_line}</b>\n{score_line}\n\n"
-            f"Benchmark trial — Version A ({html.escape(variant_a_model)}) is the next message below, "
-            f"Version B ({html.escape(variant_b_model)}) the one after. Mark whichever you send."
-        )
-        keyboard = [
-            [{"text": "✅ Mark A as sent", "callback_data": f"mark_sent_a:{preview_id}"},
-             {"text": "✅ Mark B as sent", "callback_data": f"mark_sent_b:{preview_id}"}],
-            [{"text": "❌ Discard", "callback_data": f"discard:{preview_id}"}],
-        ]
-    else:
-        header_text = f"<b>{label_line}</b>\n{score_line}"
-        keyboard = [[
-            {"text": "✅ Mark as sent", "callback_data": f"mark_sent_a:{preview_id}"},
-            {"text": "❌ Discard", "callback_data": f"discard:{preview_id}"},
-        ]]
+    header_text = f"<b>{label_line}</b>\n{score_line}"
+    keyboard = [[
+        {"text": "✅ Mark as sent", "callback_data": f"mark_sent_a:{preview_id}"},
+        {"text": "❌ Discard", "callback_data": f"discard:{preview_id}"},
+    ]]
 
     header_result = send_message(_operator_chat_id(), header_text, reply_markup={"inline_keyboard": keyboard})
     content_a_result = send_message(_operator_chat_id(), variant_a_text, disable_web_page_preview=True)
-    content_b_message_id = None
-    if variant_b_model:
-        content_b_result = send_message(_operator_chat_id(), variant_b_text, disable_web_page_preview=True)
-        content_b_message_id = content_b_result["message_id"]
 
     with dict_cursor(conn) as cur:
         cur.execute(
             """UPDATE post_previews
-               SET telegram_message_id = %s, content_message_id = %s, content_b_message_id = %s
+               SET telegram_message_id = %s, content_message_id = %s
                WHERE id = %s""",
-            (header_result["message_id"], content_a_result["message_id"], content_b_message_id, preview_id),
+            (header_result["message_id"], content_a_result["message_id"], preview_id),
         )
     conn.commit()
     return preview_id
@@ -281,18 +265,9 @@ def _generate_and_preview(conn, approval: dict):
         "score": approval["score"],
         "score_breakdown": approval["score_breakdown"],
     }
-
-    if cfg["write_benchmark_status"] == "trial":
-        variants = generate_post_variants(conn, category, channel, raw_item)
-        _send_preview_and_store(
-            conn, approval["approval_id"], channel, category, approval["score"],
-            "deepseek-v4-flash", variants["deepseek-v4-flash"],
-            "claude-sonnet-5", variants["claude-sonnet-5"],
-        )
-    else:
-        text = generate_post(conn, category, channel, raw_item)
-        _send_preview_and_store(conn, approval["approval_id"], channel, category, approval["score"],
-                                 cfg["write_model"], text)
+    text = generate_post(conn, category, channel, raw_item)
+    _send_preview_and_store(conn, approval["approval_id"], channel, category, approval["score"],
+                             cfg["write_model"], text)
 
 
 def _is_config_error(exc: Exception) -> bool:
@@ -406,8 +381,8 @@ def _handle_approve(conn, raw_item_id: int, cq_id: str) -> dict | None:
     two-phase" note on run(). A live bug (2026-09-09): when this used to
     generate-and-send inline, a 3-tap batch (approve+reject+edit landing in the
     same poll) failed with 'query is too old and response timeout expired' on
-    the 2nd and 3rd taps, because the 1st tap's benchmark-trial dual LLM
-    generate (DeepSeek + Sonnet, both real API round trips) ran before the loop
+    the 2nd and 3rd taps, because the 1st tap's inline LLM write (a real API
+    round trip) ran before the loop
     ever reached the other two callback_query_ids — Telegram's callback
     validity window doesn't wait for us. Every tap in a batch is now acked
     before any tap's slow work begins.
@@ -452,7 +427,7 @@ def _handle_edit_prompt(conn, raw_item_id: int, cq_id: str):
     _safe_ack(cq_id, "Send your edit as a reply to my message.")
 
 
-def _handle_mark_sent(conn, preview_id: int, cq_id: str, variant: str):
+def _handle_mark_sent(conn, preview_id: int, cq_id: str):
     """No Telegram send here — the operator has already copied/forwarded the
     text themselves. This just logs it to `posts` for history/dedup."""
     preview = _fetch_preview(conn, preview_id)
@@ -460,30 +435,17 @@ def _handle_mark_sent(conn, preview_id: int, cq_id: str, variant: str):
         _safe_ack(cq_id, "Already handled.")
         return
 
-    text = preview["variant_a_text"] if variant == "a" else preview["variant_b_text"]
-    model_used = preview["variant_a_model"] if variant == "a" else preview["variant_b_model"]
+    text = preview["variant_a_text"]
+    model_used = preview["variant_a_model"]
 
     mark_as_sent(conn, preview["approval_id"], preview["channel"], preview["category"], text)
 
     with dict_cursor(conn) as cur:
         cur.execute(
-            "UPDATE post_previews SET status = 'published', chosen_variant = %s WHERE id = %s",
-            (variant, preview_id),
+            "UPDATE post_previews SET status = 'published' WHERE id = %s",
+            (preview_id,),
         )
     conn.commit()
-
-    if preview["variant_b_model"]:  # this was a benchmark trial comparison
-        with dict_cursor(conn) as cur:
-            cur.execute(
-                """INSERT INTO write_benchmark (approval_id, category, deepseek_text, sonnet_text, operator_chose)
-                   VALUES (%s, %s, %s, %s, %s)""",
-                (
-                    preview["approval_id"], preview["category"],
-                    preview["variant_a_text"], preview["variant_b_text"],
-                    "deepseek" if variant == "a" else "sonnet",
-                ),
-            )
-        conn.commit()
 
     _safe_ack(cq_id, f"Marked as sent ({model_used}).")
 
@@ -526,10 +488,8 @@ def handle_callback_query(conn, cq: dict) -> dict | None:
         _handle_reject(conn, target_id, cq["id"])
     elif action == "edit":
         _handle_edit_prompt(conn, target_id, cq["id"])
-    elif action == "mark_sent_a":
-        _handle_mark_sent(conn, target_id, cq["id"], "a")
-    elif action == "mark_sent_b":
-        _handle_mark_sent(conn, target_id, cq["id"], "b")
+    elif action == "mark_sent_a":  # name kept: already-sent preview buttons carry it
+        _handle_mark_sent(conn, target_id, cq["id"])
     elif action == "discard":
         _handle_discard(conn, target_id, cq["id"])
     elif action == "retry_write":

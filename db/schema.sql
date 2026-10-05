@@ -30,8 +30,7 @@ CREATE TABLE IF NOT EXISTS category_config (
     cooldown_hours NUMERIC DEFAULT 6,    -- suppress same-topic repeats within this window
     soft_daily_cap INT,                   -- optional pacing cap, NULL = no cap
     triage_model TEXT DEFAULT 'deepseek-v4-flash',  -- or 'gemini-2.5-flash-lite', or 'template' for zero-LLM categories
-    write_model TEXT DEFAULT 'deepseek-v4-flash',   -- or 'claude-sonnet-5' once benchmarked in for this category
-    write_benchmark_status TEXT DEFAULT 'trial',    -- 'trial' | 'settled_deepseek' | 'settled_sonnet'
+    write_model TEXT DEFAULT 'deepseek-v4-flash',
     label TEXT,                                    -- notification eyebrow / routing header, e.g. "🌾 DEFI YIELDS"
     voice TEXT,                                     -- e.g. 'educational', 'market_summary', 'opportunity_framed'
     prompt_notes TEXT,                               -- freeform voice/framing notes fed into the write prompt (Section 8)
@@ -95,7 +94,6 @@ ALTER TABLE category_config ADD COLUMN IF NOT EXISTS hashtags TEXT[];
 
 -- Migration for a DB from before the header/content message split existed.
 ALTER TABLE post_previews ADD COLUMN IF NOT EXISTS content_message_id BIGINT;
-ALTER TABLE post_previews ADD COLUMN IF NOT EXISTS content_b_message_id BIGINT;
 
 -- Migration for a DB from before collect_min_usd existed.
 ALTER TABLE category_config ADD COLUMN IF NOT EXISTS collect_min_usd NUMERIC;
@@ -168,7 +166,7 @@ CREATE TABLE IF NOT EXISTS approvals (
 -- Write-failure tracking (2026-10-06). An approval stuck at 'approved' with no
 -- preview was retried by bot/approval_poller.py's recovery sweep on EVERY poll
 -- cycle, forever -- real incident: a config error (hacks_exploits set to
--- benchmark-trial mode with no ANTHROPIC_API_KEY on Railway) made 3 approvals
+-- a dual-model trial mode with a missing API key, since removed) made 3 approvals
 -- fail ~19,000 times over 6 days, each retry a paid DeepSeek call, with the
 -- operator never told. These columns bound the retries and record why.
 ALTER TABLE approvals ADD COLUMN IF NOT EXISTS write_attempts INTEGER NOT NULL DEFAULT 0;
@@ -177,8 +175,9 @@ ALTER TABLE approvals ADD COLUMN IF NOT EXISTS write_failed_at TIMESTAMPTZ;  -- 
 ALTER TABLE approvals ADD COLUMN IF NOT EXISTS write_last_error TEXT;
 
 -- Extension beyond spec Section 6: holds the generated post text between "Approve"
--- and the final Publish/Cancel confirm (Section 9 step 4), including both variants
--- during a category's DeepSeek-vs-Sonnet benchmark trial (Section 4.3).
+-- and the final Publish/Cancel confirm (Section 9 step 4). The variant_a_* names are a
+-- leftover from the removed A/B trial mode (2026-10-07): there is only ever one variant now,
+-- variant_a_model/variant_a_text are simply the model used and the post text.
 CREATE TABLE IF NOT EXISTS post_previews (
     id SERIAL PRIMARY KEY,
     approval_id INT REFERENCES approvals(id) UNIQUE,
@@ -186,18 +185,13 @@ CREATE TABLE IF NOT EXISTS post_previews (
     category TEXT NOT NULL,
     variant_a_model TEXT NOT NULL,
     variant_a_text TEXT NOT NULL,
-    variant_b_model TEXT,             -- NULL outside a benchmark trial (single-variant write)
-    variant_b_text TEXT,
     -- Split into two Telegram messages (2026-09-10, delivery/formatting
     -- overhaul): telegram_message_id is the operator-only routing header
     -- (category/channel/score + Mark as sent/Discard buttons); content_*
-    -- are the clean, button-free post(s) the operator forwards unedited.
-    -- content_b_message_id is NULL outside a benchmark trial.
+    -- is the clean, button-free post the operator forwards unedited.
     telegram_message_id BIGINT,
     content_message_id BIGINT,
-    content_b_message_id BIGINT,
     status TEXT NOT NULL DEFAULT 'pending',  -- 'pending', 'published', 'cancelled'
-    chosen_variant TEXT,              -- 'a' or 'b', set on mark-as-sent
     created_at TIMESTAMPTZ DEFAULT now()
 );
 
@@ -223,17 +217,6 @@ CREATE TABLE IF NOT EXISTS run_logs (
     details JSONB,
     started_at TIMESTAMPTZ,
     finished_at TIMESTAMPTZ
-);
-
--- Logged during each category's DeepSeek-vs-Sonnet trial period (Section 4.3)
-CREATE TABLE IF NOT EXISTS write_benchmark (
-    id SERIAL PRIMARY KEY,
-    approval_id INT REFERENCES approvals(id),
-    category TEXT NOT NULL,
-    deepseek_text TEXT NOT NULL,
-    sonnet_text TEXT NOT NULL,
-    operator_chose TEXT NOT NULL,   -- 'deepseek' or 'sonnet'
-    compared_at TIMESTAMPTZ DEFAULT now()
 );
 
 -- Tracks which of the two shared channels (Alpha Edge Crypto / CoinCraft) got the
@@ -283,3 +266,14 @@ CREATE TABLE IF NOT EXISTS llm_spend_alerts (
     alerted_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (day, kind)
 );
+
+-- Removal of the A/B "benchmark trial" machinery and the Anthropic provider (2026-10-07).
+-- Verified unused first: write_benchmark had 0 rows, 0 of 111 post_previews ever had a
+-- variant B, and no view/FK/trigger referenced any of it. Idempotent; safe on a fresh DB.
+-- Run only AFTER the code that no longer reads/writes these is deployed.
+DROP TABLE IF EXISTS write_benchmark;
+ALTER TABLE category_config DROP COLUMN IF EXISTS write_benchmark_status;
+ALTER TABLE post_previews DROP COLUMN IF EXISTS variant_b_model;
+ALTER TABLE post_previews DROP COLUMN IF EXISTS variant_b_text;
+ALTER TABLE post_previews DROP COLUMN IF EXISTS content_b_message_id;
+ALTER TABLE post_previews DROP COLUMN IF EXISTS chosen_variant;

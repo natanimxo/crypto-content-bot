@@ -82,9 +82,6 @@ still exists but only records that decision — no Telegram send happens there.
   [platform.deepseek.com](https://platform.deepseek.com)
 - `GEMINI_API_KEY` — optional, only needed if you switch a category's
   `triage_model` to `gemini-2.5-flash-lite`. [aistudio.google.com/apikey](https://aistudio.google.com/apikey)
-- `ANTHROPIC_API_KEY` — optional, only needed once a category's `write_model` is
-  benchmarked to `claude-sonnet-5` (Section 4.3), or during a trial period.
-  [console.anthropic.com](https://console.anthropic.com)
 
 ### 4. Seed config into the DB
 
@@ -105,7 +102,7 @@ want to reset DB-side tuning back to what's checked into git.
    (required now that `whale_movements` is live — both workflows reference it
    even though only `collect.yml` actually calls Etherscan directly, since
    `approval-poll.yml`'s write step can also trigger a history backfill on
-   approve), and optionally `GEMINI_API_KEY` / `ANTHROPIC_API_KEY`. See
+   approve), and optionally `GEMINI_API_KEY`. See
    [HANDOFF.md](HANDOFF.md) for exactly where to get each value. As of
    2026-09-11 **no secrets are configured yet** — both workflows are crash-
    looping on a missing `DATABASE_URL` until this step is done.
@@ -132,14 +129,14 @@ pipeline/          shared, category-agnostic machinery
   score.py          deterministic scoring, one function per category (registry pattern)
   select_candidates.py   threshold + cooldown + soft-cap filtering
   llm.py            provider-agnostic dispatch (Section 4.4)
-  llm_providers/    deepseek.py, gemini.py, anthropic.py, template.py (zero-LLM)
+  llm_providers/    deepseek.py, gemini.py, template.py (zero-LLM)
   write_post.py     final post writer, one prompt builder per category
   publish.py         posts bookkeeping only — no Telegram send (2026-09-10, see Architecture)
   telegram_api.py    thin Bot API wrapper shared by notify/poller
   alerts.py          "N consecutive failures" operator alert
 bot/
   notify.py          per-cycle operator digest (Section 9)
-  approval_poller.py approve/edit/reject + labeled delivery confirm + benchmark A/B state machine
+  approval_poller.py approve/edit/reject + labeled delivery confirm
 config/            category_config.yaml, channel_config.yaml — versioned baseline (DB is live copy)
 db/schema.sql      full schema, safe to re-run (IF NOT EXISTS throughout)
 scripts/           setup + orchestration entry points

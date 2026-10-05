@@ -8,10 +8,6 @@ leading emoji) is computed deterministically in pipeline/post_format.py from
 real data, then assembled around the model's prose. See post_format.py's
 module docstring for the reliability rationale.
 
-During a category's benchmark trial (Section 4.3), generates both a DeepSeek
-and a Sonnet variant of the PROSE, then assembles each through the identical
-deterministic pipeline — history/risk/source/hashtags never differ between
-variants, only the writing does, so the comparison isolates writing quality.
 """
 
 import difflib
@@ -1580,7 +1576,7 @@ SPECULATION_CHECKED_CATEGORIES = {"hacks_exploits"}
 
 
 def generate_post(conn, category: str, channel: str, raw_item: dict) -> str:
-    """Single-variant write, using whatever write_model is currently configured."""
+    """Writes the post using whichever write_model the category is configured with."""
     prompt, history = _build_prompt_and_history(conn, category, channel, raw_item)
     source_excerpt = (raw_item.get("payload") or {}).get("description")
     raw = _generate_checked_write(
@@ -1589,21 +1585,3 @@ def generate_post(conn, category: str, channel: str, raw_item: dict) -> str:
         check_no_speculation=category in SPECULATION_CHECKED_CATEGORIES,
     )
     return _assemble(conn, category, raw_item, history, raw)
-
-
-def generate_post_variants(conn, category: str, channel: str, raw_item: dict) -> dict:
-    """Dual-variant write for a benchmark trial (Section 4.3). Always compares
-    DeepSeek against Sonnet, regardless of which one write_model currently points
-    at, so the trial data is comparable across the whole trial window. Both
-    variants go through the identical deterministic assembly (same history/
-    risk/source/hashtags) — only the LLM prose differs between them."""
-    prompt, history = _build_prompt_and_history(conn, category, channel, raw_item)
-    source_excerpt = (raw_item.get("payload") or {}).get("description")
-    check_neutrality = category in NEUTRALITY_CHECKED_CATEGORIES
-    check_no_speculation = category in SPECULATION_CHECKED_CATEGORIES
-    raw_deepseek = _generate_checked_write(conn, category, prompt, model_override="deepseek-v4-flash", source_excerpt=source_excerpt, check_neutrality=check_neutrality, check_no_speculation=check_no_speculation)
-    raw_sonnet = _generate_checked_write(conn, category, prompt, model_override="claude-sonnet-5", source_excerpt=source_excerpt, check_neutrality=check_neutrality, check_no_speculation=check_no_speculation)
-    return {
-        "deepseek-v4-flash": _assemble(conn, category, raw_item, history, raw_deepseek),
-        "claude-sonnet-5": _assemble(conn, category, raw_item, history, raw_sonnet),
-    }

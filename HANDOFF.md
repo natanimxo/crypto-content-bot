@@ -162,7 +162,6 @@ relevance/staleness cleanups (correctly no-opped as "already handled").
    | `DEEPSEEK_API_KEY` | platform.deepseek.com → API keys | both workflows (default triage/write model) |
    | `ETHERSCAN_API_KEY` | etherscan.io/apis → sign up → create key (free tier: 3 calls/sec, 100k/day) | both workflows — `whale_movements` collection AND write-time history backfill on approve |
    | `GEMINI_API_KEY` | aistudio.google.com/apikey | optional — free-tier alt triage model, not currently used by any live category |
-   | `ANTHROPIC_API_KEY` | console.anthropic.com | optional — only needed if a category's `write_benchmark_status` flips to `trial` |
 
    Once added: Actions tab → run `Collect` manually once (Run workflow
    button) to confirm the full path before trusting the cron.

@@ -43,7 +43,7 @@ break any except-clause specificity.
 
 NOT currently a redaction target: request headers. Checked live — no log line
 in this codebase (this file included) ever logs `headers` today, which is
-where DeepSeek's `Authorization: Bearer ...` and Anthropic's `x-api-key` live.
+where an `Authorization: Bearer ...` or `x-api-key` header (any provider's) lives.
 Nothing to fix right now, but worth remembering if a header ever gets added to
 a log line later: it would need the same treatment.
 """

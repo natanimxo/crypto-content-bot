@@ -32,15 +32,7 @@ defi_yields:
   # should use a plain Python template instead of a real LLM call for the triage
   # line — the numbers ARE the summary. See pipeline/llm_providers/template.py.
   triage_model: template
-  write_model: deepseek-v4-flash    # final post writer, until the Sonnet benchmark settles it (Section 4.3)
-  # Deliberately NOT 'trial' — the operator wants to evaluate DeepSeek's writing
-  # quality on its own first before spending on Anthropic credit, rather than
-  # buying in upfront under pressure to use it. 'settled_deepseek' means "single-
-  # variant write, no A/B" without claiming the benchmark question is actually
-  # settled — this is a real config value from the Section 6 schema, not a hack.
-  # Flip back to 'trial' once ANTHROPIC_API_KEY is added and a real comparison
-  # period is wanted (Section 4.3).
-  write_benchmark_status: settled_deepseek
+  write_model: deepseek-v4-flash    # final post writer
 
   label: "🌾 DEFI YIELDS"           # operator routing header / digest eyebrow (Section 10)
 
@@ -117,8 +109,6 @@ whale_movements:
                             # structured facts — no synthesis needed, same
                             # reasoning as defi_yields' template triage.
   write_model: deepseek-v4-flash
-  write_benchmark_status: settled_deepseek   # same reasoning as defi_yields —
-                                              # evaluate DeepSeek alone first
 
   label: "🐋 WHALE MOVEMENTS"
 
@@ -166,7 +156,6 @@ web3_jobs:
 
   triage_model: template   # position/company/salary/location are fully structured facts
   write_model: deepseek-v4-flash
-  write_benchmark_status: settled_deepseek
 
   label: "💼 WEB3 JOBS"
 
@@ -227,7 +216,6 @@ gems_security:
 
   triage_model: template   # structured findings, no synthesis needed
   write_model: deepseek-v4-flash
-  write_benchmark_status: settled_deepseek
 
   label: "🚨 GEM SECURITY CHECK"
 
@@ -287,7 +275,6 @@ news:
 
   triage_model: template   # a headline is already a one-line summary
   write_model: deepseek-v4-flash
-  write_benchmark_status: settled_deepseek
 
   label: "📰 NEWS"
 
@@ -338,7 +325,6 @@ tool_launches:
 
   triage_model: template   # points/stars/comments are already structured facts
   write_model: deepseek-v4-flash
-  write_benchmark_status: settled_deepseek
 
   label: "🚀 TOOL LAUNCH"
 
@@ -385,7 +371,6 @@ startup_jobs:
 
   triage_model: template   # position/company/salary/location are fully structured facts
   write_model: deepseek-v4-flash
-  write_benchmark_status: settled_deepseek
 
   label: "💼 STARTUP JOBS"
 
@@ -461,7 +446,6 @@ macro_news:
 
   triage_model: template   # a headline is already a one-line summary, same as news
   write_model: deepseek-v4-flash
-  write_benchmark_status: settled_deepseek
 
   label: "🌐 MACRO NEWS"
 
@@ -557,14 +541,6 @@ hacks_exploits:
   triage_model: template   # structured findings (amount/classification/chain),
                              # no synthesis needed -- same reasoning as defi_yields
   write_model: deepseek-v4-flash
-  write_benchmark_status: settled_deepseek   # was `trial` at launch (2026-09-30) -- WRONG:
-                                    # trial mode (bot/approval_poller.py) generates BOTH a
-                                    # DeepSeek and a Sonnet draft, and Railway has no
-                                    # ANTHROPIC_API_KEY, so every Approve on this category
-                                    # failed at the Sonnet half (~19,000 silent retries
-                                    # over 6 days, see BACKLOG 2026-10-06). Flip back to
-                                    # `trial` only AFTER setting ANTHROPIC_API_KEY on the
-                                    # crypto-content-bot Railway service.
 
   label: "💥 HACK/EXPLOIT REPORT"
 

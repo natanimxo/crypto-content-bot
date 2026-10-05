@@ -1,7 +1,7 @@
 """LLM spend tracking + cost guard (2026-10-06).
 
 Why this exists, real incident: a misconfigured category (hacks_exploits in
-benchmark-trial mode with no ANTHROPIC_API_KEY) made the approval poller's
+a dual-model trial mode, since removed, with a missing API key) made the approval poller's
 recovery sweep re-run a paid DeepSeek write ~19,000 times over six days. Every
 call succeeded on the DeepSeek half and then raised, so nothing was stored, the
 operator saw nothing, and the DeepSeek balance went from $1.97 to $0.07.
@@ -32,8 +32,9 @@ COST ESTIMATE is an estimate, not a bill: DeepSeek Flash rates from
 api-docs.deepseek.com/quick_start/pricing as of 2026-10-06, with peak
 (01-04 and 06-10 UTC, Mon-Fri) at 2x. The page also says Chinese public
 holidays are off-peak; that isn't modelled, so on those days this slightly
-OVER-estimates, which is the safe direction for a guard. The Anthropic rate
-is an unverified placeholder (that provider is currently unused).
+OVER-estimates, which is the safe direction for a guard. A provider added
+later needs its own rate in estimate_cost_usd (unknown providers cost 0 here,
+so the call-count guard is the one that still protects it).
 """
 
 import logging
@@ -53,7 +54,6 @@ DEFAULT_BALANCE_ALERT_USD = 0.50
 
 # USD per 1M tokens
 _DEEPSEEK = {"off": {"hit": 0.003, "miss": 0.15, "out": 0.6}, "peak": {"hit": 0.006, "miss": 0.30, "out": 1.2}}
-_ANTHROPIC_PLACEHOLDER = {"in": 3.0, "out": 15.0}  # unverified
 
 
 def _env_float(name: str, default: float) -> float:
@@ -76,10 +76,7 @@ def estimate_cost_usd(provider: str, usage: dict | None, now: datetime | None = 
         hit = usage.get("cache_hit_tokens") or 0
         miss = (usage.get("prompt_tokens") or 0) - hit
         return (hit * r["hit"] + miss * r["miss"] + (usage.get("completion_tokens") or 0) * r["out"]) / 1e6
-    if provider == "anthropic":
-        return ((usage.get("prompt_tokens") or 0) * _ANTHROPIC_PLACEHOLDER["in"]
-                + (usage.get("completion_tokens") or 0) * _ANTHROPIC_PLACEHOLDER["out"]) / 1e6
-    return 0.0  # gemini free tier / unknown
+    return 0.0  # gemini free tier / any provider without a rate yet
 
 
 def record(conn, *, provider: str, model: str, category: str | None, usage: dict | None, ok: bool) -> None:

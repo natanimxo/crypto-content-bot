@@ -6,13 +6,12 @@ PROVIDERS; it never touches notify.py, write_post.py, or anything downstream.
 """
 
 from pipeline import llm_usage
-from pipeline.llm_providers import anthropic, deepseek, gemini, template
+from pipeline.llm_providers import deepseek, gemini, template
 from pipeline.score import load_category_config
 
 PROVIDERS = {
     "deepseek-v4-flash": deepseek.generate,
     "gemini-2.5-flash-lite": gemini.generate,
-    "claude-sonnet-5": anthropic.generate,
 }
 
 # Same providers, returning (text, usage) so generate_write can meter spend
@@ -20,7 +19,6 @@ PROVIDERS = {
 PROVIDERS_WITH_USAGE = {
     "deepseek-v4-flash": ("deepseek", deepseek.generate_with_usage),
     "gemini-2.5-flash-lite": ("gemini", gemini.generate_with_usage),
-    "claude-sonnet-5": ("anthropic", anthropic.generate_with_usage),
 }
 
 
@@ -47,7 +45,7 @@ def generate_triage(conn, category: str, raw_item: dict) -> str:
 def generate_write(conn, category: str, prompt: str, *, model_override: str | None = None) -> str:
     """Final post write (Section 8, step 2). Only ever called on operator-approved
     items. Pass model_override to force a specific model — used by write_post.py
-    during a benchmark trial to generate both variants regardless of which one
+    to force a specific model for a single call (tests, one-off comparisons)
     category_config.write_model currently points at."""
     cfg = load_category_config(conn, category)
     model = model_override or cfg["write_model"]

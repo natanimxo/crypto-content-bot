@@ -215,18 +215,15 @@ The repo no longer needs to be public for scheduling reasons.
 - **Gemini** (2.5 Flash-Lite) is wired up as a free-tier alternative triage
   model, available but not currently the default for any category.
 
-### 4.3 — Benchmark trials
+### 4.3 — Writes
 
-`category_config.write_benchmark_status` controls whether a category's final
-post is written once (`settled_deepseek` — current state for all three live
-categories) or as an A/B trial (`trial` — generates both a DeepSeek and a
-Sonnet variant via `generate_post_variants()`, sends both to the operator
-labeled Version A / Version B, and only counts as "written" once the
-operator marks whichever one they actually sent). All three live categories
-are deliberately `settled_deepseek`, not `trial`: the operator wants to
-evaluate DeepSeek's writing quality on its own first, rather than spending
-Anthropic credit under pressure to use it immediately. Flipping any category
-to `trial` needs `ANTHROPIC_API_KEY` set.
+Every category's final post is written exactly once, by the model named in
+`category_config.write_model` (DeepSeek for all of them), through
+`generate_post()`. There is no A/B or multi-model mode. (An earlier design
+had a `write_benchmark_status` / "trial" mode that wrote a DeepSeek and a
+Sonnet variant side by side; it was never used on a live category and was
+removed 2026-10-07, along with the Anthropic provider, after a trial-mode
+misconfiguration caused a six-day silent retry loop -- see BACKLOG.md.)
 
 ### 4.4 — Provider-agnostic dispatch
 
@@ -234,7 +231,7 @@ Pipeline code never imports a provider module directly or hardcodes a model
 name. `pipeline/llm.py` exposes exactly two entry points —
 `generate_triage(conn, category, raw_item)` and
 `generate_write(conn, category, prompt, model_override=None)` — which
-dispatch to `pipeline/llm_providers/{deepseek,gemini,anthropic,template}.py`
+dispatch to `pipeline/llm_providers/{deepseek,gemini,template}.py`
 based on `category_config.triage_model` / `write_model`. Adding a new
 provider means adding one module there with a matching call signature;
 nothing else in the pipeline changes.
@@ -281,8 +278,7 @@ back to what's checked in.
   soft_daily_cap: <int|null>      # per-category daily notify cap for a channel
   collect_min_usd: <int>          # whale_movements only — collection-time $ floor
   triage_model: template | deepseek | gemini
-  write_model: deepseek-v4-flash | claude-sonnet-5
-  write_benchmark_status: settled_deepseek | trial
+  write_model: deepseek-v4-flash
   label: "<emoji> CATEGORY NAME"  # digest eyebrow + post label header (Section 10)
   emoji: "<single emoji>"         # the ONE leading emoji on a post's title line
   display_label: "<Human Name>"   # metadata, not rendered in the post body
@@ -469,7 +465,7 @@ on Railway):
    button itself can no longer show a green checkmark).
 4. **Approve** → `_handle_approve()` marks the approval row `approved` in
    the fast phase, then (deferred) `_generate_and_preview()` calls
-   `generate_write()`/`generate_post_variants()` and sends the result as a
+   `generate_post()` (-> `generate_write()`) and sends the result as a
    **preview** — see Section 11 for exactly what that looks like.
 5. **Edit** → operator's next text message to the bot becomes the final
    post text directly — no LLM call at all, straight to the same
@@ -552,14 +548,11 @@ Telegram messages**:
 
 1. **Routing header** — operator-only: `<label> → <channel display name>`
    (e.g. "🌾 DEFI YIELDS → Alpha Edge Crypto"), the score, and **Mark as
-   sent / Discard** buttons (or, during a Section 4.3 benchmark trial,
-   **Mark A as sent / Mark B as sent / Discard**). This message is never
+   sent / Discard** buttons. This message is never
    meant to be forwarded — it carries buttons and internal metadata.
 2. **The actual post** — the fully-assembled HTML from `post_format.assemble_post()`,
    sent as its own clean message with no buttons, so the operator can
-   forward or copy-paste it to the real channel completely unedited. (In a
-   benchmark trial, this is two content messages, A and B, sent back to
-   back — see Section 4.3.)
+   forward or copy-paste it to the real channel completely unedited.
 
 The label header (item 1 above) is a load-bearing part of the operator's
 manual workflow, not cosmetic — with five channels and multiple categories,

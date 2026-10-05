@@ -30,9 +30,9 @@ def seed_categories(conn, path: str):
             cur.execute(
                 """INSERT INTO category_config
                        (category, score_weights, review_threshold, cooldown_hours,
-                        soft_daily_cap, triage_model, write_model, write_benchmark_status,
+                        soft_daily_cap, triage_model, write_model,
                         label, voice, prompt_notes, emoji, display_label, hashtags, collect_min_usd)
-                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                    ON CONFLICT (category) DO UPDATE SET
                        score_weights = EXCLUDED.score_weights,
                        review_threshold = EXCLUDED.review_threshold,
@@ -40,7 +40,6 @@ def seed_categories(conn, path: str):
                        soft_daily_cap = EXCLUDED.soft_daily_cap,
                        triage_model = EXCLUDED.triage_model,
                        write_model = EXCLUDED.write_model,
-                       write_benchmark_status = EXCLUDED.write_benchmark_status,
                        label = EXCLUDED.label,
                        voice = EXCLUDED.voice,
                        prompt_notes = EXCLUDED.prompt_notes,
@@ -56,7 +55,6 @@ def seed_categories(conn, path: str):
                     cfg.get("soft_daily_cap"),
                     cfg.get("triage_model", "deepseek-v4-flash"),
                     cfg.get("write_model", "deepseek-v4-flash"),
-                    cfg.get("write_benchmark_status", "trial"),
                     cfg.get("label"),
                     cfg.get("voice"),
                     cfg.get("prompt_notes"),
