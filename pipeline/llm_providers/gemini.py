@@ -12,7 +12,7 @@ from pipeline.http import post_json
 BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
 
 
-def generate(prompt: str, *, max_tokens: int = 800) -> str:
+def generate_with_usage(prompt: str, *, max_tokens: int = 800) -> tuple[str, dict]:
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
         raise RuntimeError("GEMINI_API_KEY is not set")
@@ -26,4 +26,11 @@ def generate(prompt: str, *, max_tokens: int = 800) -> str:
     # Same reasoning as deepseek.py's timeout=60 (2026-09-14): a completion
     # call is a slower workload than http.py's 30s default was tuned for.
     resp = post_json(url, json_body=body, timeout=60)
-    return resp["candidates"][0]["content"]["parts"][0]["text"].strip()
+    u = resp.get("usageMetadata") or {}
+    usage = {"prompt_tokens": u.get("promptTokenCount"), "cache_hit_tokens": 0,
+             "completion_tokens": u.get("candidatesTokenCount"), "model": model}
+    return resp["candidates"][0]["content"]["parts"][0]["text"].strip(), usage
+
+
+def generate(prompt: str, *, max_tokens: int = 800) -> str:
+    return generate_with_usage(prompt, max_tokens=max_tokens)[0]

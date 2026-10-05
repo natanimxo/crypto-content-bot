@@ -258,3 +258,28 @@ CREATE INDEX IF NOT EXISTS idx_raw_items_collected_at ON raw_items(collected_at)
 CREATE INDEX IF NOT EXISTS idx_scores_raw_item_id ON scores(raw_item_id);
 CREATE INDEX IF NOT EXISTS idx_scores_category ON scores(category);
 CREATE INDEX IF NOT EXISTS idx_approvals_raw_item_id ON approvals(raw_item_id);
+
+-- LLM spend tracking + cost guard (2026-10-06, see pipeline/llm_usage.py). One row
+-- per LLM call, successful or not (a failed call still counts toward the daily
+-- call-count guard). est_cost_usd is an ESTIMATE from published per-token rates.
+CREATE TABLE IF NOT EXISTS llm_usage (
+    id BIGSERIAL PRIMARY KEY,
+    ts TIMESTAMPTZ NOT NULL DEFAULT now(),
+    provider TEXT NOT NULL,
+    model TEXT NOT NULL,
+    category TEXT,
+    prompt_tokens INT,
+    cache_hit_tokens INT,
+    completion_tokens INT,
+    est_cost_usd NUMERIC(10, 6),
+    ok BOOLEAN NOT NULL DEFAULT TRUE
+);
+CREATE INDEX IF NOT EXISTS idx_llm_usage_ts ON llm_usage(ts);
+
+-- At most one alert per UTC day per kind ('spend' | 'calls' | 'balance').
+CREATE TABLE IF NOT EXISTS llm_spend_alerts (
+    day DATE NOT NULL,
+    kind TEXT NOT NULL,
+    alerted_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (day, kind)
+);

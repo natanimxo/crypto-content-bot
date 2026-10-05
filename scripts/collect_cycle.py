@@ -19,6 +19,7 @@ from dotenv import load_dotenv  # noqa: E402
 
 from bot import notify  # noqa: E402
 from collectors import defi_yields, gems_security, hacks_exploits, macro_news, news, startup_jobs, tool_launches, web3_jobs, whale_movements  # noqa: E402
+from pipeline import llm_usage  # noqa: E402
 from pipeline.db import get_conn  # noqa: E402
 from pipeline.score import score_new_items  # noqa: E402
 
@@ -65,6 +66,14 @@ def main():
 
     logger.info("Running notify...")
     notify.run()
+
+    # LLM cost guard (pipeline/llm_usage.py): balance + daily spend/call-count
+    # alerts. Never raises.
+    conn = get_conn()
+    try:
+        llm_usage.run_checks(conn)
+    finally:
+        conn.close()
     logger.info("Collect cycle done.")
 
 

@@ -14,7 +14,10 @@ from pipeline.http import post_json
 API_URL = "https://api.deepseek.com/chat/completions"
 
 
-def generate(prompt: str, *, system: str | None = None, max_tokens: int = 800) -> str:
+def generate_with_usage(prompt: str, *, system: str | None = None, max_tokens: int = 800) -> tuple[str, dict]:
+    """(text, usage) -- usage is what pipeline/llm_usage.py meters. The
+    response's `usage` block used to be discarded, which is why a six-day
+    runaway retry loop could not be measured after the fact."""
     api_key = os.environ.get("DEEPSEEK_API_KEY")
     if not api_key:
         raise RuntimeError("DEEPSEEK_API_KEY is not set")
@@ -44,4 +47,15 @@ def generate(prompt: str, *, system: str | None = None, max_tokens: int = 800) -
     # call is a slower, different workload -- 60s here, not a global change to
     # http.py's default, since collectors legitimately want to fail fast.
     resp = post_json(API_URL, json_body=body, headers=headers, timeout=60)
-    return resp["choices"][0]["message"]["content"].strip()
+    u = resp.get("usage") or {}
+    usage = {
+        "prompt_tokens": u.get("prompt_tokens"),
+        "cache_hit_tokens": u.get("prompt_cache_hit_tokens"),
+        "completion_tokens": u.get("completion_tokens"),
+        "model": model,
+    }
+    return resp["choices"][0]["message"]["content"].strip(), usage
+
+
+def generate(prompt: str, *, system: str | None = None, max_tokens: int = 800) -> str:
+    return generate_with_usage(prompt, system=system, max_tokens=max_tokens)[0]

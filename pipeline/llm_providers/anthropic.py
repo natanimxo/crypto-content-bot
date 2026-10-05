@@ -14,7 +14,7 @@ ANTHROPIC_VERSION = "2023-06-01"
 MODEL_ID = "claude-sonnet-5"
 
 
-def generate(prompt: str, *, system: str | None = None, max_tokens: int = 1024) -> str:
+def generate_with_usage(prompt: str, *, system: str | None = None, max_tokens: int = 1024) -> tuple[str, dict]:
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:
         raise RuntimeError("ANTHROPIC_API_KEY is not set")
@@ -35,4 +35,12 @@ def generate(prompt: str, *, system: str | None = None, max_tokens: int = 1024) 
     # Same reasoning as deepseek.py's timeout=60 (2026-09-14): a completion
     # call is a slower workload than http.py's 30s default was tuned for.
     resp = post_json(API_URL, json_body=body, headers=headers, timeout=60)
-    return "".join(block["text"] for block in resp["content"] if block["type"] == "text").strip()
+    u = resp.get("usage") or {}
+    usage = {"prompt_tokens": u.get("input_tokens"), "cache_hit_tokens": 0,
+             "completion_tokens": u.get("output_tokens"), "model": MODEL_ID}
+    text = "".join(block["text"] for block in resp["content"] if block["type"] == "text").strip()
+    return text, usage
+
+
+def generate(prompt: str, *, system: str | None = None, max_tokens: int = 1024) -> str:
+    return generate_with_usage(prompt, system=system, max_tokens=max_tokens)[0]

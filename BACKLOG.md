@@ -372,6 +372,51 @@ the one place to check.
   the taps that "did nothing" were on the other three hacks cards. Re-tap it
   to confirm.
 
+## LLM spend: reconciliation and cost guard (2026-10-06)
+
+- **DeepSeek balance $1.97 -> $0.07 in a week: the retry loop accounts for
+  all of it.** Nothing recorded token usage (the response's `usage` block was
+  discarded), so this was reconstructed from measured per-call numbers rather
+  than read from a log. Measured on the 3 stuck incidents' real prompts, 2
+  calls each: ~535 prompt tokens (384 served from DeepSeek's prefix cache,
+  ~150 miss), ~127 completion, 0 reasoning tokens. Model id on Railway is the
+  default `deepseek-chat` (`DEEPSEEK_MODEL_ID` unset). At current published
+  Flash rates ($0.003 / $0.15 per 1M cached / uncached input, $0.60 output
+  off-peak; peak is 2x) that is ~$0.0001 per retry. Run-log timestamps give
+  19,078 retries since the first hacks approval; all fell off-peak (Oct 1-7 is
+  a Chinese public holiday, which DeepSeek bills off-peak, and the rest missed
+  the 01-04/06-10 UTC weekday peak windows) -> **$1.91** (range $1.91-$2.98
+  depending on cache-hit assumptions; the measured hit rate sits at the low
+  end). **Legitimate writes in the same window: 37 successful writes across 8
+  categories, ~$0.006.** All 9 categories use `triage_model: template`, so
+  triage costs nothing; every LLM call goes through `llm.generate_write`.
+  $1.91 + $0.006 vs the observed ~$1.90 -- nothing else is spending. Caveats
+  stated plainly: the legit figure is estimated from rebuilt prompts (not
+  logged usage), excludes any guard-retry calls (also unlogged), and ~24
+  calls of mine today (~$0.003) came after the window. Even a 10x error on the
+  legit side is ~$0.06.
+
+- **Cost guard built** (`pipeline/llm_usage.py`, tables `llm_usage` and
+  `llm_spend_alerts`): every LLM call is logged with tokens and an estimated
+  cost, including FAILED calls. Telegram alerts, once per UTC day per kind:
+  `spend` (default $0.10/day), `calls` (default 150/day -- price-independent,
+  so it still catches a runaway if rates change or usage is missing), and
+  `balance` (DeepSeek's own `/user/balance`, default floor $0.50; checked once
+  per collect cycle). Defaults sit ~100x above a normal day and below the
+  incident's rate (~$0.32/day, ~3,200 calls/day). Override with
+  `LLM_DAILY_SPEND_ALERT_USD`, `LLM_DAILY_CALLS_ALERT`, `LLM_BALANCE_ALERT_USD`
+  on the Railway service. The alert slot is claimed before sending and
+  released if the send fails, so an alert is neither spammed nor lost; metering
+  failures are logged and never block a real write. Verified end to end: a
+  real call recorded 15 prompt / 5 completion tokens, and the real balance
+  alert reached Telegram. Estimate caveats: peak pricing is modelled, Chinese
+  holidays are not (slight over-estimate, the safe direction); the Anthropic
+  rate is an unverified placeholder (provider unused).
+  **Alert only, deliberately -- no circuit breaker.** Refusing LLM calls over
+  a threshold could block a legitimate burst of approvals; the retry cap
+  (see "Silent write failures") already bounds the specific loop that caused
+  this. Revisit if an alert is ever ignored.
+
 ## Telegram / bot reliability
 
 - ~~Unresolved: callback_query taps sometimes don't appear in getUpdates, or
