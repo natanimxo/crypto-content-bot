@@ -257,7 +257,17 @@ CREATE TABLE IF NOT EXISTS llm_usage (
     est_cost_usd NUMERIC(10, 6),
     ok BOOLEAN NOT NULL DEFAULT TRUE
 );
+ALTER TABLE llm_usage ADD COLUMN IF NOT EXISTS prompt_hash TEXT;  -- sha1[:12] of the prompt; lets the repeat guard spot an identical prompt being re-sent
 CREATE INDEX IF NOT EXISTS idx_llm_usage_ts ON llm_usage(ts);
+
+-- Near-real-time anomaly alerts (pipeline/llm_usage.py): one row per (kind, key), re-alerted
+-- every LLM_REALERT_MINUTES while the condition persists -- NOT once per day like llm_spend_alerts.
+CREATE TABLE IF NOT EXISTS llm_anomaly_alerts (
+    kind TEXT NOT NULL,           -- 'rate' | 'repeat'
+    key TEXT NOT NULL,            -- 'all' for rate, the prompt hash for repeat
+    last_alerted_at TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (kind, key)
+);
 
 -- At most one alert per UTC day per kind ('spend' | 'calls' | 'balance').
 CREATE TABLE IF NOT EXISTS llm_spend_alerts (

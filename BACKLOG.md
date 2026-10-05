@@ -412,6 +412,10 @@ the one place to check.
   alert reached Telegram. Estimate caveats: peak pricing is modelled, Chinese
   holidays are not (slight over-estimate, the safe direction); the Anthropic
   rate is an unverified placeholder (provider unused).
+  **Superseded in part, same day (see the next entry): the daily guards are
+  now a backstop only.** A once-a-day alert would have fired roughly a day
+  into the incident (~$0.32/day against a $0.10 threshold) and then gone quiet
+  while it kept running.
   **Alert only, deliberately -- no circuit breaker.** Refusing LLM calls over
   a threshold could block a legitimate burst of approvals; the retry cap
   (see "Silent write failures") already bounds the specific loop that caused
@@ -451,6 +455,60 @@ the one place to check.
   functional gain; the schema comment explains the leftover "_a"), and the
   `mark_sent_a` callback name (already-sent preview buttons in Telegram carry
   it). A stale `mark_sent_b` tap now just answers "Unknown action." Tested.
+
+## LLM anomaly alerts, near-real-time (2026-10-07)
+
+- **Rate and repeated-prompt guards that re-alert while the problem
+  persists** (`pipeline/llm_usage.py::_check_anomaly`, table
+  `llm_anomaly_alerts`), evaluated on every LLM call. Operator's point: the
+  retry loop burned ~$0.32 and ~3,200 calls a day, and a once-daily alert
+  fires a day in then goes quiet. (1) **rate:** >= `LLM_RATE_ALERT_CALLS`
+  calls in the last `LLM_RATE_WINDOW_MINUTES`. (2) **repeat:** the same
+  prompt sent >= `LLM_REPEAT_ALERT_COUNT` times in `LLM_REPEAT_WINDOW_MINUTES`.
+  (3) Both **re-alert every `LLM_REALERT_MINUTES` while still true**, per
+  (kind, key) -- an atomic claim, restored if the Telegram send fails so an
+  alert is never lost. (4) The daily spend/call-count and balance alerts are
+  unchanged, as a backstop.
+- **Why "repeat" keys on the prompt, not on failures.** The operator asked
+  for "the same approval or item fails repeatedly". But every one of the real
+  loop's ~19,000 calls SUCCEEDED at DeepSeek -- the failure came afterwards,
+  in the approval poller, which `llm_usage` never sees -- so a failed-call
+  counter would have caught nothing. What the loop DID have, observably, was an
+  identical prompt re-sent every minute. A prompt fingerprint
+  (`llm_usage.prompt_hash`, sha1[:12]) catches that whichever caller is
+  looping, independent of volume. The approval-level cap/alert
+  (`write_attempts`, "Silent write failures" above) remains the first line for
+  that specific path; this is the independent second one.
+- **Defaults, derived from real usage, not guessed.** All 111 successful
+  writes ever (2026-09-08 to 10-05, ~4 weeks) -- the busiest 15-, 30- and
+  60-minute windows each held at most **7** writes, and the busiest day 8.
+  Defaults: rate **20 calls / 15 min** (~3x the worst burst ever seen),
+  repeat **5 identical prompts / 30 min** (the poller's own capped retry sends
+  a prompt at most 3x, plus room for one manual Retry tap, so legitimate
+  behaviour never trips it), re-alert **60 min**. Env vars:
+  `LLM_RATE_WINDOW_MINUTES`, `LLM_RATE_ALERT_CALLS`,
+  `LLM_REPEAT_WINDOW_MINUTES`, `LLM_REPEAT_ALERT_COUNT`,
+  `LLM_REALERT_MINUTES`.
+- **Verified by replaying the actual incident**, not just boundary tests:
+  3 stuck approvals re-running one call per minute each (the real shape),
+  with an injectable clock. Also: 7 distinct writes in 15 min -> no alert; a
+  capped retry (same prompt x3) -> no alert; 19 calls -> none, the 20th ->
+  alert; 4 identical prompts -> none, the 5th -> alert; loop stops -> alerts
+  stop; Telegram down -> not lost, delivered on retry. **Replay result: the repeat alert fired at
+  minute 4 and the rate alert at minute 6, then both re-alerted at exactly +60
+  and +120 minutes (12 alerts over 3 hours: 9 repeat across the 3 prompts, 3
+  rate) and stopped when the calls stopped.** For comparison, the existing
+  daily guards on the same loop: the call-count backstop (150/day) would have
+  fired ~50 min in, the spend backstop ($0.10/day) ~7.5 h in -- and each only
+  ONCE, then silence until the next UTC day, which is the gap the operator
+  named. Bug found by the first test run and fixed before shipping:
+  `make_interval(mins => <float>)` doesn't exist (needs an integer); the
+  cooldown now uses seconds.
+- **Known limitation, stated plainly:** these guards only run when an LLM
+  call happens (that's where the data is), plus once per collect cycle for
+  the daily/balance checks. A runaway that fails BEFORE reaching the LLM
+  (e.g. crashing early in the poller) makes no calls and spends nothing, so
+  it won't trip them -- that case is the approval-level failure alert's job.
 
 ## Telegram / bot reliability
 

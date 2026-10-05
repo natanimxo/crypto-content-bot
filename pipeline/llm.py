@@ -54,13 +54,15 @@ def generate_write(conn, category: str, prompt: str, *, model_override: str | No
     if not provider:
         raise RuntimeError(f"Unknown write_model '{model}' for category '{category}'")
     provider_name, with_usage = PROVIDERS_WITH_USAGE[model]
+    prompt_hash = llm_usage.prompt_fingerprint(prompt)
     try:
         text, usage = with_usage(prompt)
     except Exception:
         # A failed call still counts toward the daily call-count guard: a loop
         # of failing calls is exactly the runaway it exists to catch.
-        llm_usage.record(conn, provider=provider_name, model=model, category=category, usage=None, ok=False)
+        llm_usage.record(conn, provider=provider_name, model=model, category=category, usage=None, ok=False,
+                         prompt_hash=prompt_hash)
         raise
     llm_usage.record(conn, provider=provider_name, model=usage.get("model") or model, category=category,
-                     usage=usage, ok=True)
+                     usage=usage, ok=True, prompt_hash=prompt_hash)
     return text

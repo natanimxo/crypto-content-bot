@@ -9,10 +9,26 @@ Nothing recorded token usage -- the response's `usage` block was thrown away --
 so the only way to reconstruct it was a manual estimate. (That estimate, from
 measured per-call tokens, came to $1.91 against the observed $1.90.)
 
-Three independent guards, all alerting the operator on Telegram, at most once
-per UTC day per kind (llm_spend_alerts claims the slot BEFORE sending and
-releases it if the send fails, so an alert is neither spammed nor silently
-lost):
+TWO KINDS OF GUARD, both alerting the operator on Telegram.
+
+NEAR-REAL-TIME ANOMALY GUARDS (added 2026-10-07 -- the daily guards below
+would have spoken a full day into the incident and then gone quiet while it
+kept running). Evaluated on every LLM call, and they RE-ALERT every
+LLM_REALERT_MINUTES for as long as the condition holds, so a runaway cannot
+go quiet after one message:
+  rate     more than LLM_RATE_ALERT_CALLS calls in the last
+           LLM_RATE_WINDOW_MINUTES (failed calls count)
+  repeat   the SAME prompt sent LLM_REPEAT_ALERT_COUNT+ times within
+           LLM_REPEAT_WINDOW_MINUTES. This is the retry loop's signature,
+           independent of volume: every one of its ~19,000 calls was an
+           identical prompt, and every one SUCCEEDED at the LLM -- the
+           failure happened afterwards, in code this module never sees --
+           so 'failed calls' can't be what detects it, but a repeated
+           identical prompt can, whichever caller is looping.
+
+DAILY BACKSTOP GUARDS, at most once per UTC day per kind (llm_spend_alerts
+claims the slot BEFORE sending and releases it if the send fails, so an
+alert is neither spammed nor silently lost):
   spend    today's estimated spend crossed LLM_DAILY_SPEND_ALERT_USD
   calls    today's call count crossed LLM_DAILY_CALLS_ALERT -- counts FAILED
            calls too, and doesn't depend on a price table being right, so it
@@ -37,9 +53,10 @@ later needs its own rate in estimate_cost_usd (unknown providers cost 0 here,
 so the call-count guard is the one that still protects it).
 """
 
+import hashlib
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import requests
 
@@ -54,6 +71,13 @@ DEFAULT_BALANCE_ALERT_USD = 0.50
 
 # USD per 1M tokens
 _DEEPSEEK = {"off": {"hit": 0.003, "miss": 0.15, "out": 0.6}, "peak": {"hit": 0.006, "miss": 0.30, "out": 1.2}}
+
+
+DEFAULT_RATE_WINDOW_MINUTES = 15
+DEFAULT_RATE_ALERT_CALLS = 20
+DEFAULT_REPEAT_WINDOW_MINUTES = 30
+DEFAULT_REPEAT_ALERT_COUNT = 5
+DEFAULT_REALERT_MINUTES = 60
 
 
 def _env_float(name: str, default: float) -> float:
@@ -79,7 +103,12 @@ def estimate_cost_usd(provider: str, usage: dict | None, now: datetime | None = 
     return 0.0  # gemini free tier / any provider without a rate yet
 
 
-def record(conn, *, provider: str, model: str, category: str | None, usage: dict | None, ok: bool) -> None:
+def prompt_fingerprint(prompt: str) -> str:
+    return hashlib.sha1(prompt.encode("utf-8")).hexdigest()[:12]
+
+
+def record(conn, *, provider: str, model: str, category: str | None, usage: dict | None, ok: bool,
+           prompt_hash: str | None = None) -> None:
     """Log one LLM call (successful or not) and run the spend/call-count
     guards. Must never raise into the caller: a metering failure must not
     take a real write down with it -- but it logs loudly, never silently."""
@@ -89,12 +118,13 @@ def record(conn, *, provider: str, model: str, category: str | None, usage: dict
         with dict_cursor(conn) as cur:
             cur.execute(
                 """INSERT INTO llm_usage (provider, model, category, prompt_tokens, cache_hit_tokens,
-                                          completion_tokens, est_cost_usd, ok)
-                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
+                                          completion_tokens, est_cost_usd, ok, prompt_hash)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)""",
                 (provider, model, category, u.get("prompt_tokens"), u.get("cache_hit_tokens"),
-                 u.get("completion_tokens"), cost, ok),
+                 u.get("completion_tokens"), cost, ok, prompt_hash),
             )
         conn.commit()
+        _check_anomaly(conn)
         _check_daily(conn)
     except Exception:
         logger.exception("llm_usage: could not record/check usage (call itself is unaffected)")
@@ -141,6 +171,96 @@ def _alert_once_per_day(conn, kind: str, text: str) -> bool:
             cur.execute("DELETE FROM llm_spend_alerts WHERE day = (now() AT TIME ZONE 'UTC')::date AND kind = %s", (kind,))
         conn.commit()
         return False
+
+
+def _realert_claim(conn, kind: str, key: str, now: datetime, realert_minutes: float):
+    """Atomically claim the right to alert for (kind, key): True if never
+    alerted, or last alerted at least `realert_minutes` ago. Returns
+    (claimed, previous_alerted_at) so a failed send can put things back."""
+    with dict_cursor(conn) as cur:
+        cur.execute("SELECT last_alerted_at FROM llm_anomaly_alerts WHERE kind = %s AND key = %s", (kind, key))
+        row = cur.fetchone()
+        prev = row["last_alerted_at"] if row else None
+        cur.execute(
+            """INSERT INTO llm_anomaly_alerts (kind, key, last_alerted_at) VALUES (%s, %s, %s)
+               ON CONFLICT (kind, key) DO UPDATE SET last_alerted_at = EXCLUDED.last_alerted_at
+                 WHERE llm_anomaly_alerts.last_alerted_at <= %s - make_interval(secs => %s)
+               RETURNING key""",
+            (kind, key, now, now, realert_minutes * 60.0),
+        )
+        claimed = cur.fetchone() is not None
+    conn.commit()
+    return claimed, prev
+
+
+def _send_anomaly_alert(conn, kind: str, key: str, text: str, now: datetime, realert_minutes: float) -> bool:
+    claimed, prev = _realert_claim(conn, kind, key, now, realert_minutes)
+    if not claimed:
+        return False
+    chat_id = os.environ.get("TELEGRAM_OPERATOR_CHAT_ID")
+    try:
+        if not chat_id:
+            raise RuntimeError("TELEGRAM_OPERATOR_CHAT_ID is not set")
+        send_message(chat_id, text)
+        logger.error("llm_usage: ANOMALY ALERT sent (%s/%s): %s", kind, key, text.replace("\n", " | "))
+        return True
+    except Exception:
+        logger.exception("llm_usage: could not send %s anomaly alert -- restoring state so it retries", kind)
+        with dict_cursor(conn) as cur:
+            if prev is None:
+                cur.execute("DELETE FROM llm_anomaly_alerts WHERE kind = %s AND key = %s", (kind, key))
+            else:
+                cur.execute("UPDATE llm_anomaly_alerts SET last_alerted_at = %s WHERE kind = %s AND key = %s",
+                            (prev, kind, key))
+        conn.commit()
+        return False
+
+
+def _check_anomaly(conn, now: datetime | None = None) -> None:
+    """Near-real-time rate + repeated-prompt guards. `now` is injectable so the
+    re-alert cadence can be tested by simulation instead of waiting hours."""
+    now = now or datetime.now(timezone.utc)
+    rate_win = _env_float("LLM_RATE_WINDOW_MINUTES", DEFAULT_RATE_WINDOW_MINUTES)
+    rate_cap = int(_env_float("LLM_RATE_ALERT_CALLS", DEFAULT_RATE_ALERT_CALLS))
+    rep_win = _env_float("LLM_REPEAT_WINDOW_MINUTES", DEFAULT_REPEAT_WINDOW_MINUTES)
+    rep_cap = int(_env_float("LLM_REPEAT_ALERT_COUNT", DEFAULT_REPEAT_ALERT_COUNT))
+    realert = _env_float("LLM_REALERT_MINUTES", DEFAULT_REALERT_MINUTES)
+
+    with dict_cursor(conn) as cur:
+        cur.execute(
+            """SELECT COUNT(*) AS calls, COALESCE(SUM(est_cost_usd), 0)::float AS spend
+               FROM llm_usage WHERE ts > %s AND ts <= %s""",
+            (now - timedelta(minutes=rate_win), now),
+        )
+        w = dict(cur.fetchone())
+        cur.execute(
+            """SELECT prompt_hash, COUNT(*) AS n, MAX(category) AS category,
+                      COALESCE(SUM(est_cost_usd), 0)::float AS spend, MIN(ts) AS first_ts
+               FROM llm_usage WHERE ts > %s AND ts <= %s AND prompt_hash IS NOT NULL
+               GROUP BY prompt_hash HAVING COUNT(*) >= %s ORDER BY n DESC""",
+            (now - timedelta(minutes=rep_win), now, rep_cap),
+        )
+        repeats = cur.fetchall()
+
+    if w["calls"] >= rate_cap:
+        _send_anomaly_alert(
+            conn, "rate", "all",
+            f"🚨 <b>LLM call-rate anomaly</b>\n{w['calls']} LLM calls in the last {rate_win:g} minutes "
+            f"(alert at {rate_cap}; normal use is a few calls an hour). ~${w['spend']:.3f} in that window.\n"
+            f"Something may be looping -- check the Railway poller logs now. "
+            f"I'll repeat this every {realert:g} min while it continues.",
+            now, realert,
+        )
+    for r in repeats:
+        _send_anomaly_alert(
+            conn, "repeat", r["prompt_hash"],
+            f"🔁 <b>Same LLM prompt sent {r['n']}x in {rep_win:g} minutes</b>\n"
+            f"Category: {r['category'] or '?'} · prompt {r['prompt_hash']} · ~${r['spend']:.4f} so far. "
+            f"A normal write sends a given prompt once (a capped retry sends it up to 3x).\n"
+            f"This is the shape of a retry loop -- check the Railway poller logs now. "
+            f"I'll repeat this every {realert:g} min while it continues.",
+            now, realert,
+        )
 
 
 def _check_daily(conn) -> None:
