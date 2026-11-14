@@ -18,6 +18,8 @@ LLM_REALERT_MINUTES for as long as the condition holds, so a runaway cannot
 go quiet after one message:
   rate     more than LLM_RATE_ALERT_CALLS calls in the last
            LLM_RATE_WINDOW_MINUTES (failed calls count)
+           (Both guards ignore calls tagged by tag_session() -- deliberate dev/test
+           traffic -- which have their own 10x ceiling; see TAGGED_RATE_MULTIPLIER.)
   repeat   the SAME prompt sent LLM_REPEAT_ALERT_COUNT+ times within
            LLM_REPEAT_WINDOW_MINUTES. This is the retry loop's signature,
            independent of volume: every one of its ~19,000 calls was an
@@ -79,6 +81,29 @@ DEFAULT_REPEAT_WINDOW_MINUTES = 30
 DEFAULT_REPEAT_ALERT_COUNT = 5
 DEFAULT_REALERT_MINUTES = 60
 
+# DELIBERATE TEST TRAFFIC (2026-11-14). A generation-heavy build session (scripts/
+# voice_compare.py, a batch of retries while tuning a prompt) tripped the rate alert at
+# 20 calls/15min -- correctly by the numbers, uselessly in practice. Raising the threshold
+# is the wrong fix: the real incident ran ~3,200 calls/day, i.e. ~33 per 15 minutes, so any
+# threshold high enough to stay quiet during a build session (say 60) would have missed it.
+# Instead a script declares itself with tag_session(); its calls are stored with a non-NULL
+# `source` and left out of the rate and repeated-prompt alerts and the daily call COUNT
+# (production code never tags, so the poller/collect cycle are watched exactly as before).
+# Tagged calls are NOT unwatched: they still count toward the spend guard (real money), and
+# a tagged session making TAGGED_RATE_MULTIPLIER x the rate threshold in one window still
+# alerts -- a bugged test script looping is a runaway like any other.
+TAGGED_RATE_MULTIPLIER = 10
+_SOURCE: str | None = os.environ.get("LLM_USAGE_SOURCE") or None
+
+
+def tag_session(source: str | None) -> None:
+    """Mark every LLM call made by this PROCESS from now on as deliberate test/dev
+    traffic (see the comment above). Call once at the top of a script. Setting the env
+    var LLM_USAGE_SOURCE=<name> does the same for an ad-hoc script with no code change.
+    Never call this from the collect cycle or the poller."""
+    global _SOURCE
+    _SOURCE = source or None
+
 
 def _env_float(name: str, default: float) -> float:
     try:
@@ -118,10 +143,10 @@ def record(conn, *, provider: str, model: str, category: str | None, usage: dict
         with dict_cursor(conn) as cur:
             cur.execute(
                 """INSERT INTO llm_usage (provider, model, category, prompt_tokens, cache_hit_tokens,
-                                          completion_tokens, est_cost_usd, ok, prompt_hash)
-                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                                          completion_tokens, est_cost_usd, ok, prompt_hash, source)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
                 (provider, model, category, u.get("prompt_tokens"), u.get("cache_hit_tokens"),
-                 u.get("completion_tokens"), cost, ok, prompt_hash),
+                 u.get("completion_tokens"), cost, ok, prompt_hash, _SOURCE),
             )
         conn.commit()
         _check_anomaly(conn)
@@ -137,7 +162,9 @@ def record(conn, *, provider: str, model: str, category: str | None, usage: dict
 def today_totals(conn) -> dict:
     with dict_cursor(conn) as cur:
         cur.execute(
-            """SELECT COUNT(*) AS calls, COALESCE(SUM(est_cost_usd), 0)::float AS spend,
+            """SELECT COUNT(*) FILTER (WHERE source IS NULL) AS calls,
+                      COUNT(*) FILTER (WHERE source IS NOT NULL) AS tagged_calls,
+                      COALESCE(SUM(est_cost_usd), 0)::float AS spend,
                       COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
                       COALESCE(SUM(completion_tokens), 0) AS completion_tokens
                FROM llm_usage WHERE (ts AT TIME ZONE 'UTC')::date = (now() AT TIME ZONE 'UTC')::date"""
@@ -228,7 +255,10 @@ def _check_anomaly(conn, now: datetime | None = None) -> None:
 
     with dict_cursor(conn) as cur:
         cur.execute(
-            """SELECT COUNT(*) AS calls, COALESCE(SUM(est_cost_usd), 0)::float AS spend
+            """SELECT COUNT(*) FILTER (WHERE source IS NULL) AS calls,
+                      COUNT(*) FILTER (WHERE source IS NOT NULL) AS tagged_calls,
+                      COALESCE(SUM(est_cost_usd) FILTER (WHERE source IS NULL), 0)::float AS spend,
+                      COALESCE(SUM(est_cost_usd) FILTER (WHERE source IS NOT NULL), 0)::float AS tagged_spend
                FROM llm_usage WHERE ts > %s AND ts <= %s""",
             (now - timedelta(minutes=rate_win), now),
         )
@@ -236,7 +266,7 @@ def _check_anomaly(conn, now: datetime | None = None) -> None:
         cur.execute(
             """SELECT prompt_hash, COUNT(*) AS n, MAX(category) AS category,
                       COALESCE(SUM(est_cost_usd), 0)::float AS spend, MIN(ts) AS first_ts
-               FROM llm_usage WHERE ts > %s AND ts <= %s AND prompt_hash IS NOT NULL
+               FROM llm_usage WHERE ts > %s AND ts <= %s AND prompt_hash IS NOT NULL AND source IS NULL
                GROUP BY prompt_hash HAVING COUNT(*) >= %s ORDER BY n DESC""",
             (now - timedelta(minutes=rep_win), now, rep_cap),
         )
@@ -248,6 +278,16 @@ def _check_anomaly(conn, now: datetime | None = None) -> None:
             f"🚨 <b>LLM call-rate anomaly</b>\n{w['calls']} LLM calls in the last {rate_win:g} minutes "
             f"(alert at {rate_cap}; normal use is a few calls an hour). ~${w['spend']:.3f} in that window.\n"
             f"Something may be looping -- check the Railway poller logs now. "
+            f"I'll repeat this every {realert:g} min while it continues.",
+            now, realert,
+        )
+    tagged_cap = rate_cap * TAGGED_RATE_MULTIPLIER
+    if w["tagged_calls"] >= tagged_cap:
+        _send_anomaly_alert(
+            conn, "rate", "tagged",
+            f"🚨 <b>Tagged (dev/test) LLM session is running away</b>\n{w['tagged_calls']} tagged calls in the "
+            f"last {rate_win:g} minutes (alert at {tagged_cap}). ~${w['tagged_spend']:.3f} in that window.\n"
+            f"A script that called tag_session() is looping -- stop it. This is NOT the poller. "
             f"I'll repeat this every {realert:g} min while it continues.",
             now, realert,
         )

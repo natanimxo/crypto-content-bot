@@ -295,3 +295,11 @@ ALTER TABLE post_previews DROP COLUMN IF EXISTS chosen_variant;
 -- nothing here touches calibration. get_new_candidates and hold_candidates.release
 -- both skip expired rows.
 ALTER TABLE raw_items ADD COLUMN IF NOT EXISTS expired_at TIMESTAMPTZ;
+
+-- 2026-11-14: tag LLM calls made by deliberate dev/test scripts (scripts/voice_compare.py,
+-- ad-hoc generation runs) so the near-real-time anomaly guards don't cry wolf during a
+-- generation-heavy build session. NULL = production traffic (collect cycle, poller) and is
+-- what every guard watches; a non-NULL value is excluded from the rate and repeated-prompt
+-- alerts and from the daily call-COUNT alert, but still counts toward the spend guard (it is
+-- real money) and has its own, 10x-higher runaway ceiling. See pipeline/llm_usage.py.
+ALTER TABLE llm_usage ADD COLUMN IF NOT EXISTS source TEXT;
