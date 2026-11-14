@@ -310,3 +310,12 @@ ALTER TABLE llm_usage ADD COLUMN IF NOT EXISTS source TEXT;
 -- (CoinCraft until its Phase 5 profile). Source of truth: config/channel_voices.yaml, applied by
 -- scripts/seed_config.py. Read by pipeline/channel_voice.py::load_profile.
 ALTER TABLE channel_config ADD COLUMN IF NOT EXISTS voice_profile JSONB;
+
+-- 2026-11-14: WHY an approval was expired, so calibration can tell "retired without ever being
+-- judged" from "past its freshness window and never acted on". The 2026-11-14 queue cleanup marked
+-- 1,078 never-actioned cards 'expired' (correctly NOT 'rejected'), but calibration's negatives are
+-- exactly the never-actioned cards, so every time-sensitive category lost them (whale_movements went
+-- to 17 accepted / 0 negatives). 'stale_unactioned' rows are counted as IGNORED by
+-- scripts/calibration_report.py -- the same observation as before the cleanup. Other reasons stay
+-- excluded: 'channel_retired' (never judged), 'write_failed_stale' (the operator DID approve it).
+ALTER TABLE approvals ADD COLUMN IF NOT EXISTS expired_reason TEXT;

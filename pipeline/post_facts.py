@@ -29,6 +29,17 @@ from dataclasses import dataclass
 from typing import Callable
 
 
+# The one definition of how to read an exchange transfer, shared by the channel-voice brief below and the
+# legacy whale prompt in write_post.py. 2026-11-14: both used to say only "state the likely market read
+# (e.g. accumulation vs. distribution)" and the model inverted it -- a Kraken withdrawal came out "read as
+# distribution" in the first channel-voice test. Stating the convention removes the guess.
+WHALE_READ_CONVENTION = (
+    "The convention: a WITHDRAWAL from an exchange (coins leaving) is typically read as accumulation or "
+    "reduced sell pressure; a DEPOSIT to an exchange is typically read as possible sell pressure. For a "
+    "stablecoin, report the movement and give no directional read."
+)
+
+
 def facts_defi_yields(p: dict) -> str:
     return f"""Facts about this pool:
 - Protocol: {p.get('project')}
@@ -172,10 +183,7 @@ FACT_SPECS: dict[str, FactSpec] = {
         content_brief=(
             "Name the exchange and the approximate dollar amount, say which way it moved, "
             "and state the typical market read of that kind of move as an interpretation, "
-            "not a certainty. The convention: a WITHDRAWAL from an exchange (coins leaving) "
-            "is typically read as accumulation or reduced sell pressure; a DEPOSIT to an "
-            "exchange is typically read as possible sell pressure. For a stablecoin, report "
-            "the movement and give no directional read."
+            "not a certainty. " + WHALE_READ_CONVENTION
         ),
         guardrails=(
             "Never state a price prediction or tell the reader what to do with their own "

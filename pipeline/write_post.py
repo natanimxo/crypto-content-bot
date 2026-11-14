@@ -21,7 +21,7 @@ from pipeline import channel_voice, llm, post_format
 from pipeline.db import dict_cursor
 from pipeline.http import get_json
 from pipeline.post_facts import (
-    FACT_SPECS, facts_defi_yields, facts_gems_security, facts_job_listing, facts_tool_launches,
+    FACT_SPECS, WHALE_READ_CONVENTION, facts_defi_yields, facts_gems_security, facts_job_listing, facts_tool_launches,
     facts_whale_movements, facts_wire_story,
 )
 from pipeline.score import load_category_config
@@ -239,9 +239,8 @@ three string fields:
     withdrawn from Binance', never 'Whale Alert'. No emoji.",
   "narrative": "1-2 sentences: what moved, with the key numbers inline.
     Plain prose.",
-  "why_it_matters": "EXACTLY one sentence on the likely market read (e.g.
-    accumulation vs. distribution signal) — state it as a typical
-    interpretation, not a certainty or a directive."
+  "why_it_matters": "EXACTLY one sentence on the likely market read, stated as
+    a typical interpretation, not a certainty or a directive. {WHALE_READ_CONVENTION}"
 }}
 
 Do not mention scores or internal categorization. Never state a price

@@ -7,7 +7,12 @@ already trust, rather than inheriting whatever an aggregator happens to
 surface. Every feed below was fetched and parsed live before being added,
 same discipline as RemoteOK/Etherscan/GoPlus/DefiLlama.
 
-FEEDS: CoinDesk, The Block, Decrypt, Blockworks, The Defiant, Protos.
+FEEDS: CoinDesk, The Block, Decrypt, Unchained, The Defiant, Protos.
+(Blockworks was the sixth until 2026-11-14: its feed still answers 200 and parses
+cleanly, but its newest item is 311 days old -- frozen, not moved: blockworks.co now
+redirects to blockworks.com/feed, same content. Nothing in the collector flagged it,
+because an empty-after-the-age-filter feed is indistinguishable from a quiet one.
+Replacement chosen from live checks 2026-11-14, see BACKLOG.md: Unchained.)
 Cointelegraph deliberately left out (operator direction 2026-09-11) -- six
 clean sources is the better starting default for a market-summary channel;
 revisit once the opinion/sponsored gate below has a track record.
@@ -39,7 +44,9 @@ normally from here on; the existing held backlog is untouched and worked
 through manually via scripts/hold_candidates.py.
 """
 
+import html
 import logging
+import re
 import sys
 from datetime import datetime, timezone
 from time import mktime
@@ -48,6 +55,7 @@ import feedparser
 from dotenv import load_dotenv
 
 from pipeline import entities as entity_lib
+from pipeline import llm_usage
 from pipeline.channel_router import assign_channels_to_new_items
 from pipeline.db import get_conn
 from pipeline.run_log import run_log
@@ -62,12 +70,19 @@ FEEDS = {
     "coindesk": "https://www.coindesk.com/arc/outboundfeeds/rss/",
     "theblock": "https://www.theblock.co/rss.xml",
     "decrypt": "https://decrypt.co/feed",
-    "blockworks": "https://blockworks.co/feed",
+    # Replaces "blockworks" (frozen since ~Jan 2026, 311 days). Unchained: original reporting,
+    # 9 of its 10 items in the last 48h were stories none of the other five feeds had, every
+    # item passes the opinion gate, robots.txt allows the feed. NOT Cointelegraph: it is the
+    # larger and fresher feed (18 of 21 items new) but was deliberately left out by operator
+    # direction 2026-09-11 ("revisit once the gate has a track record") -- that call is the
+    # operator's to reverse, see BACKLOG.md.
+    "unchained": "https://unchainedcrypto.com/feed/",
     "thedefiant": "https://thedefiant.io/feed",
     "protos": "https://protos.com/feed/",
 }
 
 MAX_AGE_HOURS = 48  # no point surfacing news that's already two days stale
+STALE_FEED_DAYS = 7  # a feed whose newest item is older than this is dead, not quiet
 
 # See module docstring. Live-checked category values across all candidate
 # feeds 2026-09-11: CoinDesk tags "Opinion" explicitly; Blockworks mixes
@@ -99,6 +114,23 @@ DEDUP_MERGE_THRESHOLD = 0.5
 # entire reason every collector held unconditionally. Existing held rows
 # are untouched by this; only new candidates from here on are affected.
 HOLD_ALL_CANDIDATES = False
+
+
+_TAG_RE = re.compile(r"<[^>]+>")
+_WS_RE = re.compile(r"\s+")
+# WordPress feeds (Unchained, Protos) append a "The post X appeared first on Y." line to the excerpt.
+_APPEARED_FIRST_RE = re.compile(r"\s*The post .{0,300}? appeared first on .{0,120}?\.?\s*$", re.IGNORECASE | re.DOTALL)
+
+
+def _clean_description(raw: str) -> str:
+    """Plain text from a feed summary. Found 2026-11-14 while adding Unchained: its summaries (and
+    Protos', already stored that way) are HTML -- an <img> tag with alt text and inline styles --
+    which then flows into the write prompt, the reproduction guard's source text and entity
+    extraction. CoinDesk/The Block/Decrypt/The Defiant summaries have no markup, so this is a
+    no-op for them."""
+    text = html.unescape(_TAG_RE.sub(" ", raw or ""))
+    text = _WS_RE.sub(" ", text).strip()
+    return _APPEARED_FIRST_RE.sub("", text).strip()
 
 
 def _is_original_reporting(tags: list[str]) -> bool:
@@ -134,6 +166,7 @@ def collect() -> int:
             now = datetime.now(timezone.utc)
             candidates = []  # list of dicts: source_name, entry-derived fields, entities
             fetched_total = 0
+            stale_feeds: dict[str, int] = {}
             not_original_filtered = 0
             too_old_filtered = 0
 
@@ -144,6 +177,23 @@ def collect() -> int:
                     logger.exception("news: failed to fetch %s", source_name)
                     continue
                 fetched_total += len(entries)
+
+                # DEAD-FEED DETECTION (2026-11-14): Blockworks answered 200, parsed cleanly and
+                # returned 50 entries for 311 days while every one of them aged out at the 48h
+                # filter below -- indistinguishable, in this collector's own numbers, from a quiet
+                # feed. A feed whose NEWEST entry is older than STALE_FEED_DAYS is dead: recorded in
+                # run_logs and the operator is told (once a week per feed).
+                newest = max((d for d in (_entry_datetime(e) for e in entries) if d), default=None)
+                if entries and newest and (now - newest).days >= STALE_FEED_DAYS:
+                    stale_feeds[source_name] = (now - newest).days
+                    logger.error("news: feed %s is STALE -- newest item is %d days old", source_name,
+                                 (now - newest).days)
+                    llm_usage._send_anomaly_alert(
+                        conn, "feed_stale", source_name,
+                        f"📰 <b>News feed gone quiet: {source_name}</b>\nIts newest item is {(now - newest).days} "
+                        f"days old (alert at {STALE_FEED_DAYS}). It still responds, so nothing else would flag it "
+                        f"-- replace or remove it in collectors/news.py FEEDS.",
+                        now, 7 * 24 * 60)
 
                 for entry in entries:
                     published_at = _entry_datetime(entry)
@@ -157,7 +207,7 @@ def collect() -> int:
                         continue
 
                     title = (entry.get("title") or "").strip()
-                    description = (entry.get("summary") or "").strip()
+                    description = _clean_description(entry.get("summary") or "")
                     link = entry.get("link") or ""
                     external_id = entry.get("id") or link
                     if not title or not link or not external_id:
@@ -177,6 +227,7 @@ def collect() -> int:
                     })
 
             state["details"]["fetched"] = fetched_total
+            state["details"]["stale_feeds"] = stale_feeds
             state["details"]["not_original_filtered"] = not_original_filtered
             state["details"]["too_old_filtered"] = too_old_filtered
 

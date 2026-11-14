@@ -1478,3 +1478,77 @@ before the profiles were seeded; every profiled channel/category pair then run t
   guarantee -- advice phrased as a statement is invisible to it, and it flags attributed advice too
   (a false positive that just costs a retry). The channel's voice does feel slightly constrained on
   macro_news as a result; that is the intended trade.
+
+## Phase 2: reliability fixes (2026-11-14)
+
+**1. Collector isolation.** `scripts/collect_cycle.py` ran `for category: collect_fn()` bare, so one
+exception ended the cycle -- 2026-11-03, a single Etherscan timeout in whale_movements killed the
+seven collectors after it and notify. Now every collect, score and notify step runs under `guarded()`:
+failure is logged with its traceback, recorded, and the cycle continues (notify still runs on what was
+collected); a 25-minute SIGALRM ceiling per step turns a HANG into an isolated failure too (Linux/Railway
+only -- not exercised on this Windows box). A `collect_cycle` run_logs row lists `failed_steps` (status
+`partial_failure`), the process exits 1 at the very end, and -- found while doing this -- the
+"3 consecutive failures" operator alert had only ever covered notify and the poller; it now runs for
+every collector (and says "Railway logs", not "GitHub Actions"). Inside whale_movements each wallet is
+isolated too (`address_errors`; the collector only fails if ALL wallets fail). Tested with a simulated
+failing collector: the others, scoring, notify and the LLM checks all ran, exit 1.
+
+**2. Whale impact weight.** Re-pulled the calibration, and first fixed a side effect of my own queue
+cleanup: marking 1,078 stale cards `expired` had removed them as calibration negatives (whale showed 17
+accepted / 0 negatives). New `approvals.expired_reason`; `stale_unactioned` rows count as IGNORED again
+(`channel_retired`, `write_failed_stale`, `category_retired` stay excluded). With 17 accepted vs 172
+never-actioned: impact AUC 0.36 (0.5 = none), novelty 0.70, actionability 0.64, credibility 0.50, total
+0.72. Size is U-shaped against acceptance ($2-10M ~17%, $10-100M ~5%, $100M+ ~16%; median accepted $9.5M vs
+$17.2M ignored) -- the middle is stablecoin mints and exchange-internal / institutional shuffles, so no
+monotone rescale of impact fixes it. Weights 0.30/0.30/0.20/0.20 -> impact 0.15 / novelty 0.35 /
+credibility 0.20 / actionability 0.30: total AUC 0.72 -> 0.75, all 17 accepted still clear 50, items
+clearing 50 196 -> 188 of 905 (60d) -- reorders and trims ~19% of ignored-type cards, does not cut volume.
+0.10 rejected (25% fewer clearing, 2 of 17 accepted lost). n=17: bootstrap intervals overlap; this stops
+weighting a component with no demonstrated signal, it does not claim optimality. Re-check at ~40 accepted.
+
+**3. Blockworks.** Not a moved URL: blockworks.co redirects to blockworks.com/feed (200, parses, 50
+entries) but the newest is 311 days old -- frozen, and invisible to the collector because an all-stale feed
+looks like a quiet one. Live-checked 11 candidates 2026-11-14. Replaced with **Unchained** (9 of 10 items in
+48h were stories none of the other five feeds had, all pass the opinion gate, robots.txt allows it).
+DL News is also frozen (17 days), CryptoSlate 403, Crypto Briefing is stocks-heavy, BeInCrypto SEO.
+**Cointelegraph was the stronger candidate** (18 of 21 items new, 3 dup) but was left out by operator
+direction 2026-09-11 ("revisit once the gate has a track record") -- NOT reversed; it is a one-line add
+to `FEEDS` if wanted. Also: summaries from Unchained AND Protos (already stored that way) carried raw HTML
+(<img> tags) into prompts, the reproduction guard and entity extraction -- `_clean_description` strips
+markup and WordPress "appeared first on" boilerplate (no-op for the four feeds without markup). New
+`STALE_FEED_DAYS = 7`: a feed whose newest item is that old is logged, recorded in `details.stale_feeds`
+and the operator gets a Telegram alert (weekly per feed); tested against the real Blockworks feed.
+
+**4. Whale watchlist.** Only 4 of 8 wallets were live (both OKX silent 219 days, Binance 0x631f... 1,986
+days, Coinbase 0x7166... 80 days); the live four were Binance Cold Wallet 20, Coinbase 44, Kraken Hot
+Wallets 2 and 3. Every replacement label was read from the address's own Etherscan page title (WebFetch;
+search snippets were not reliable -- two labels conflicted) and must be live on-chain. Now 10 wallets: + Binance 14,
+Binance 15, Coinbase: Miscellaneous, OKX 7, OKX 3, Bitfinex: Hot Wallet (promoted from classification-only).
+The four dead ones moved to KNOWN_EXCHANGE_ADDRESSES (still useful for classifying counterparties).
+Deliberately NOT added: Binance Cold Wallet 28 -- the busiest candidate (23 moves >= $2M in 7 days), but 22
+of 23 were against ~194,000-tx unlabeled counterparties, i.e. Binance shuffling its own infrastructure, the
+class the operator accepts 4 of 86 times (volume, not signal). Honest expectation: the six additions had ~0
+moves >= $2M in the last 7 days each (Bitfinex: 3); this is resilience, not a volume jump.
+**Found on the way (bigger than the refresh):** "most recent 100 transactions" is a count, not a time span.
+Coinbase 44's last 100 native txs spanned 0.2 HOURS and Kraken Hot Wallet 2's 0.3, against a 4h cycle, so
+most large native-ETH moves between cycles were never looked at (24h check: 2 moves >= $2M, old page saw
+1; Kraken 1, old page 0). Fetch is now time-windowed: everything since a block ~12h ago (one
+getblocknobytime per cycle), up to Etherscan's 10,000-row page, truncation logged loudly. Dry run on the new
+watchlist: 12 notable moves in the 12h window (9 of them Bitfinex USDT). Expect whale candidate volume and
+notified volume to RISE somewhat; caps (12/day category, 2/cycle) are unchanged. Not built: a dormancy
+detector for wallets (the four dead ones went unnoticed for months) -- needs a last-activity lookup per
+wallet; worth a weekly check.
+Binance is the exchange with the lowest accept rate (5/83); Cold Wallet 20 likely behaves like Cold Wallet 28.
+Left in place -- revisit with a week of data.
+
+**5. web3_jobs retired.** Removed from collect_cycle, channel_config.yaml (both channels), the DB
+`channel_config.categories`, and `channel_router.SHARED_CATEGORY_CHANNELS`; 12 pending cards expired
+(`category_retired`, excluded from calibration). Collector, scorer, prompt builder, FactSpec and
+category_config row stay in the repo.
+
+**6. Whale read wording.** The legacy whale prompt and `category_config.whale_movements.prompt_notes` said
+only "accumulation vs. distribution"; now both state the convention (`post_facts.WHALE_READ_CONVENTION`,
+shared with the channel-voice brief): exchange withdrawal = accumulation / less sell pressure, deposit =
+possible sell pressure, stablecoin = no directional read. Real generations through the legacy path on all
+four cases (ETH in/out, stablecoin in/out) read correctly. The other 50 sampled legacy prompts are
+byte-identical; only the 6 whale ones changed.

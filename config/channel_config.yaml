@@ -78,8 +78,8 @@ alpha_edge_crypto:
     - news            # shared with crypto_wall_street since 2026-09-30, see note above --
                        # real headroom (news clears ~35/day against a 10/day cap), gives
                        # this channel its own news content without touching Wall Street's.
-    - web3_jobs       # shared with coincraft via alternation; RemoteOK feed is dry
-                       # right now (same 13 listings since Sep 10), left wired.
+    # web3_jobs RETIRED 2026-11-14 (operator direction, Phase 2) -- dry RemoteOK feed. Removed from
+    # this channel and from coincraft; the collector is no longer run (scripts/collect_cycle.py).
   region_profile: us
   soft_daily_cap: 16   # raised from 12 -- see 2026-09-30 note above
   chat_id: "-1001992993907"
@@ -95,7 +95,6 @@ coincraft:
                        # incidents (DefiLlama), complements gems_security's pre-hack risk
                        # screening without splitting defi_yields away from alpha_edge_crypto.
                        # See category_config.yaml for threshold/scoring reasoning.
-    - web3_jobs       # shared with alpha_edge_crypto via alternation (dry source, left wired)
   region_profile: default
   soft_daily_cap: 12   # unchanged -- combined demand here stays well under 12
                         # (gems_security ~0-1/day, hacks_exploits ~1-3/week, web3_jobs dry)

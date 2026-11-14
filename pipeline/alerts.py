@@ -22,5 +22,6 @@ def check_and_alert(conn, job_name: str) -> None:
 
     send_message(
         operator_chat_id,
-        f"⚠️ '{job_name}' has failed {consecutive} times in a row. Check GitHub Actions logs.",
+        f"⚠️ '{job_name}' has failed {consecutive} times in a row. Check the Railway logs "
+        f"(and its run_logs rows for the error).",
     )

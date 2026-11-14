@@ -22,7 +22,7 @@ from pipeline.db import dict_cursor
 # categories (the majority) don't need anything here at all; assign_channel
 # returns None for them and callers skip assignment entirely.
 SHARED_CATEGORY_CHANNELS = {
-    "web3_jobs": ["alpha_edge_crypto", "coincraft"],
+    # "web3_jobs" retired 2026-11-14 -- no longer collected or routed.
     # 2026-09-30 (operator direction, real headroom -- news clears review_
     # threshold ~35/day against a single channel's 10/day cap): crypto_wall_
     # street listed first so it keeps first-assignment priority, matching

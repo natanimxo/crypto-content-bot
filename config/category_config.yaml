@@ -73,9 +73,22 @@ defi_yields:
 # reliable free source for those) for large in/out transfers. See BACKLOG.md
 # / commit history for the full plan discussion and operator sign-off.
 whale_movements:
+  # RE-WEIGHTED 2026-11-14 (Phase 2, from calibration): impact 0.30 -> 0.15, novelty 0.30 -> 0.35,
+  # actionability 0.20 -> 0.30 (credibility unchanged at 0.20). On 17 accepted vs 172 never-actioned
+  # cards, the impact component's AUC was 0.36 (0.5 = no signal) -- transfer SIZE was, if anything,
+  # anti-correlated with what the operator picks: accept rate by size is U-shaped ($2-10M ~17%,
+  # $10-100M ~5%, $100M+ ~16%), median accepted $9.5M vs $17.2M ignored. The bulk of big moves are
+  # stablecoin mints / exchange-internal and institutional-infrastructure shuffles. Novelty (AUC 0.70)
+  # and actionability (0.64) carry the signal. Total-score AUC 0.72 -> 0.75; at the 50 threshold all
+  # 17 accepted cards still clear and the number of items clearing it barely moves (196 -> 188 of
+  # 905 over 60 days) -- this reorders and filters a little, it does not cut or manufacture volume.
+  # 0.10 was tried and rejected: it dropped 25% of clearing volume and 2 of 17 accepted cards.
+  # Caveat: n=17, the bootstrap intervals for 0.72 vs 0.75 overlap heavily; this is "stop weighting a
+  # component with no demonstrated signal", not a claim that the new weights are optimal. The impact
+  # SCALE (log, $2M-$50M) is left alone -- the U-shape means no monotone rescale fixes it.
   score_weights:
-    impact: 0.30          # transfer size in USD, log-scaled
-    novelty: 0.30          # raised vs. defi_yields' 0.25 — "is this unusual for
+    impact: 0.15          # transfer size in USD, log-scaled
+    novelty: 0.35          # raised vs. defi_yields' 0.25 — "is this unusual for
                             # this wallet" carries as much story as "how big"
                             # here; cooldown-adjusted against recent flagged
                             # moves for the same exchange+direction pair
@@ -89,7 +102,7 @@ whale_movements:
                             # economic activity" signal than one touching a
                             # brand-new, one-off address (higher exploit/mixer/
                             # wash-trade risk) — this genuinely varies per item.
-    actionability: 0.20    # single-exchange in/out (clear directional signal:
+    actionability: 0.30    # single-exchange in/out (clear directional signal:
                             # deposit=possible sell pressure, withdrawal=possible
                             # accumulation) scores higher than exchange<->exchange
                             # (ambiguous market read)
@@ -125,8 +138,12 @@ whale_movements:
   # these notes shape only the LLM's prose.
   prompt_notes: >
     Tight market-summary register: report the move, state the likely read
-    (accumulation vs. distribution signal), stop. No teaching, no mechanic
-    explainers — this is a faster, more direct voice than Crypto Notebook's.
+    (a withdrawal from an exchange reads as accumulation / reduced sell
+    pressure, a deposit as possible sell pressure; a stablecoin gets no
+    directional read -- fixed 2026-11-14, the loose "accumulation vs.
+    distribution" wording let the model invert it), stop. No teaching, no
+    mechanic explainers — this is a faster, more direct voice than Crypto
+    Notebook's.
     Never state a price prediction or tell the reader what to do with their
     own funds — describe what moved and what that typically signals, not
     financial advice. Measured tone: no hype, no manufactured urgency, no

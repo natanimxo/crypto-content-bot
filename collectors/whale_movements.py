@@ -90,25 +90,46 @@ ETHERSCAN_CALL_DELAY_SECONDS = 0.35
 #   across raw_items AND clear that heuristic are good candidates to identify
 #   and add explicitly (not automated here — a simple ad-hoc query against
 #   existing data, not worth building a tracked feature for yet).
+# REFRESHED 2026-11-14 (Phase 2). Of the original 8 wallets only 4 were still live: both OKX wallets
+# had been silent for 219 days, Binance 0x631f... for 1,986 days (token side 62d), Coinbase
+# 0x7166... for 80 days -- the watchlist was quietly down to Binance Cold Wallet 20, Coinbase 44 and
+# Kraken Hot Wallets 2 and 3. Replacements were chosen the same way the originals were -- label read
+# from the address's own Etherscan page (title quoted in the comment), never recalled from memory --
+# and only if live on-chain (a transfer in the last ~2 days). The four retired wallets are not
+# deleted: they move to KNOWN_EXCHANGE_ADDRESSES below, where being a verified exchange address is
+# still useful for classifying a counterparty. Candidates that were verified but NOT added to the
+# watchlist, and why, are listed after KNOWN_EXCHANGE_ADDRESSES.
 WATCHLIST = [
-    {"address": "0xf977814e90da44bfa03b6295a0616a897441acec", "exchange": "Binance"},
-    {"address": "0x631fc1ea2270e98fbd9d92658ece0f5a269aa161", "exchange": "Binance"},
-    {"address": "0x71660c4005ba85c37ccec55d0c4493e66fe775d3", "exchange": "Coinbase"},
-    {"address": "0xb5d85cbf7cb3ee0d56b3bb207d5fc4b82f43f511", "exchange": "Coinbase"},
-    {"address": "0xf30ba13e4b04ce5dc4d254ae5fa95477800f0eb0", "exchange": "Kraken"},
-    {"address": "0xcc282e2004428939ee5149a9e7872f0b4d5d5ec7", "exchange": "Kraken"},
-    {"address": "0x4b4e14a3773ee558b6597070797fd51eb48606e5", "exchange": "OKX"},
-    {"address": "0x4e7b110335511f662fdbb01bf958a7844118c0d4", "exchange": "OKX"},
+    {"address": "0xf977814e90da44bfa03b6295a0616a897441acec", "exchange": "Binance"},   # "Binance: Cold Wallet 20"
+    {"address": "0x28c6c06298d514db089934071355e5743bf21d60", "exchange": "Binance"},   # "Binance 14" (added 2026-11-14)
+    {"address": "0x21a31ee1afc51d94c2efccaa2092ad1028285549", "exchange": "Binance"},   # "Binance 15" (added 2026-11-14)
+    {"address": "0xb5d85cbf7cb3ee0d56b3bb207d5fc4b82f43f511", "exchange": "Coinbase"},  # "Coinbase 44"
+    {"address": "0xa090e606e30bd747d4e6245a1517ebe430f0057e", "exchange": "Coinbase"},  # "Coinbase: Miscellaneous" (added 2026-11-14)
+    {"address": "0xf30ba13e4b04ce5dc4d254ae5fa95477800f0eb0", "exchange": "Kraken"},    # "Kraken: Hot Wallet 2"
+    {"address": "0xcc282e2004428939ee5149a9e7872f0b4d5d5ec7", "exchange": "Kraken"},    # "Kraken: Hot Wallet 3"
+    {"address": "0x5041ed759dd4afc3a72b8192c143f72f4724081a", "exchange": "OKX"},       # "OKX 7" (added 2026-11-14)
+    {"address": "0xa7efae728d2936e78bda97dc267687568dd593f3", "exchange": "OKX"},       # "OKX 3" (added 2026-11-14)
+    {"address": "0x77134cbc06cb00b66f4c7e623d5fdbf6777635ec", "exchange": "Bitfinex"},  # "Bitfinex: Hot Wallet" (promoted from classification-only 2026-11-14)
 ]
 WATCHLIST_BY_ADDRESS = {w["address"]: w for w in WATCHLIST}
 
 # Broader classification-only set (see block comment above) — verified
 # 2026-09-10 the same way as WATCHLIST. Deliberately not polled for collection.
 KNOWN_EXCHANGE_ADDRESSES = WATCHLIST + [
+    # Retired from the watchlist 2026-11-14 as dormant, kept for counterparty classification:
+    {"address": "0x631fc1ea2270e98fbd9d92658ece0f5a269aa161", "exchange": "Binance"},
+    {"address": "0x71660c4005ba85c37ccec55d0c4493e66fe775d3", "exchange": "Coinbase"},
+    {"address": "0x4b4e14a3773ee558b6597070797fd51eb48606e5", "exchange": "OKX"},
+    {"address": "0x4e7b110335511f662fdbb01bf958a7844118c0d4", "exchange": "OKX"},
+    # Verified 2026-11-14 (Etherscan title) but not polled -- see the note below:
+    {"address": "0xdfd5293d8e347dfe59e90efd55b2956a1343963d", "exchange": "Binance"},   # "Binance 16" (deposit address)
+    {"address": "0x5a52e96bacdabb82fd05763e25335261b270efcb", "exchange": "Binance"},   # "Binance: Cold Wallet 28"
+    {"address": "0x503828976d22510aad0201ac7ec88293211d23da", "exchange": "Coinbase"},  # "Coinbase 12" (fiat gateway)
+    {"address": "0x267be1c1d684f78cb4f6a176c4911b741e4ffdc0", "exchange": "Kraken"},    # "Kraken 4"
+    {"address": "0x6cc5f688a315f3dc28a7781717a9a798a59fda7b", "exchange": "OKX"},       # "OKX" (derivatives)
     {"address": "0xa9d1e08c7793af67e9d92fe308d5697fb81d3e43", "exchange": "Coinbase"},  # Coinbase 10 -- the live bug that prompted this fix
     {"address": "0xa7a93fd0a276fc1c0197a5b5623ed117786eed06", "exchange": "Bybit"},
     {"address": "0xf89d7b9c864f589bbf53a82105107622b35eaa40", "exchange": "Bybit"},
-    {"address": "0x77134cbc06cb00b66f4c7e623d5fdbf6777635ec", "exchange": "Bitfinex"},
     {"address": "0x7793cd85c11a924478d358d49b05b37e91b5810f", "exchange": "Gate.io"},
     {"address": "0xfdb16996831753d5331ff813c29a93c76834a0ad", "exchange": "HTX"},
     {"address": "0xeee28d484628d41a82d01e21d12e2e78d69920da", "exchange": "HTX"},
@@ -116,6 +137,15 @@ KNOWN_EXCHANGE_ADDRESSES = WATCHLIST + [
     {"address": "0x2b5634c42055806a59e9107ed44d43c426e58258", "exchange": "KuCoin"},
     {"address": "0x46340b20830761efd32832a74d7169b29feb9758", "exchange": "Crypto.com"},
 ]
+# NOT added to the watchlist, on evidence (2026-11-14, last-100-tx pages, >= $2M moves):
+#   Binance Cold Wallet 28 (0x5a52...): the busiest candidate (23 notable moves in 7 days) and all
+#   but one were against unlabeled, ~194,000-transaction counterparties -- Binance moving funds
+#   between its own infrastructure, the "institutional-ish" class the operator accepts 4 of 86 times.
+#   Volume, not signal. (The existing Binance Cold Wallet 20 likely behaves the same: Binance is the
+#   exchange with the lowest accept rate, 5/83 -- left in place, revisit with a week of data.)
+#   Binance 16 (deposit address), Coinbase 12 (fiat gateway), Kraken 4, OKX 0x6cc5, Gate.io, HTX,
+#   KuCoin, Crypto.com, Bybit: live-checked, no >= $2M move in the last 7 days -- cost API calls
+#   every cycle for nothing yet. Cheap to promote if one wakes up: move it into WATCHLIST.
 KNOWN_EXCHANGE_BY_ADDRESS = {w["address"]: w for w in KNOWN_EXCHANGE_ADDRESSES}
 
 # Self-maintaining fallback (operator direction 2026-09-10): an address with
@@ -135,7 +165,6 @@ INSTITUTIONAL_SENT_TX_THRESHOLD = 10_000
 MIN_PRICE_CONFIDENCE = 0.8
 MAX_PRICE_AGE_HOURS = 24
 
-TXLIST_PAGE_SIZE = 100
 DEFAULT_MIN_USD = 2_000_000  # fallback if category_config.collect_min_usd is unset
 
 # Live bug, 2026-09-10: fetching "the most recent 100 transactions" from
@@ -216,21 +245,50 @@ def _get_token_price_usd(contract_address: str) -> float | None:
     return coin["price"]
 
 
-def _fetch_native_txs(address: str) -> list[dict]:
-    body = _etherscan_get({
-        "module": "account", "action": "txlist", "address": address,
-        "startblock": 0, "endblock": 99999999,
-        "page": 1, "offset": TXLIST_PAGE_SIZE, "sort": "desc",
-    })
-    return body.get("result") or []
+# TIME-WINDOWED FETCH (2026-11-14, Phase 2). Found while refreshing the watchlist: "the most recent
+# 100 transactions" is a count, not a time span, and for a busy exchange wallet 100 transactions is
+# minutes. Measured live: Coinbase 44's last 100 native txs spanned 0.2 hours and Kraken Hot Wallet 2's
+# 0.3 hours, against a 4-hour collect cycle -- so most of a busy wallet's large native-ETH moves
+# between cycles were never even looked at (24h check: Coinbase 44 had 2 moves >= $2M, the old page
+# saw 1; Kraken Hot Wallet 2 had 1, the old page saw 0). Now each call asks Etherscan for everything
+# since a block ~FETCH_WINDOW_HOURS ago (one getblocknobytime call per cycle, shared by every wallet),
+# up to Etherscan's 10,000-row page. 12h = the 4h cycle plus room for a missed or late cycle
+# (re-seen transactions are free: raw_items is UNIQUE on external_id). If a wallet ever fills the
+# whole 10,000-row page the window is truncated -- logged loudly, never silent.
+FETCH_WINDOW_HOURS = 12
+ETHERSCAN_MAX_PAGE = 10_000
 
 
-def _fetch_token_txs(address: str) -> list[dict]:
+def _start_block(now_ts: int) -> int:
     body = _etherscan_get({
-        "module": "account", "action": "tokentx", "address": address,
-        "page": 1, "offset": TXLIST_PAGE_SIZE, "sort": "desc",
+        "module": "block", "action": "getblocknobytime",
+        "timestamp": now_ts - FETCH_WINDOW_HOURS * 3600, "closest": "before",
     })
-    return body.get("result") or []
+    return int(body["result"])
+
+
+def _fetch_window(action: str, address: str, start_block: int) -> list[dict]:
+    body = _etherscan_get({
+        "module": "account", "action": action, "address": address,
+        "startblock": start_block, "endblock": 99999999,
+        "page": 1, "offset": ETHERSCAN_MAX_PAGE, "sort": "desc",
+    })
+    result = body.get("result")
+    if not isinstance(result, list):
+        return []  # "No transactions found" arrives as a string/empty -- same as before
+    if len(result) >= ETHERSCAN_MAX_PAGE:
+        logger.error("whale_movements: %s %s returned a FULL %d-row page -- the %dh window is truncated "
+                     "for this wallet (shrink FETCH_WINDOW_HOURS or paginate)",
+                     action, address, ETHERSCAN_MAX_PAGE, FETCH_WINDOW_HOURS)
+    return result
+
+
+def _fetch_native_txs(address: str, start_block: int) -> list[dict]:
+    return _fetch_window("txlist", address, start_block)
+
+
+def _fetch_token_txs(address: str, start_block: int) -> list[dict]:
+    return _fetch_window("tokentx", address, start_block)
 
 
 def _counterparty_establishment(address: str) -> dict:
@@ -349,55 +407,69 @@ def collect() -> int:
             items = []
             fetched_count = 0
             stale_skipped = 0
+            address_errors: list[str] = []
             now_ts = int(time.time())
+            start_block = _start_block(now_ts)
 
             for entry in WATCHLIST:
                 address = entry["address"]
                 exchange = entry["exchange"]
 
-                for tx in _fetch_native_txs(address):
-                    fetched_count += 1
-                    if not _is_recent(tx, now_ts):
-                        stale_skipped += 1
-                        continue
-                    try:
-                        value_eth = int(tx["value"]) / 1e18
-                    except (KeyError, ValueError):
-                        continue
-                    value_usd = value_eth * eth_price
-                    if value_usd < min_usd:
-                        continue
-                    item = _build_item(tx, address, exchange, "ETH", value_usd, value_eth, is_token=False)
-                    if item:
-                        items.append(item)
+                # PER-ADDRESS ISOLATION (2026-11-14, Phase 2): one wallet's Etherscan call timing out
+                # must not discard the other seven (the 2026-11-03 incident took the whole cycle). Items
+                # already gathered from this wallet are kept; the failure is counted and logged, and only
+                # if EVERY wallet failed does the collector itself fail (below).
+                try:
+                    for tx in _fetch_native_txs(address, start_block):
+                        fetched_count += 1
+                        if not _is_recent(tx, now_ts):
+                            stale_skipped += 1
+                            continue
+                        try:
+                            value_eth = int(tx["value"]) / 1e18
+                        except (KeyError, ValueError):
+                            continue
+                        value_usd = value_eth * eth_price
+                        if value_usd < min_usd:
+                            continue
+                        item = _build_item(tx, address, exchange, "ETH", value_usd, value_eth, is_token=False)
+                        if item:
+                            items.append(item)
 
-                for tx in _fetch_token_txs(address):
-                    fetched_count += 1
-                    if not _is_recent(tx, now_ts):
-                        stale_skipped += 1
-                        continue
-                    try:
-                        decimals = int(tx.get("tokenDecimal") or 18)
-                        raw_value = int(tx["value"])
-                    except (KeyError, ValueError):
-                        continue
-                    token_amount = raw_value / (10 ** decimals)
-                    contract = tx.get("contractAddress")
-                    if not contract:
-                        continue
-                    if contract not in token_price_cache:
-                        token_price_cache[contract] = _get_token_price_usd(contract)
-                    price = token_price_cache[contract]
-                    if price is None:
-                        continue  # can't value it reliably -- skip rather than guess
-                    value_usd = token_amount * price
-                    if value_usd < min_usd:
-                        continue
-                    item = _build_item(tx, address, exchange, tx.get("tokenSymbol") or "?",
-                                        value_usd, token_amount, is_token=True)
-                    if item:
-                        items.append(item)
+                    for tx in _fetch_token_txs(address, start_block):
+                        fetched_count += 1
+                        if not _is_recent(tx, now_ts):
+                            stale_skipped += 1
+                            continue
+                        try:
+                            decimals = int(tx.get("tokenDecimal") or 18)
+                            raw_value = int(tx["value"])
+                        except (KeyError, ValueError):
+                            continue
+                        token_amount = raw_value / (10 ** decimals)
+                        contract = tx.get("contractAddress")
+                        if not contract:
+                            continue
+                        if contract not in token_price_cache:
+                            token_price_cache[contract] = _get_token_price_usd(contract)
+                        price = token_price_cache[contract]
+                        if price is None:
+                            continue  # can't value it reliably -- skip rather than guess
+                        value_usd = token_amount * price
+                        if value_usd < min_usd:
+                            continue
+                        item = _build_item(tx, address, exchange, tx.get("tokenSymbol") or "?",
+                                            value_usd, token_amount, is_token=True)
+                        if item:
+                            items.append(item)
+                except Exception as exc:
+                    address_errors.append(address)
+                    logger.warning("whale_movements: %s (%s) failed, continuing with the other wallets: %s",
+                                   exchange, address, exc)
 
+            state["details"]["address_errors"] = len(address_errors)
+            if len(address_errors) == len(WATCHLIST):
+                raise RuntimeError(f"all {len(WATCHLIST)} watchlist wallets failed (Etherscan down or key problem)")
             state["details"]["fetched"] = fetched_count
             state["details"]["stale_skipped"] = stale_skipped
             state["details"]["notable"] = len(items)

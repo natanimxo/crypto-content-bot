@@ -106,8 +106,13 @@ via `category_config_exists()` until built.
 | Channel | Display name | Categories (live) | Region profile |
 |---|---|---|---|
 | `crypto_wall_street` | Crypto Wall Street | `whale_movements`, `news` (shared via alternation) | `default` |
-| `alpha_edge_crypto` | Alpha Edge Crypto | `defi_yields`, `news` (shared via alternation), `web3_jobs` (shared via alternation) | `us` |
-| `coincraft` | CoinCraft | `gems_security`, `hacks_exploits`, `web3_jobs` (shared via alternation) | `default` |
+| `alpha_edge_crypto` | Alpha Edge Crypto | `defi_yields`, `news` (shared via alternation) | `us` |
+| `coincraft` | CoinCraft | `gems_security`, `hacks_exploits` | `default` |
+
+**`web3_jobs` retired 2026-11-14** (operator direction, Phase 2): the RemoteOK feed had been dry for two
+months (3 notified cards in 60 days). Removed from both channels and from the collect cycle; the collector,
+scorer, prompt builder and `category_config` row stay in the repo, so reviving it is re-adding it to
+`scripts/collect_cycle.py` and `config/channel_config.yaml`. The rows below that mention it are history.
 | `hustle_to_million` | Hustle to Million | `tool_launches`, `startup_jobs`, `macro_news` (2026-09-12); `grants` deliberately out of scope, see below | `default` |
 
 **Alternation.** `web3_jobs` was the first category shared across two

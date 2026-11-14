@@ -87,7 +87,7 @@ POSITION_CAVEAT = (
 
 def fetch_rows(conn, category: str | None = None) -> list[dict]:
     query = """
-        SELECT r.id AS raw_item_id, r.category, a.decision, a.decided_at,
+        SELECT r.id AS raw_item_id, r.category, a.decision, a.decided_at, a.expired_reason,
                s.score, s.score_breakdown, n.id AS notification_id, n.sent_at,
                RANK() OVER (PARTITION BY n.id, r.category ORDER BY s.score DESC) AS digest_rank,
                COUNT(*) OVER (PARTITION BY n.id, r.category) AS digest_size
@@ -113,7 +113,10 @@ def classify(row: dict, now: datetime, ignore_after_days: float) -> str:
     if d == "rejected":
         return "rejected"
     if d == "expired":
-        return "expired"
+        # 'stale_unactioned' = expired by the 2026-11-14 cleanup for being past its freshness window
+        # with no decision. Marked expired (not rejected) so it is not an explicit reject, but it IS
+        # the same "never acted on" observation calibration has always used as its negative.
+        return "ignored" if row.get("expired_reason") == "stale_unactioned" else "expired"
     # pending
     age_days = (now - row["sent_at"]).total_seconds() / 86400
     return "ignored" if age_days >= ignore_after_days else "too_recent"
