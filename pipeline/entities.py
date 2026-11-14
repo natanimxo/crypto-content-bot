@@ -114,6 +114,88 @@ def extract_entities(title: str, description: str = "") -> dict:
     return {"tickers": tickers, "phrases": phrases, "figures": figures}
 
 
+# ---------------------------------------------------------------------------
+# Entity masking for the reproduction guard (2026-11-14, operator direction).
+#
+# Copyright protects EXPRESSION, not facts. "U.S. spot crypto ETFs" and "$1.55
+# billion combined" are facts any accurate post must state, so the reproduction
+# guard (pipeline/write_post.py::_find_reproduction_issues) measures overlap on
+# what is left after those are masked out. The failure mode to watch is the
+# opposite one -- masking so much that a verbatim lift sails through -- which is
+# why (1) masked spans are kept as placeholder tokens that bridge a run instead of
+# breaking it, (2) only NON-entity words count toward a run, and (3) a Title-Cased
+# source (where "every word is capitalised" would mask everything) falls back to the
+# narrow rules. Verified against verbatim and adversarial lifts in BACKLOG.md.
+# ---------------------------------------------------------------------------
+
+MASK_PLACEHOLDER = "\x00"
+
+_NUMBER_RE = re.compile(r"[$€£]?\s?\d[\d,]*(?:\.\d+)?(?:\s?(?:%|[BMKbmk]\b|(?:thousand|million|billion|trillion)\b))?",
+                        re.IGNORECASE)
+# U.S., U.K. (dotted initialisms) and anything with two capitals: AI, SEC, ETFs, BlackRock, ChatGPT
+_ACRONYM_RE = re.compile(r"(?:\b(?:[A-Za-z]\.){2,})|\b[a-z0-9]*[A-Z][a-z0-9]*[A-Z][A-Za-z0-9]*\b")
+_CAP_WORD_RE = re.compile(r"\b[A-Z][A-Za-z'’-]*\b")
+_SENTENCE_START_PREV = set(".!?:;“\"'(")
+# If this share of a source's words are capitalised mid-sentence it is Title Case (or a list of
+# names), not prose with a few proper nouns -- capital-word masking would hide the whole source.
+_TITLE_CASE_SHARE = 0.35
+
+
+def entity_surface_forms(text: str) -> set[str]:
+    """Lower-cased surface strings in `text` that are FACTS rather than wording: numbers/amounts/
+    percentages, acronyms and multi-capital names, known tickers and spelled-out coin names, and
+    capitalised words that are not sentence-initial (proper nouns). Biased toward masking LESS: a
+    missed entity only means the guard behaves as it did before masking existed."""
+    text = text or ""
+    forms = {m.group(0).strip().lower() for m in _NUMBER_RE.finditer(text) if m.group(0).strip()}
+    forms |= {m.group(0).lower() for m in _ACRONYM_RE.finditer(text)}
+    lowered = text.lower()
+    forms |= {t.lower() for t in KNOWN_TICKERS | KNOWN_ACRONYMS if re.search(rf"\b{t.lower()}\b", lowered)}
+    forms |= {n for n in COIN_NAME_TO_TICKER if re.search(rf"\b{re.escape(n)}\b", lowered)}
+
+    caps = set()
+    for m in _CAP_WORD_RE.finditer(text):
+        prev = text[:m.start()].rstrip()
+        if not prev or prev[-1] in _SENTENCE_START_PREV:
+            continue  # sentence-initial: capitalised because of position, not because it is a name
+        caps.add(m.group(0).lower())
+    n_words = max(1, len(re.findall(r"\w+", text)))
+    if len(caps) / n_words <= _TITLE_CASE_SHARE:
+        forms |= caps
+    return {f for f in forms if f}
+
+
+def mask_forms(text: str, forms: set[str]) -> str:
+    """Lower-cases `text` and replaces every occurrence of a surface form with MASK_PLACEHOLDER."""
+    text = (text or "").lower()
+    if not forms:
+        return text
+    alt = "|".join(re.escape(f) for f in sorted(forms, key=len, reverse=True))
+    return re.sub(rf"(?<!\w)(?:{alt})(?!\w)", MASK_PLACEHOLDER, text)
+
+
+def masked_verbatim_run(gen_masked: str, src_masked: str, min_words: int) -> list[str] | None:
+    """The first run of identical consecutive tokens, shared by two masked texts, that contains at
+    least `min_words` NON-entity words -- entity placeholders bridge a run (so a lift cannot hide by
+    sprinkling names through it) but do not count toward its length (so a stretch that is mostly
+    names and figures is not a copied sentence). Returns the run's tokens, or None."""
+    g = re.findall(rf"{MASK_PLACEHOLDER}|\w+", gen_masked)
+    s = re.findall(rf"{MASK_PLACEHOLDER}|\w+", src_masked)
+    prev_len = [0] * (len(s) + 1)
+    prev_words = [0] * (len(s) + 1)
+    for i in range(1, len(g) + 1):
+        cur_len = [0] * (len(s) + 1)
+        cur_words = [0] * (len(s) + 1)
+        for j in range(1, len(s) + 1):
+            if g[i - 1] == s[j - 1]:
+                cur_len[j] = prev_len[j - 1] + 1
+                cur_words[j] = prev_words[j - 1] + (0 if g[i - 1] == MASK_PLACEHOLDER else 1)
+                if cur_words[j] >= min_words:
+                    return g[i - cur_len[j]:i]
+        prev_len, prev_words = cur_len, cur_words
+    return None
+
+
 def fingerprint_overlap(a: dict, b: dict) -> float:
     """0-1 similarity between two extract_entities() results, weighted toward
     tickers/figures (specific, low-ambiguity) over phrases (looser, more

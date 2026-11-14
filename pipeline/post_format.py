@@ -37,7 +37,8 @@ def parse_llm_json(raw: str) -> dict:
 def assemble_post(*, emoji: str, title: str, narrative: str, why_it_matters: str | None,
                    history_line: str | None, risk_line: str | None,
                    source_name: str | None, hashtags: list[str],
-                   context_line: str | None = None) -> str:
+                   context_line: str | None = None,
+                   paragraphs: list[str] | None = None) -> str:
     """Builds the final HTML post text. Every input here is either
     deterministically computed (history_line, risk_line, context_line) or
     config (emoji, source_name, hashtags) or LLM prose (title, narrative,
@@ -71,6 +72,11 @@ def assemble_post(*, emoji: str, title: str, narrative: str, why_it_matters: str
     Telegram send as a defensive measure — this function can't guarantee the
     LLM's free-form prose never happens to contain something URL-shaped.
 
+    paragraphs (added 2026-11-14, channel-voice path): when given, it IS the
+    body -- narrative/why_it_matters are ignored -- so a channel's voice profile
+    can set how many paragraphs a post has (1 for a wire-service desk, 3 for an
+    explainer). Everything else renders identically.
+
     Target ~400-700 chars, one emoji in the title, ⚠️ only when risk_line is
     present — callers are responsible for keeping narrative/why_it_matters
     within budget via the prompt; this function doesn't truncate.
@@ -83,11 +89,14 @@ def assemble_post(*, emoji: str, title: str, narrative: str, why_it_matters: str
         return html.escape(s, quote=False)
 
     lines = [f"{emoji} <b>{esc(title)}</b>", ""]
-    lines.append(esc(narrative))
+    if paragraphs is not None:
+        lines.append("\n\n".join(esc(para) for para in paragraphs))
+    else:
+        lines.append(esc(narrative))
 
-    if why_it_matters:
-        lines.append("")
-        lines.append(esc(why_it_matters))
+        if why_it_matters:
+            lines.append("")
+            lines.append(esc(why_it_matters))
 
     if history_line:
         lines.append("")

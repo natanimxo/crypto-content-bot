@@ -113,6 +113,33 @@ def seed_channels(conn, path: str):
     conn.commit()
 
 
+def seed_voices(conn, path: str):
+    """Apply config/channel_voices.yaml to channel_config.voice_profile (2026-11-14).
+
+    Validates every profile first (a half-specified voice must fail here, not at write time).
+    A profile is applied only to a channel that has a row; a channel without one (crypto_notebook
+    until the remap recreates it) is reported and picked up the next time this runs after the row
+    exists. A channel with a row but NO profile entry gets voice_profile = NULL, i.e. the legacy
+    category voice -- CoinCraft's deliberate state until its Phase 5 profile.
+    """
+    from pipeline.channel_voice import load_profiles_from_yaml
+
+    profiles = load_profiles_from_yaml(path)  # raises VoiceProfileError on a bad profile
+    with open(path, "r", encoding="utf-8") as f:
+        raw = yaml.safe_load(f) or {}
+    with conn.cursor() as cur:
+        cur.execute("SELECT channel FROM channel_config")
+        existing = {row[0] for row in cur.fetchall()}
+        for channel in sorted(existing):
+            profile = raw.get(channel)
+            cur.execute("UPDATE channel_config SET voice_profile = %s WHERE channel = %s",
+                        (json.dumps(profile) if profile else None, channel))
+            print(f"  voice_profile: {channel} -> {profile['name'] if profile else 'NULL (legacy category voice)'}")
+        for channel in sorted(set(profiles) - existing):
+            print(f"  voice_profile: {channel} defined but has no channel_config row yet -- applies once the row exists")
+    conn.commit()
+
+
 def main():
     load_dotenv()
     conn = get_conn()
@@ -121,6 +148,8 @@ def main():
         seed_categories(conn, os.path.join(CONFIG_DIR, "category_config.yaml"))
         print("Seeding channel_config...")
         seed_channels(conn, os.path.join(CONFIG_DIR, "channel_config.yaml"))
+        print("Seeding channel voice profiles...")
+        seed_voices(conn, os.path.join(CONFIG_DIR, "channel_voices.yaml"))
         print("Done.")
     finally:
         conn.close()

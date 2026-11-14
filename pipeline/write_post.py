@@ -17,9 +17,13 @@ import re
 from datetime import datetime, timezone
 
 from pipeline import entities as entity_lib
-from pipeline import llm, post_format
+from pipeline import channel_voice, llm, post_format
 from pipeline.db import dict_cursor
 from pipeline.http import get_json
+from pipeline.post_facts import (
+    FACT_SPECS, facts_defi_yields, facts_gems_security, facts_job_listing, facts_tool_launches,
+    facts_whale_movements, facts_wire_story,
+)
 from pipeline.score import load_category_config
 
 logger = logging.getLogger(__name__)
@@ -83,15 +87,7 @@ def build_defi_yields_prompt(cfg: dict, region_profile: str, raw_item: dict, his
     return f"""You are writing prose for a crypto DeFi content channel. Voice: {cfg.get('voice', 'educational')}.
 {cfg.get('prompt_notes', '')}{us_note}
 
-Facts about this pool:
-- Protocol: {p.get('project')}
-- Chain: {p.get('chain')}
-- Pool: {p.get('symbol')}
-- APY: {p.get('apy')}% (base {p.get('apy_base')}%, reward {p.get('apy_reward')}%)
-- TVL: ${p.get('tvl_usd', 0):,.0f}
-- 7d APY change: {p.get('apy_pct_7d')}
-- IL risk flag: {p.get('il_risk')}
-- Stablecoin pair: {p.get('stablecoin')}
+{facts_defi_yields(p)}
 
 Return ONLY a JSON object (no markdown fence, no commentary) with exactly these
 three string fields:
@@ -221,23 +217,8 @@ def compute_defi_yields_elements(conn, raw_item: dict, history: list) -> dict:
 @register_prompt_builder("whale_movements")
 def build_whale_movements_prompt(cfg: dict, region_profile: str, raw_item: dict, history: list) -> str:
     p = raw_item["payload"]
-    verb = "withdrew" if p.get("direction") == "outflow" else "deposited"
-    # 3-way, not binary (2026-09-10 — live bug: an unlabeled-but-clearly-not-
-    # retail counterparty was being described to the LLM as "an external
-    # wallet," and it wrote posts calling it exactly that, when it's very
-    # likely institutional infrastructure we just haven't identified by name).
-    if p.get("counterparty_is_exchange"):
-        counterparty_note = f"the counterparty is another exchange ({p.get('counterparty_exchange_name')})"
-    elif p.get("counterparty_likely_institutional"):
-        counterparty_note = (
-            "the counterparty is a high-activity wallet with an enormous on-chain "
-            "transaction history — almost certainly institutional or automated "
-            "infrastructure, not an individual holder, even though we haven't identified "
-            "exactly which entity it is. Do NOT call it 'an external wallet' or imply it's "
-            "a retail/individual holder."
-        )
-    else:
-        counterparty_note = "the counterparty is an external wallet"
+    # Facts (incl. the 3-way counterparty note and its live-bug history) moved to
+    # pipeline/post_facts.py 2026-11-14 so the channel-voice path shares them.
 
     us_note = (
         "\nThis is a US-audience channel — keep financial framing conservative and "
@@ -248,12 +229,7 @@ def build_whale_movements_prompt(cfg: dict, region_profile: str, raw_item: dict,
     return f"""You are writing prose for a crypto market-summary Telegram channel. Voice: {cfg.get('voice', 'market_summary')}.
 {cfg.get('prompt_notes', '')}{us_note}
 
-Facts about this transfer:
-- Exchange: {p.get('exchange')}
-- Direction: {verb} (relative to the exchange wallet)
-- Amount: {p.get('amount')} {p.get('symbol')}
-- USD value: ${p.get('value_usd', 0):,.0f}
-- Counterparty: {counterparty_note}
+{facts_whale_movements(p)}
 
 Return ONLY a JSON object (no markdown fence, no commentary) with exactly these
 three string fields:
@@ -538,21 +514,12 @@ when why_it_matters is empty."""
 @register_prompt_builder("web3_jobs")
 def build_web3_jobs_prompt(cfg: dict, region_profile: str, raw_item: dict, history: list) -> str:
     p = raw_item["payload"]
-    salary_max = p.get("salary_max") or 0
-    salary_note = (
-        f"${p.get('salary_min') or 0:,.0f}-${salary_max:,.0f}" if salary_max else "not disclosed"
-    )
     schema = _JOBS_SCHEMA_BLOCK.format(company=p.get("company"), position=p.get("position"))
 
     return f"""You are writing prose for a web3/crypto jobs Telegram channel. Voice: {cfg.get('voice', 'opportunity_framed')}.
 {cfg.get('prompt_notes', '')}
 
-Facts about this listing:
-- Role: {p.get('position')}
-- Company: {p.get('company')}
-- Salary: {salary_note}
-- Location: {p.get('location') or 'remote (no geographic restriction stated)'}
-- Tags: {', '.join(p.get('tags') or [])}
+{facts_job_listing(p)}
 
 {schema}
 """
@@ -581,10 +548,6 @@ def build_startup_jobs_prompt(cfg: dict, region_profile: str, raw_item: dict, hi
     it) -- only the surrounding framing (audience, no-crypto-language rule)
     differs from web3_jobs."""
     p = raw_item["payload"]
-    salary_max = p.get("salary_max") or 0
-    salary_note = (
-        f"${p.get('salary_min') or 0:,.0f}-${salary_max:,.0f}" if salary_max else "not disclosed"
-    )
     schema = _JOBS_SCHEMA_BLOCK.format(company=p.get("company"), position=p.get("position"))
 
     return f"""You are writing prose for a startup/tech jobs Telegram channel (audience:
@@ -592,12 +555,7 @@ founders, indie hackers, people job-hunting at startups -- not a crypto
 audience). Voice: {cfg.get('voice', 'opportunity_framed')}.
 {cfg.get('prompt_notes', '')}
 
-Facts about this listing:
-- Role: {p.get('position')}
-- Company: {p.get('company')}
-- Salary: {salary_note}
-- Location: {p.get('location') or 'remote (no geographic restriction stated)'}
-- Tags: {', '.join(p.get('tags') or [])}
+{facts_job_listing(p)}
 
 {schema}
 
@@ -620,6 +578,16 @@ def compute_startup_jobs_elements(conn, raw_item: dict, history: list) -> dict:
 # requested in the prompt -- prompts get ignored; a code-level guard doesn't.
 # Not category-scoped on purpose: cheap to run everywhere, and a category
 # that doesn't touch GoPlus data has nothing to trip it on anyway.
+def _prose_text(parsed: dict) -> str:
+    """Every piece of LLM prose in a parsed write, for the structural guards.
+    The legacy shape is title/narrative/why_it_matters; the channel-voice shape
+    (2026-11-14) is title + a `paragraphs` list. Both are covered so no guard
+    silently stops checking when a channel moves to a voice profile."""
+    parts = [str(parsed.get(k, "")) for k in ("title", "narrative", "why_it_matters")]
+    parts += [str(x) for x in (parsed.get("paragraphs") or [])]
+    return " ".join(parts)
+
+
 BANNED_OVERCLAIM_PATTERNS = [re.compile(p, re.IGNORECASE) for p in [
     r"\bis (?:completely |totally |100% )?safe\b",
     r"\bis legit\b",
@@ -636,7 +604,7 @@ BANNED_OVERCLAIM_PATTERNS = [re.compile(p, re.IGNORECASE) for p in [
 
 
 def _find_overclaims(parsed: dict) -> list[str]:
-    text = " ".join(str(parsed.get(k, "")) for k in ("title", "narrative", "why_it_matters"))
+    text = _prose_text(parsed)
     return [p.pattern for p in BANNED_OVERCLAIM_PATTERNS if p.search(text)]
 
 
@@ -717,9 +685,74 @@ def _content_overlap_fraction(gen_text: str, source_text: str,
 
 
 def _find_reproduction_issues(parsed: dict, source_excerpt: str | None) -> list[str]:
+    """Reproduction guard, measured on EXPRESSION rather than facts (2026-11-14, operator
+    direction): copyright protects how something is said, not that "U.S. spot crypto ETFs"
+    pulled in "$1.55 billion". Entities (figures, tickers/acronyms, proper nouns -- see
+    entities.entity_surface_forms, derived from the source excerpt) are masked out of BOTH the
+    draft and the source first, then both checks run on what remains:
+
+      1. a run of 8+ consecutive identical NON-entity words (entity placeholders bridge a run so
+         a lift cannot hide by sprinkling names through it, but do not count toward its length)
+      2. the share of the draft's non-entity characters made of 15+ char runs lifted from the
+         source (denominator excludes masked characters, so it no longer penalises a short,
+         fact-dense post for stating its facts)
+
+    The thresholds are UNCHANGED (8 words, 0.30). Before this the same two checks ran on raw
+    text and made terse, numeric posts -- a 200-350 char Wall Street post -- fail on the
+    entity names and figures any accurate post must repeat. Whether masking lets real lifting
+    through is tested, not assumed: BACKLOG.md ("Reproduction guard: entity masking").
+
+    Quoted spans are handled exactly as before (<=25 words, excluded from the checks)."""
     if not source_excerpt:
         return []
-    text = " ".join(str(parsed.get(k, "")) for k in ("title", "narrative", "why_it_matters"))
+    text = _prose_text(parsed)
+
+    issues = []
+    unquoted = text
+    for m in _QUOTE_SPAN_RE.finditer(text):
+        quote = m.group(1)
+        if len(quote.split()) > REPRODUCTION_QUOTE_MAX_WORDS:
+            issues.append(f"quoted span is {len(quote.split())} words -- too long to read as a short attributed quote")
+        unquoted = unquoted.replace(m.group(0), " ", 1)
+
+    forms = entity_lib.entity_surface_forms(source_excerpt)
+    gen_masked = entity_lib.mask_forms(unquoted, forms)
+    src_masked = entity_lib.mask_forms(source_excerpt, forms)
+    ph = entity_lib.MASK_PLACEHOLDER
+
+    run = entity_lib.masked_verbatim_run(gen_masked, src_masked, REPRODUCTION_NGRAM_SIZE)
+    if run:
+        shown = " ".join("[...]" if t == ph else t for t in run)
+        issues.append(f"reproduces {REPRODUCTION_NGRAM_SIZE}+ consecutive words verbatim from the source "
+                      f"outside a marked quote (\"{shown}\") -- reword that passage in your own words "
+                      f"(names and figures may be repeated; the wording around them may not)")
+
+    denom = sum(1 for c in gen_masked if c != ph)
+    if denom:
+        sm = difflib.SequenceMatcher(None, gen_masked, src_masked, autojunk=False)
+        matched = 0
+        for b in sm.get_matching_blocks():
+            block = gen_masked[b.a:b.a + b.size]
+            real = sum(1 for c in block if c != ph)
+            if b.size >= REPRODUCTION_MIN_BLOCK_CHARS and real >= REPRODUCTION_MIN_BLOCK_CHARS:
+                matched += real
+        overlap = matched / denom
+        if overlap > REPRODUCTION_OVERLAP_THRESHOLD:
+            runs = _overlap_runs(gen_masked, src_masked)
+            issues.append(
+                f"substantial verbatim overlap with the source ({overlap:.2f} of the draft's wording, must be "
+                f"at most {REPRODUCTION_OVERLAP_THRESHOLD:.2f}) -- reword these runs, which appear word for "
+                f"word in the source: " + "; ".join(f'"{r.replace(ph, "[...]")}"' for r in runs)
+            )
+    return issues
+
+
+def _find_reproduction_issues_unmasked(parsed: dict, source_excerpt: str | None) -> list[str]:
+    """The reproduction guard exactly as it was before entity masking (same thresholds, raw text).
+    Kept ONLY so the masking change can be tested against it; nothing in the pipeline calls it."""
+    if not source_excerpt:
+        return []
+    text = _prose_text(parsed)
 
     issues = []
     unquoted = text
@@ -733,14 +766,37 @@ def _find_reproduction_issues(parsed: dict, source_excerpt: str | None) -> list[
     gen_words = re.findall(r"\w+", unquoted.lower())
     n = REPRODUCTION_NGRAM_SIZE
     src_ngrams = {tuple(src_words[i:i + n]) for i in range(max(0, len(src_words) - n + 1))}
-    if any(tuple(gen_words[i:i + n]) in src_ngrams for i in range(max(0, len(gen_words) - n + 1))):
-        issues.append(f"reproduces {n}+ consecutive words verbatim from the source outside a marked quote")
+    hit = next((tuple(gen_words[i:i + n]) for i in range(max(0, len(gen_words) - n + 1))
+                if tuple(gen_words[i:i + n]) in src_ngrams), None)
+    if hit:
+        issues.append(f"reproduces {n}+ consecutive words verbatim from the source outside a marked quote "
+                      f"(\"{' '.join(hit)}...\") -- reword that passage")
 
     overlap = _content_overlap_fraction(unquoted.lower(), source_excerpt.lower())
     if overlap > REPRODUCTION_OVERLAP_THRESHOLD:
-        issues.append(f"substantial verbatim overlap with the source ({overlap:.2f} of the draft)")
+        # Name the exact runs so a retry can actually act on it -- "too much overlap"
+        # alone left a terse draft unable to tell WHICH phrases to reword (2026-11-14).
+        runs = _overlap_runs(unquoted.lower(), source_excerpt.lower())
+        issues.append(
+            f"substantial verbatim overlap with the source ({overlap:.2f} of the draft, must be at most "
+            f"{REPRODUCTION_OVERLAP_THRESHOLD:.2f}) -- reword these runs, which appear word for word in "
+            f"the source: " + "; ".join(f'"{r}"' for r in runs)
+        )
 
     return issues
+
+
+def _overlap_runs(gen_text: str, source_text: str, limit: int = 4,
+                  min_block_len: int = REPRODUCTION_MIN_BLOCK_CHARS) -> list[str]:
+    """The longest (>=min_block_len char) runs gen_text shares with source_text --
+    what _content_overlap_fraction counted, for naming them in a retry message."""
+    sm = difflib.SequenceMatcher(None, gen_text, source_text, autojunk=False)
+    ph = entity_lib.MASK_PLACEHOLDER  # masked texts: only real (non-placeholder) characters count
+    blocks = sorted((b for b in sm.get_matching_blocks()
+                     if b.size >= min_block_len
+                     and sum(1 for c in gen_text[b.a:b.a + b.size] if c != ph) >= min_block_len),
+                    key=lambda b: -b.size)
+    return [gen_text[b.a:b.a + b.size].strip() for b in blocks[:limit]]
 
 
 # Political neutrality guard (macro_news, 2026-09-12) -- extends the SAME
@@ -831,7 +887,7 @@ def _find_neutrality_violations(parsed: dict) -> list[str]:
     it isn't doing real attribution work. Narrow enough that no draft has
     hit it live yet, but worth naming rather than pretending the exemption
     is bulletproof."""
-    text = " ".join(str(parsed.get(k, "")) for k in ("title", "narrative", "why_it_matters"))
+    text = _prose_text(parsed)
     issues = [p.pattern for p in _LOADED_CHARACTERIZATION_PATTERNS if p.search(text)]
     issues += [p.pattern for p in _UNATTRIBUTED_MOTIVE_PATTERNS if p.search(text)]
 
@@ -864,7 +920,7 @@ _SPECULATION_PATTERNS = [re.compile(p, re.IGNORECASE) for p in [
 def _find_speculation_issues(parsed: dict) -> list[str]:
     """Checked against title/narrative/why_it_matters, same fields every
     other structural guard in this module checks."""
-    text = " ".join(str(parsed.get(k, "")) for k in ("title", "narrative", "why_it_matters"))
+    text = _prose_text(parsed)
     return [p.pattern for p in _SPECULATION_PATTERNS if p.search(text)]
 
 
@@ -926,26 +982,11 @@ def build_gems_security_prompt(cfg: dict, region_profile: str, raw_item: dict, h
     compute_gems_security_elements) -- and is handed the found/unchecked
     split explicitly so it can't imply more than what was actually checked."""
     p = raw_item["payload"]
-    red_flags = p.get("red_flags") or []
-    tokens_unchecked = p.get("tokens_unchecked") or []
-
-    unchecked_note = (
-        f"\nNote: {len(tokens_unchecked)} of this pool's underlying token(s) could not be "
-        f"checked at all (unsupported chain or no GoPlus data) -- do not imply they're clean, "
-        f"say plainly that they weren't checked."
-        if tokens_unchecked else ""
-    )
 
     return f"""You are writing prose for a crypto DeFi security/education channel. Voice: {cfg.get('voice', 'educational')}.
 {cfg.get('prompt_notes', '')}
 
-Facts about this pool (already verified by an automated check, not your judgment):
-- Protocol: {p.get('project')}
-- Chain: {p.get('chain')}
-- Pool: {p.get('symbol')}
-- TVL: ${p.get('tvl_usd', 0):,.0f}
-- Specific security findings from GoPlus's Token Security API:
-{chr(10).join(f'  - {flag}' for flag in red_flags)}{unchecked_note}
+{facts_gems_security(p)}
 
 Return ONLY a JSON object (no markdown fence, no commentary) with exactly these
 three string fields:
@@ -1091,12 +1132,7 @@ def build_news_prompt(cfg: dict, region_profile: str, raw_item: dict, history: l
     return f"""You are writing prose for a crypto market-summary Telegram channel. Voice: {cfg.get('voice', 'market_summary')}.
 {cfg.get('prompt_notes', '')}
 
-Facts about this story (from a wire excerpt, summarize in your own words --
-never quote more than a short phrase, and never copy the excerpt's sentence
-structure):
-- Headline: {p.get('title')}
-- Source excerpt: {p.get('description')}
-- Outlet: {p.get('source')}
+{facts_wire_story(p)}
 
 Return ONLY a JSON object (no markdown fence, no commentary) with exactly these
 three string fields:
@@ -1367,28 +1403,12 @@ def compute_news_elements(conn, raw_item: dict, history: list) -> dict:
 @register_prompt_builder("tool_launches")
 def build_tool_launches_prompt(cfg: dict, region_profile: str, raw_item: dict, history: list) -> str:
     p = raw_item["payload"]
-    if p.get("source") == "hackernews":
-        facts = (
-            f"- Launch: {p.get('title')}\n"
-            f"- Discussed on Hacker News: {p.get('points')} points, {p.get('comments')} comments\n"
-            f"- Link: {p.get('url')}"
-        )
-        cross_note = "\nNote: this also appeared on GitHub Trending the same day." if p.get("also_trending_on_github") else ""
-    else:
-        facts = (
-            f"- Repository: {p.get('title')}\n"
-            f"- Trending on GitHub: {p.get('stars_today')} stars today (language: {p.get('language') or 'unspecified'})\n"
-            f"- Description: {p.get('description') or 'none given'}"
-        )
-        cross_note = "\nNote: this was also posted to Hacker News the same day." if p.get("also_shown_on_hn") else ""
-
     return f"""You are writing prose for a builder/startup-tools Telegram channel (audience:
 founders, indie hackers, people evaluating new tools -- not a crypto audience).
 Voice: {cfg.get('voice', 'opportunity_framed')}.
 {cfg.get('prompt_notes', '')}
 
-Facts about this launch:
-{facts}{cross_note}
+{facts_tool_launches(p)}
 
 Return ONLY a JSON object (no markdown fence, no commentary) with exactly these
 three string fields:
@@ -1444,12 +1464,7 @@ their own economic situation -- not a crypto audience, not a general news
 audience). Voice: {cfg.get('voice', 'market_summary')}.
 {cfg.get('prompt_notes', '')}
 
-Facts about this story (from a wire excerpt, summarize in your own words --
-never quote more than a short phrase, and never copy the excerpt's sentence
-structure):
-- Headline: {p.get('title')}
-- Source excerpt: {p.get('description')}
-- Outlet: {p.get('source')}
+{facts_wire_story(p)}
 
 Return ONLY a JSON object (no markdown fence, no commentary) with exactly these
 three string fields:
@@ -1575,8 +1590,119 @@ NEUTRALITY_CHECKED_CATEGORIES = {"macro_news"}
 SPECULATION_CHECKED_CATEGORIES = {"hacks_exploits"}
 
 
+VOICE_MAX_RETRIES = 2  # after the first draft; each retry carries the specific issues found
+
+
+def _get_display_name(conn, channel: str) -> str:
+    with dict_cursor(conn) as cur:
+        cur.execute("SELECT display_name FROM channel_config WHERE channel = %s", (channel,))
+        row = cur.fetchone()
+    return (row["display_name"] if row and row["display_name"] else channel)
+
+
+def _generate_voiced_write(conn, category: str, prompt: str, check, *, model_override: str | None = None,
+                            max_retries: int = VOICE_MAX_RETRIES) -> tuple[dict, int, list[list[str]]]:
+    """The channel-voice counterpart of _generate_checked_write: same "never
+    silently ship a draft that fails a check" rule, but the checks include the
+    voice profile's length/structure/title/person rules, and a retry tells the
+    model exactly what was wrong ("the post is 412 characters but must be
+    200-350") rather than a generic reminder -- a length miss is fixed far more
+    reliably with the number than without. `check(parsed) -> list[str]` runs
+    the category guards plus the voice checks. Returns (parsed, attempts,
+    issues_per_failed_attempt); raises RuntimeError after max_retries."""
+    history: list[list[str]] = []
+    current = prompt
+    for attempt in range(1, max_retries + 2):
+        raw = llm.generate_write(conn, category, current)
+        try:
+            parsed = post_format.parse_llm_json(raw)
+            issues = check(parsed)
+        except (ValueError, KeyError, TypeError, AttributeError) as exc:  # malformed JSON / shape
+            parsed, issues = None, [f"the reply was not the required JSON object ({type(exc).__name__}); "
+                                    f"return ONLY the JSON object"]
+        if not issues:
+            return parsed, attempt, history
+        history.append(issues)
+        logger.warning("write_post: voice/guard issues for category=%s attempt=%d: %s", category, attempt, issues)
+        current = prompt + (
+            "\n\nYOUR PREVIOUS DRAFT WAS REJECTED. Fix every one of these and keep the guardrails:\n"
+            + "\n".join(f"- {i}" for i in issues)
+        )
+    raise RuntimeError(
+        f"write_post: category={category} still failed the voice/guard checks after {max_retries} retries "
+        f"({history[-1]}) -- refusing to publish rather than ship it"
+    )
+
+
+def generate_post_with_report(conn, category: str, channel: str, raw_item: dict, *, profile=None) -> dict:
+    """Channel-voice write. Returns {"text", "attempts", "retry_issues", "chars",
+    "prompt", "channel"} -- generate_post() wraps this and returns just the text;
+    scripts/voice_compare.py shows the rest. `profile` overrides the DB lookup
+    (the compare script passes profiles straight from the YAML so a voice can be
+    reviewed before it is seeded into production)."""
+    spec = FACT_SPECS[category]
+    cfg = load_category_config(conn, category)
+    profile = profile or channel_voice.load_profile(conn, channel)
+    if profile is None:
+        raise RuntimeError(f"channel '{channel}' has no voice profile")
+    region_profile = _get_region_profile(conn, channel)
+    topic_key = (raw_item["payload"] or {}).get("topic_key")
+    history = get_topic_history(conn, category, topic_key, raw_item["raw_item_id"])
+    computer = POST_COMPUTERS.get(category)
+    elements = computer(conn, raw_item, history) if computer else {}
+
+    history_line = elements.get("history_line") if profile.keep_context_lines else None
+    context_line = elements.get("context_line") if profile.keep_context_lines else None
+    risk_line = elements.get("risk_line")
+    emoji = cfg.get("emoji") or ""
+
+    def assemble(title: str, paragraphs: list[str], *, final: bool) -> str:
+        return post_format.assemble_post(
+            emoji=emoji, title=title, narrative="", why_it_matters=None, paragraphs=paragraphs,
+            history_line=history_line, risk_line=risk_line,
+            source_name=elements.get("source_name") if final else None,
+            hashtags=(cfg.get("hashtags") or []) if (final and profile.hashtags) else [],
+            context_line=context_line,
+        )
+
+    # Everything in the post the writer does NOT control (emoji, context lines, risk
+    # flag) is measured once, up front, and subtracted from the length budget the
+    # writer is given.
+    overhead = channel_voice.measure(assemble("", [], final=False))
+    prompt = channel_voice.build_prompt(profile, display_name=_get_display_name(conn, channel), spec=spec,
+                                        region_profile=region_profile, raw_item=raw_item, overhead_chars=overhead)
+    source_excerpt = (raw_item.get("payload") or {}).get("description")
+    facts_have_figures = bool(re.search(r"\d", spec.facts(raw_item["payload"])))
+
+    def check(parsed: dict) -> list[str]:
+        if not isinstance(parsed.get("paragraphs"), list):
+            return channel_voice.find_voice_issues(profile, parsed, None, facts_have_figures)
+        hits = _find_overclaims(parsed) + _find_reproduction_issues(parsed, source_excerpt)
+        if category in NEUTRALITY_CHECKED_CATEGORIES:
+            hits += _find_neutrality_violations(parsed)
+        if category in SPECULATION_CHECKED_CATEGORIES:
+            hits += _find_speculation_issues(parsed)
+        chars = channel_voice.measure(assemble(str(parsed.get("title", "")), parsed["paragraphs"], final=False))
+        return hits + channel_voice.find_voice_issues(profile, parsed, chars, facts_have_figures)
+
+    parsed, attempts, retry_issues = _generate_voiced_write(conn, category, prompt, check)
+    text = assemble(parsed["title"], parsed["paragraphs"], final=True)
+    return {
+        "text": text, "attempts": attempts, "retry_issues": retry_issues, "prompt": prompt, "channel": channel,
+        "chars": channel_voice.measure(assemble(parsed["title"], parsed["paragraphs"], final=False)),
+    }
+
+
 def generate_post(conn, category: str, channel: str, raw_item: dict) -> str:
-    """Writes the post using whichever write_model the category is configured with."""
+    """Writes the post using whichever write_model the category is configured with.
+
+    A channel with a voice profile (channel_config.voice_profile) and a category with
+    a FactSpec is written through the channel-voice path -- the channel owns voice,
+    the category supplies facts and guardrails. Anything else (CoinCraft until its
+    Phase 5 profile, a category without a FactSpec) takes the legacy path below,
+    unchanged."""
+    if category in FACT_SPECS and channel_voice.load_profile(conn, channel) is not None:
+        return generate_post_with_report(conn, category, channel, raw_item)["text"]
     prompt, history = _build_prompt_and_history(conn, category, channel, raw_item)
     source_excerpt = (raw_item.get("payload") or {}).get("description")
     raw = _generate_checked_write(

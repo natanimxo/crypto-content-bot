@@ -294,9 +294,24 @@ back to what's checked in.
   emoji: "<single emoji>"         # the ONE leading emoji on a post's title line
   display_label: "<Human Name>"   # metadata, not rendered in the post body
   hashtags: ["#Tag1", "#Tag2"]
-  voice: <free text>              # register description, informs prompt_notes
-  prompt_notes: <free text>       # shapes ONLY the LLM's prose (title/narrative/why_it_matters)
+  voice: <free text>              # LEGACY (2026-11-14): used only for a channel with no voice profile
+  prompt_notes: <free text>       # LEGACY, same -- see config/channel_voices.yaml below
 ```
+
+`config/channel_voices.yaml` (2026-11-14, one entry per channel, applied to
+`channel_config.voice_profile` by `scripts/seed_config.py`): **the channel owns
+voice, the category supplies only facts.** Before this, voice lived in
+`category_config.prompt_notes`, so one news story landed on Crypto Wall Street
+and on Alpha Edge through the same prompt and read identically. A profile holds
+`name`, `summary`, `tone`, `title_style`, `title_check`, `paragraphs` (the body
+structure, a role per paragraph), `length: {min, max}`, `person`, `hashtags`,
+`keep_context_lines`, `banned_words` (see `pipeline/channel_voice.py`). A channel
+with no profile (CoinCraft until its Phase 5 profile) keeps the legacy category
+voice. What a category contributes now lives in `pipeline/post_facts.py` and is
+deliberately in code, not config: its **facts**, a voice-neutral **content
+brief**, and its **guardrails** (never-rules), each guardrail paired with a
+structural check in `pipeline/write_post.py`. **Guardrails always beat voice**;
+the composed prompt says so and says what to do on a conflict.
 
 `config/channel_config.yaml` (one entry per channel): `display_name`,
 `categories` (list), `region_profile`, `soft_daily_cap` (channel-wide,
@@ -397,6 +412,24 @@ Two separate LLM touch-points per item, at two different stages:
    operator-**approved** item. The LLM is deliberately scoped narrowly: it
    returns JSON `{title, narrative, why_it_matters}` — three pieces of prose
    — and nothing else. It never emits HTML or decides structure.
+
+**Channel-voice write (2026-11-14).** For a channel with a voice profile the LLM
+returns `{title, paragraphs: [...]}` instead — the paragraph count and roles come
+from the channel (1 for a wire-service desk, 2 for a fast feed, 3 for an explainer).
+Output is checked in code (`channel_voice.find_voice_issues`: length of the whole post
+except the Source line and hashtags, paragraph count, banned words, title rule, person)
+together with the category guards; a failed check is retried twice with the specific
+problem named, then the write fails loudly like any other guard. Terse channels
+(`keep_context_lines: false`) drop the history / "Also in our own tracking" blockquotes.
+Try a voice before it ships: `python scripts/voice_compare.py --item <raw_item_id>
+--channels <a> <b>` (reads profiles from the YAML, writes nothing, sends nothing).
+
+**Reproduction guard measures expression, not facts (2026-11-14).** Entities (figures,
+tickers/acronyms, proper nouns — `entities.entity_surface_forms`) are masked out of both
+draft and source before the 8-word-run and 0.30-overlap checks, so a short post is not
+penalised for stating the facts it must state. Thresholds unchanged; verified against
+verbatim, half-lifted, Title-Cased and entity-rich lifts by
+`scripts/check_reproduction_masking.py`.
 
 **Deterministic assembly** (`pipeline/post_format.py::assemble_post()`,
 2026-09-10 redesign) builds the actual post from that JSON plus

@@ -1415,3 +1415,48 @@ it's a sourcing decision still pending operator direction, not a fix).
   collectors re-inserting them. `get_new_candidates` and `hold_candidates.py release` skip
   expired rows. Gems excluded. Evergreen pending cards (defi_yields 244, tool_launches 161,
   startup_jobs 67, web3_jobs 12) have no freshness window and were left pending.
+
+## Phase 1 part 1: channel-level voice (2026-11-14)
+
+**What changed.** Voice moved from the category (`category_config.voice` / `prompt_notes`) to the
+channel. `config/channel_voices.yaml` -> `channel_config.voice_profile` (JSONB, seeded by
+`scripts/seed_config.py`); `pipeline/channel_voice.py` (profile, prompt, deterministic voice
+checks); `pipeline/post_facts.py` (per-category facts + voice-neutral content brief + guardrails,
+in CODE on purpose: each guardrail is paired with a structural check, none is an operator knob);
+`write_post.generate_post` takes the channel-voice path when the channel has a profile and the
+category a FactSpec, else the legacy path (unchanged -- the 8 legacy prompt builders now share
+the `facts_*` helpers; 56 sampled prompts across 9 categories x 2 regions were byte-identical
+before/after). Profiles: crypto_wall_street (market desk, 1 paragraph, 200-350, no hashtags, no
+context lines), alpha_edge_crypto (2 paragraphs, 350-500), crypto_notebook (setup/mechanic/spot-it,
+600-900; NO channel_config row until the remap -- the seed applies it when the row exists),
+hustle_to_million (second person, 300-450). coincraft has NO profile on purpose: legacy voice
+until Phase 5 (earning-opportunities category). Length = whole post minus Source line and hashtags.
+Guardrails beat voice: macro_news on Hustle answers "what to do" with "what it means for you".
+
+**Found while building it (kept):**
+- "Title must contain a figure" as a hard rule made the writer fail 3 drafts on a story with no
+  number -- the only way to comply was to invent one. Now applies only when the facts contain a figure.
+- The reproduction guard was calibrated on 400-700 char posts; at 200-350 chars the names and
+  figures any accurate post must repeat dominated the ratio (Wall Street succeeded on 6/14 recent
+  news items). Retry feedback now names the exact runs to reword, and (operator-approved) the guard
+  measures EXPRESSION: entities are masked from draft and source before BOTH the 8-word-run check
+  and the 0.30 overlap ratio (thresholds unchanged). Wall Street now 13/14.
+  `scripts/check_reproduction_masking.py` against 60 real excerpts + 2 entity-dense synthetic
+  sources: verbatim 62/62, half-lift 62/62, Title-Cased source 62/62 still flagged; facts-only and
+  own-words paraphrase drafts pass; two entity-rich lifts (sentence copied with names interleaved)
+  still flagged. KNOWN LIMITS, reported not hidden: an entity-dense source (e.g. 7 entities in 19
+  words) with every name swapped for an invented one, or an invented word inserted every 4th
+  word, can evade the masked guard (1-2 of 62; the old guard missed 3/62 swapped and 0/62
+  sprinkled, so sprinkled is 1 worse on the pathological synthetic source and swapped is 1-2
+  better). A real model copying lazily does neither.
+- The first side-by-side opened both posts with the same sentence. Alpha Edge's first paragraph
+  is now "the point" (plain-language meaning first, figures second); Wall Street leads on figures.
+- The whale brief let the model invert the convention (an exchange withdrawal "read as
+  distribution"). The brief now states it: withdrawal = accumulation/reduced sell pressure,
+  deposit = possible sell pressure, stablecoin = no directional read. (The legacy whale prompt has
+  the same loose instruction; it stops being used on Wall Street once the profile is live.)
+- LLM call-rate alert tripped by dev testing: calls from deliberate scripts are now tagged
+  (`llm_usage.tag_session`, `llm_usage.source`) and excluded from the rate / repeated-prompt /
+  daily-call-count alerts, with a 10x ceiling of their own. Raising the threshold would have
+  missed the real incident (~33 calls per 15 min).
+- Cost of a Wall Street write: 1-3 DeepSeek calls (retries carry the specific issue).

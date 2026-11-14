@@ -303,3 +303,10 @@ ALTER TABLE raw_items ADD COLUMN IF NOT EXISTS expired_at TIMESTAMPTZ;
 -- alerts and from the daily call-COUNT alert, but still counts toward the spend guard (it is
 -- real money) and has its own, 10x-higher runaway ceiling. See pipeline/llm_usage.py.
 ALTER TABLE llm_usage ADD COLUMN IF NOT EXISTS source TEXT;
+
+-- 2026-11-14: channel-level voice. The CHANNEL owns voice (who is talking, post shape, length,
+-- person, hashtags, whether history/context lines appear); the category supplies only facts and
+-- guardrails (pipeline/post_facts.py). NULL = no profile -> the legacy category voice is used
+-- (CoinCraft until its Phase 5 profile). Source of truth: config/channel_voices.yaml, applied by
+-- scripts/seed_config.py. Read by pipeline/channel_voice.py::load_profile.
+ALTER TABLE channel_config ADD COLUMN IF NOT EXISTS voice_profile JSONB;

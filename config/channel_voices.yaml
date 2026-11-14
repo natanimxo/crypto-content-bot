@@ -1,0 +1,149 @@
+# Channel voice profiles -- who each channel sounds like, 2026-11-14 (operator direction).
+#
+# Source of truth checked into git, upserted into channel_config.voice_profile by
+# scripts/seed_config.py (same YAML-baseline / DB-runtime pattern as the other two
+# config files). Keyed by channel slug. See pipeline/channel_voice.py for what each
+# field means and exactly which of them are enforced in code.
+#
+# The CATEGORY no longer decides voice: it supplies facts, a voice-neutral content
+# brief and guardrails (pipeline/post_facts.py). Guardrails always beat voice.
+#
+# crypto_notebook is defined here ahead of its channel_config row on purpose: that
+# channel was removed 2026-09-20 and comes back with the channel remap. The seed step
+# applies a profile only to a channel that has a row, and says so for the rest, so it
+# takes effect the moment the row is created.
+#
+# coincraft has NO profile deliberately (operator direction 2026-11-14): it becomes a
+# non-crypto earning-opportunities channel in Phase 5 and a profile written now would be
+# guesswork against content that doesn't exist. Until then it keeps the old category
+# voice (category_config.voice / prompt_notes) via the legacy path in write_post.py.
+#
+# `length` counts the whole post EXCEPT the Source line and hashtags -- emoji, title,
+# paragraphs, any history / "Also in our own tracking" blockquote and any risk flag.
+
+crypto_wall_street:
+  name: market_desk
+  summary: >-
+    A wire-service market desk filing a short dispatch for traders who want the
+    figures, not the colour.
+  tone: >-
+    Wire-service register: flat, factual, one idea per sentence, no opinion, no
+    exclamation marks, no adjectives or adverbs of degree. Numbers lead every
+    sentence that has a number. Report what moved and how much; say what it is
+    typically read as only if the story supports it.
+  title_style: >-
+    Data-first: the subject and the number, nothing else -- for example
+    "BTC outflows hit $250M" or "Binance sheds $4.2M USDC". Short (about 60
+    characters or fewer). Not a question, not a label. A story with no figure in
+    it leads with its concrete fact instead -- never an invented number.
+  title_check: has_number
+  paragraphs:
+    - >-
+      The whole dispatch in one tight paragraph of one to three short sentences:
+      lead with the figures (who, how much, which direction), then the single most
+      relevant fact or implication.
+  length: {min: 200, max: 350}
+  person: third
+  hashtags: false
+  keep_context_lines: false
+  banned_words:
+    - massive
+    - huge
+    - enormous
+    - major
+    - significant
+    - notable
+    - sharp
+    - strong
+    - big
+    - bold
+    - dramatic
+    - dramatically
+    - staggering
+    - stunning
+    - incredible
+    - explosive
+    - bullish
+    - bearish
+    - soaring
+    - surging
+    - skyrocketing
+    - plunging
+    - plummeting
+    - crucial
+    - key
+    - important
+    - impressive
+    - aggressive
+
+alpha_edge_crypto:
+  name: broad_and_fast
+  summary: >-
+    A fast, confident crypto feed for a broad audience that skims headlines and
+    wants to know in seconds what happened and why it matters.
+  tone: >-
+    Confident and direct. Short punchy sentences, active verbs, plain words. Leads
+    with the POINT of the story in plain language and lets the numbers back it up
+    -- the opposite of a data feed, which opens on the figures. Has a view on why a
+    story matters, but never predicts prices and never tells anyone what to do with
+    their money.
+  title_style: >-
+    A punchy headline: a complete claim in a handful of words, active voice -- for
+    example "Circle's Arc mainnet goes live" or "Ethereum staking exits hit a
+    record". Not a label, not a question.
+  paragraphs:
+    - >-
+      The point: open with what the story MEANS in a few plain words (the trend, the
+      turn, the surprise) -- not with the figures -- then bring in the one or two
+      numbers that prove it. One or two short sentences.
+    - "Why it matters: the implication or what to watch next, in one or two short sentences."
+  length: {min: 350, max: 500}
+  person: null
+  hashtags: true
+  keep_context_lines: true
+
+crypto_notebook:
+  name: explainer
+  summary: >-
+    A patient explainer for readers who want to understand how DeFi actually works
+    and learn to spot patterns themselves, not be handed a verdict.
+  tone: >-
+    Patient and explanatory. Plain language; define any term of art the first time
+    it appears. Teach the mechanism rather than reporting a headline, and never
+    rush. Calm, no hype, no urgency.
+  title_style: >-
+    A question or a concept that tells the reader what they will learn -- for
+    example "Why this pool's APY tripled" or "How a hidden owner can still mint
+    tokens". Not a news headline.
+  title_check: question_or_concept
+  paragraphs:
+    - "Setup: what we are looking at -- the specific item, stated plainly, with its key numbers."
+    - "Mechanic: how it works -- the general mechanism behind it and why it produces this result."
+    - >-
+      How to spot it yourself: concrete steps a reader can take to check the same
+      thing on any pool or token -- where to look and what to look for.
+  length: {min: 600, max: 900}
+  person: null
+  hashtags: true
+  keep_context_lines: true
+
+hustle_to_million:
+  name: builders
+  summary: >-
+    A practical briefing for founders and indie hackers, written straight to the
+    reader: what is in it for you and what to do next.
+  tone: >-
+    Second person, practical and direct. Plain words, no jargon, no hype. Every
+    sentence helps the reader decide or do something.
+  title_style: >-
+    Benefit-led: lead with what the reader gets or can do -- for example "A free
+    tool that turns your docs into an API". Not a news headline, not a label.
+  paragraphs:
+    - "Hook: the one thing that matters to the reader and why it is relevant to them right now."
+    - >-
+      What to do about it: the practical next step for the reader -- try it, apply,
+      watch for something, or what it means for them -- in one or two sentences.
+  length: {min: 300, max: 450}
+  person: second
+  hashtags: true
+  keep_context_lines: true
