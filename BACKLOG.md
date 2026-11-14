@@ -324,6 +324,50 @@ the one place to check.
   heuristic, not a filler-word gap; worth a proper-noun-aware approach if it
   keeps showing up.
 
+## Railway: Config-as-Code -> Infrastructure-as-Code (2026-11-14)
+
+- **Done ahead of Railway's 2026-12-01 cutoff for `railway.json`.** Both
+  services are now declared in `.railway/railway.ts` and `railway.json` is
+  deleted. `railway config plan` reports "already up to date" (file == live),
+  verified after applying.
+- **Why not just `railway config migrate`:** its dry run silently DROPS
+  `restartPolicyType: ALWAYS` (emits only `start` + `replicas`), and it knows
+  nothing about `collect-cycle`, whose start command and cron were set through
+  the API and have no file. And `railway config pull` (the live state) can't see
+  `railway.json` either: live service-level settings for the poller were
+  `startCommand: null` and `restartPolicyType: ON_FAILURE` -- its real start
+  command and `ALWAYS` came ONLY from the file. Applied the pull as-is, or let
+  the file lapse on Dec 1, and the poller would have had no start command (the
+  same "No start command detected" failure as September) and would not restart
+  after a clean exit. `pull` also emitted a file that doesn't compile (the GitHub
+  source and the poller service share one identifier), fixed by hand; the
+  poller's start/restart were added by hand. The authoritative result is what
+  Railway reports now: poller `start='python scripts/poller_daemon.py'`
+  `restart=ALWAYS`; collect-cycle `start='python scripts/collect_cycle.py'`
+  `restart=NEVER` `cron='0 */4 * * *'`; `railwayConfigFile` null on both (nothing
+  was bound to the file, so deleting it is safe).
+- **Procedure that worked (keep for next time):** `config pull` (no
+  `--include-variables`: secrets stay `preserve()`) -> fix the file -> `config
+  plan` (expected exactly 1 change: the poller's two settings; 0 add / 0 destroy;
+  collect-cycle no diff) -> `config plan --out` + `config apply --plan --yes` ->
+  `plan` again -> confirm the poller's heartbeat. The apply redeployed the
+  poller only (collect-cycle untouched); polling resumed after a ~74s gap, all
+  polls successful, with the usual transient 409 while the old instance
+  finished its long-poll.
+- **Windows gotcha:** `railway config plan/apply` need the SDK installed
+  (`npm install railway --no-save --no-package-lock` in the repo root;
+  `node_modules/` is gitignored and there is deliberately NO `package.json` --
+  Railpack would detect Node on a Python service). The SDK checks the CLI
+  version by running `$_ --version`, which throws a misleading "requires Railway
+  CLI 5.42.1 or newer" on Windows because the npm `railway` shim isn't
+  executable by Node. Fix: run with `_` set to the native binary, e.g.
+  `env _="C:/Users/hp/AppData/Roaming/npm/node_modules/@railway/cli/bin/railway.exe"
+  railway config plan`. (The CLI itself is 5.56.0; it is not out of date.)
+- **Not covered by this file:** variables beyond the six `preserve()`d ones
+  (the optional `LLM_*` alert thresholds are unset and use code defaults).
+  Anything added in the Railway dashboard that isn't in `railway.ts` shows up
+  as drift in the next `config plan`.
+
 ## gems_security "broken, not quiet" + hacks_exploits inserted=0 (2026-11-14)
 
 - **`gems_security`: both halves of the operator's diagnosis were right, but

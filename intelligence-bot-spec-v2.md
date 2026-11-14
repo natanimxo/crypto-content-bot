@@ -57,17 +57,28 @@ project, two services built from this same repo:
   done): runs `scripts/collect_cycle.py`, which for every live category calls
   `collect()` → `score_new_items()`, then runs `bot/notify.py` once at the end
   across all channels. Its start command and schedule are set directly on the
-  service through Railway's API (Railway rejects binding a *new* service to a
-  Config-as-Code file), and its env vars are cross-service references
-  (`${{crypto-content-bot.VAR}}`) to the poller's values, so a rotated
-  credential is updated in one place.
+  service (and are now declared in `.railway/railway.ts`, see below), and its
+  env vars are cross-service references (`${{crypto-content-bot.VAR}}`) to the
+  poller's values, so a rotated credential is updated in one place.
 - **`crypto-content-bot`** — an **always-on worker** (restart policy `ALWAYS`,
-  configured by `railway.json`): runs `scripts/poller_daemon.py`, which loops
+  declared in `.railway/railway.ts`): runs `scripts/poller_daemon.py`, which loops
   `bot/approval_poller.py`'s `run()` forever. Each `run()` is one
   `getUpdates` long-poll (270s, Section 9) plus processing, so the gap between
   polls is effectively zero. It drives the whole approve/edit/reject → write →
   "mark as sent" state machine, including a per-cycle sweep that retries any
   approval left `approved` with no preview (Section 9).
+
+**Railway configuration is code: `.railway/railway.ts`** (Infrastructure as
+Code; migrated 2026-11-14, ahead of Railway ending support for `railway.json`
+Config-as-Code on 2026-12-01 -- BACKLOG.md has the full migration notes). It
+declares both services, their start commands, the cron schedule, restart
+policies and replica counts; every secret is `preserve()` (Railway keeps the
+existing value, nothing sensitive is in the repo). Change it with
+`railway config plan` (dry run) then `railway config apply`. There is no
+`package.json` on purpose: the SDK is installed locally with
+`npm install railway --no-save`, because a Node manifest in the repo root would
+make Railway's builder detect Node on a Python service. On Windows the SDK's
+CLI-version check needs `_` pointed at the native `railway.exe`, see BACKLOG.
 
 The GitHub Actions workflows still exist but are **manual-only**
 (`workflow_dispatch`): `collect.yml`'s and `approval-poll.yml`'s `schedule:`

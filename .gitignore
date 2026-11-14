@@ -10,3 +10,8 @@ venv/
 .mypy_cache/
 .DS_Store
 *.log
+
+# Railway IaC SDK, installed locally with --no-save only so `railway config plan/apply` can evaluate
+# .railway/railway.ts. Deliberately NOT committed with a package.json: a Node manifest in the repo
+# root would make Railway's builder detect Node on a Python service.
+node_modules/
