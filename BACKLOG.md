@@ -1384,3 +1384,34 @@ it's a sourcing decision still pending operator direction, not a fix).
        now a real, load-bearing part of the operator workflow, not a nice-to-have.
   The spec doc itself lives outside this repo (per the README's note to
   Claude Code) — this entry is the pointer so it isn't forgotten.
+
+## Phase 0 close + Phase 1 parts 2-3: gems hold, volume cut, queue cleanup (2026-11-14)
+
+- **Phase 0 verified** on the 12:00 UTC cycle: cron fired 12:01:43 on the IaC-managed
+  service; gems_security `details.goplus = {"ok": 60}`, inserted 143 (predicted ~141).
+  `PROJECT_REPEAT_RATIO = 0.5` stays (operator decision).
+- **gems_security held pending the Crypto Notebook remap**: 159 unnotified rows held in the
+  DB, and `collectors/gems_security.py` `HOLD_ALL_CANDIDATES = True` so new rows insert
+  held. Held gems total 173 (30 pre-Nov-14 rows from Sep-Oct + 143 from Nov 14). One gems
+  card reached CoinCraft at 16:05 UTC before the hold (2 gems cards pending there). Flip
+  the flag back to False when the channel routing changes.
+- **Volume cut, from calibration** (last 60d, per (notification, category) batch): news -- 71
+  batches had an accept, exactly one accepted in 68, and it was the top-scored in 64;
+  tool_launches 20/20 exactly one, top-scored 18; whale 8/8 (top 7), startup_jobs 5/5 (top 4)
+  -- the last two are below the n>=10 bar and were NOT cut. defi_yields/macro_news/hacks are
+  single-card batches, no pattern. Applied: news 10 -> 6/day, tool_launches 8 -> 6/day.
+  News is a shared category (Wall Street / Alpha Edge) so its cap is now CATEGORY-WIDE:
+  ceil(6/6) = 1 card per cycle across both channels, channels taking turns
+  (`bot/notify.py::_order_channels_for_shared_caps`, `select_candidates.SHARED_CYCLE_WINDOW_HOURS`).
+  This also applies to web3_jobs (the only other shared category; source is dry).
+  Expect news to pause for a cycle or two while the trailing-24h count (8 at the time)
+  drains below 6.
+- **Queue cleanup** (one transaction, counts asserted): 1,078 stale pending approvals
+  (news 831, whale 172, macro 59, hacks 16 -- past FRESHNESS_MAX_AGE_HOURS by the item's own
+  timestamp) -> `decision='expired'`; orphaned macro_news approval 1414 (Q3 GDP, write failed
+  3x on the verbatim-reproduction guard, 15 days old) -> `expired`; 7,730 held-never-released
+  raw_items (defi_yields 7,264, tool_launches 177, news 149, startup_jobs 89, whale 29,
+  macro 22) marked via new `raw_items.expired_at` -- NOT deleted, the rows are what stops the
+  collectors re-inserting them. `get_new_candidates` and `hold_candidates.py release` skip
+  expired rows. Gems excluded. Evergreen pending cards (defi_yields 244, tool_launches 161,
+  startup_jobs 67, web3_jobs 12) have no freshness window and were left pending.
