@@ -147,6 +147,9 @@ def build_prompt(profile: VoiceProfile, *, display_name: str, spec, region_profi
     n = len(profile.paragraphs)
     prose_min = max(0, profile.length_min - overhead_chars)
     prose_max = max(prose_min, profile.length_max - overhead_chars)
+    # Aim at the middle of the range, slightly low: a first attempt that targets the upper limit
+    # lands a few characters over it (observed 2026-11-14: 508 vs 500, 469 vs 450, 461 vs 450).
+    prose_aim = prose_min + int((prose_max - prose_min) * 0.45)
     roles = "\n".join(f"  {i}. {role}" for i, role in enumerate(profile.paragraphs, 1))
     audience = f"\nThe story's own subject matter is aimed at: {spec.audience}." if spec.audience else ""
 
@@ -183,7 +186,7 @@ Title: {profile.title_style}{rules_block}
 STRUCTURE -- the body is exactly {n} paragraph{'s' if n != 1 else ''}, in this order:
 {roles}
 
-LENGTH -- the finished post is {profile.length_min}-{profile.length_max} characters. A fixed {overhead_chars} characters are added around your prose (the leading emoji and any context lines), so the title plus all paragraphs together must come to about {prose_min}-{prose_max} characters. Count them; this range is enforced by code.
+LENGTH -- the finished post must be {profile.length_min}-{profile.length_max} characters, enforced by code. A fixed {overhead_chars} characters are added around your prose (the leading emoji and any context lines), so the title plus all paragraphs together must total between {prose_min} and {prose_max} characters. AIM FOR ABOUT {prose_aim}: drafts that aim for the limit overshoot it. Count your characters before answering.
 
 {facts}
 
@@ -226,9 +229,13 @@ def find_voice_issues(profile: VoiceProfile, parsed: dict, post_chars: int | Non
 
     prose = _prose(parsed)
     if post_chars is not None and not (profile.length_min <= post_chars <= profile.length_max):
-        direction = "shorten it" if post_chars > profile.length_max else "lengthen it"
+        mid = (profile.length_min + profile.length_max) // 2
+        if post_chars > profile.length_max:
+            fix = f"cut about {post_chars - mid} characters (aim for roughly {mid} in total)"
+        else:
+            fix = f"add about {mid - post_chars} characters (aim for roughly {mid} in total)"
         issues.append(f"the finished post is {post_chars} characters but must be {profile.length_min}-"
-                      f"{profile.length_max} -- {direction}")
+                      f"{profile.length_max} -- {fix}")
 
     if profile.title_check == "has_number" and facts_have_figures and not _NUMBER_RE.search(title):
         issues.append("the title must lead with data and contain at least one figure (a number, amount or percentage)")
