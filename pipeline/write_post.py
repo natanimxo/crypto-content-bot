@@ -924,6 +924,38 @@ def _find_speculation_issues(parsed: dict) -> list[str]:
     return [p.pattern for p in _SPECULATION_PATTERNS if p.search(text)]
 
 
+# Reader-advice guard (2026-11-14, channel-voice path). Found by the first macro_news-on-Hustle
+# generation: Hustle's second paragraph is "what to do about it", and macro_news's guardrail says the
+# answer is what it MEANS for the reader or what to WATCH -- never an instruction. The model wrote
+# "plan for higher costs on any credit you rely on". The prompt alone did not hold the line, so this
+# checks the output, same as every other guardrail. Deliberately narrow: an advisory modal aimed at
+# the reader ("you should/must/need to"), or a sentence that OPENS with an advisory imperative.
+# "Watch ...", "Track ...", "Note ..." are NOT advice and are allowed. A floor, not a guarantee --
+# it cannot see advice phrased as a statement ("now is the time to lock in rates").
+_ADVICE_MODAL_RE = re.compile(
+    r"\byou(?:'d| would| might| may| could)? (?:should|must|need to|ought to|want to|better)\b"
+    r"|\b(?:you(?:'d| would)? )?(?:might|may) want to\b|\bit(?:'s| is) (?:wise|smart|prudent) to\b",
+    re.IGNORECASE)
+_ADVICE_IMPERATIVE_RE = re.compile(
+    r"^\W*(?:plan|prepare|brace|consider|budget|hedge|lock|buy|sell|hold|invest|avoid|stock|cut|raise|"
+    r"reduce|increase|review|revisit|renegotiate|diversify|save|spend|borrow|refinance|delay|accelerate|"
+    r"build|adjust|factor|price in|set aside|make sure|be sure|don't|do not)\b",
+    re.IGNORECASE)
+READER_ADVICE_CHECKED_CATEGORIES = {"macro_news"}
+
+
+def _find_reader_advice(parsed: dict) -> list[str]:
+    issues = []
+    for sentence in _SENTENCE_SPLIT_RE.split(_prose_text(parsed)):
+        s = sentence.strip()
+        # An advisory imperative may follow a colon or dash ("Watch rates: plan for ...") -- check each clause.
+        clauses = re.split(r"[:;—]\s+|\s--\s|,\s+(?:so|and|then|but)\s+", s)
+        if _ADVICE_MODAL_RE.search(s) or any(_ADVICE_IMPERATIVE_RE.match(c) for c in clauses):
+            issues.append(f"it tells the reader what to do (\"{s[:70]}\") -- say what it means for them or what to "
+                          f"watch instead; never an instruction")
+    return issues
+
+
 def _generate_checked_write(conn, category: str, prompt: str, *, model_override: str | None = None,
                              source_excerpt: str | None = None, check_neutrality: bool = False,
                              check_no_speculation: bool = False) -> str:
@@ -1590,7 +1622,7 @@ NEUTRALITY_CHECKED_CATEGORIES = {"macro_news"}
 SPECULATION_CHECKED_CATEGORIES = {"hacks_exploits"}
 
 
-VOICE_MAX_RETRIES = 2  # after the first draft; each retry carries the specific issues found
+VOICE_MAX_RETRIES = 3  # after the first draft; each retry carries the specific issues found (2 left ~1 in 12 writes failing on a length miss by a few characters)
 
 
 def _get_display_name(conn, channel: str) -> str:
@@ -1682,6 +1714,8 @@ def generate_post_with_report(conn, category: str, channel: str, raw_item: dict,
             hits += _find_neutrality_violations(parsed)
         if category in SPECULATION_CHECKED_CATEGORIES:
             hits += _find_speculation_issues(parsed)
+        if category in READER_ADVICE_CHECKED_CATEGORIES:
+            hits += _find_reader_advice(parsed)
         chars = channel_voice.measure(assemble(str(parsed.get("title", "")), parsed["paragraphs"], final=False))
         return hits + channel_voice.find_voice_issues(profile, parsed, chars, facts_have_figures)
 

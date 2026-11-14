@@ -138,6 +138,11 @@ class FactSpec:
     content_brief: str            # what a post must cover -- no tone, no length, no structure
     guardrails: str               # never-rules; override any channel voice instruction
     us_guardrail: str | None = None   # extra rule on region_profile 'us' channels (kept from the legacy builders)
+    # Where a channel's paragraph ROLE would invite what the guardrails forbid, the category replaces
+    # that role (1-based paragraph number -> new role text) instead of relying on the model to
+    # reconcile them -- guardrails beat voice, applied at prompt-design level. Only ever used for
+    # a role that would otherwise ask for advice; the channel's tone/length/person still apply.
+    role_overrides: dict[int, str] | None = None
 
 
 _NO_SCORES = "Never mention scores or internal categorization."
@@ -256,6 +261,14 @@ FACT_SPECS: dict[str, FactSpec] = {
             "the reader should DO, answer with what it means for them or what to watch; "
             "never an instruction."
         ),
+        # Hustle's second paragraph is "what to do about it". For macro news that invites exactly
+        # what the guardrail forbids (first live generation: "plan for higher costs on any credit
+        # you rely on"), so the role is replaced here, not left for the model to reconcile.
+        role_overrides={2: (
+            "What it means for you: the plausible effect on the reader's costs, demand or markets, "
+            "and what to watch next -- a statement about the world, written to the reader, never an "
+            "instruction or a recommendation of any action."
+        )},
         guardrails=(
             "HARD RULES. Report what happened and its plausible economic implications. Never "
             "advocate a position, never tell a government/policymaker/reader what should "

@@ -150,7 +150,8 @@ def build_prompt(profile: VoiceProfile, *, display_name: str, spec, region_profi
     # Aim at the middle of the range, slightly low: a first attempt that targets the upper limit
     # lands a few characters over it (observed 2026-11-14: 508 vs 500, 469 vs 450, 461 vs 450).
     prose_aim = prose_min + int((prose_max - prose_min) * 0.45)
-    roles = "\n".join(f"  {i}. {role}" for i, role in enumerate(profile.paragraphs, 1))
+    overrides = getattr(spec, "role_overrides", None) or {}
+    roles = "\n".join(f"  {i}. {overrides.get(i, role)}" for i, role in enumerate(profile.paragraphs, 1))
     audience = f"\nThe story's own subject matter is aimed at: {spec.audience}." if spec.audience else ""
 
     rules = []

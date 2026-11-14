@@ -1460,3 +1460,21 @@ Guardrails beat voice: macro_news on Hustle answers "what to do" with "what it m
   daily-call-count alerts, with a 10x ceiling of their own. Raising the threshold would have
   missed the real incident (~33 calls per 15 min).
 - Cost of a Wall Street write: 1-3 DeepSeek calls (retries carry the specific issue).
+
+**Wiring + first live integration run (2026-11-14, same day):** column + seed applied, code pushed
+before the profiles were seeded; every profiled channel/category pair then run through the real
+`generate_post` (DB profile) -- see `scripts/` history. Findings, all fixed:
+- 3/8 first-run writes missed the UPPER length bound by 8-19 chars after retries. The prompt now
+  aims at ~45% of the way up the range ("drafts that aim for the limit overshoot it") and a retry
+  says how many characters to cut; max retries 2 -> 3. Measured across 41 + 18 items: ~92-95% first-
+  pass-with-retries, the remainder length misses; a failed write surfaces as the usual "write failed"
+  card (Retry / Reject).
+- macro_news on Hustle: the channel's second paragraph is "what to do about it", which invites the
+  advice macro_news's guardrail forbids -- the first generation wrote "plan for higher costs on any
+  credit you rely on". Guardrail wins, applied two ways: (1) `FactSpec.role_overrides` replaces that
+  paragraph's role for macro_news with "what it means for you / what to watch -- a statement about the
+  world, never an instruction"; (2) `_find_reader_advice` checks the output (advisory modal aimed at the
+  reader, or a clause opening with an advisory imperative; "Watch/Track/Note" allowed). Floor, not a
+  guarantee -- advice phrased as a statement is invisible to it, and it flags attributed advice too
+  (a false positive that just costs a retry). The channel's voice does feel slightly constrained on
+  macro_news as a result; that is the intended trade.
