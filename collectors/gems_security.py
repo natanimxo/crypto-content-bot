@@ -190,7 +190,15 @@ MAX_GOPLUS_CALLS_PER_RUN = 60
 # the always-on Railway poller is now verified healthy, which was the
 # entire reason every collector held unconditionally. Existing held rows
 # are untouched by this; only new candidates from here on are affected.
-HOLD_ALL_CANDIDATES = False
+#
+# RE-FLIPPED to True 2026-11-14 (operator direction): gems_security is being
+# moved from CoinCraft to Crypto Notebook, and CoinCraft becomes a non-crypto
+# earning-opportunities channel. Until that remap lands, every new gems row is
+# inserted HELD so nothing drains into CoinCraft. Flip back to False when the
+# category's channel routing is changed. Rows already held (the 2026-11-14
+# backlog, 173 at the time) stay held until released with
+# scripts/hold_candidates.py.
+HOLD_ALL_CANDIDATES = True
 
 
 def fetch_pools() -> list[dict]:
