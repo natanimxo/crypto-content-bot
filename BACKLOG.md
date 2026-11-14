@@ -324,6 +324,80 @@ the one place to check.
   heuristic, not a filler-word gap; worth a proper-noun-aware approach if it
   keeps showing up.
 
+## gems_security "broken, not quiet" + hacks_exploits inserted=0 (2026-11-14)
+
+- **`gems_security`: both halves of the operator's diagnosis were right, but
+  they were two different problems, and only one of them was why nothing
+  came out.** Measured by replaying the collector against live data (local
+  replay on the same DB/cache; I had no Railway log access -- the CLI session
+  had expired).
+  **(1) GoPlus responses were being thrown away (fixed).** Of the 28 calls the
+  collector spent its budget on in one cycle, **28 were discarded**: 24 were
+  `code=3, message="OK"` WITH data present (15-16 fields) on Base tokens, 4
+  were `code=5000 system error` on ids like `coingecko:usd-coin`. Three
+  defects in `pipeline/goplus.py`: only `code == 1` was accepted (GoPlus's docs
+  define code 2 as "partial data... request again in ~15 seconds"; code 3 is
+  undocumented but behaves the same -- now both are used when data is present,
+  tagged `_goplus_code`, cached 1 day not 14, missing fields still read as
+  UNKNOWN, never clean); non-address ids were sent to the API (can only ever
+  return 5000 -- now short-circuited to "unchecked", no call); and a failure
+  was never remembered, so one token was re-requested once per pool containing
+  it, AND the collector charged the 60-call budget per pool occurrence. A
+  single Base token consumed 24 of those 28 calls. Real collector run after the
+  fix: 13 distinct calls (was 60), 0 pools deferred for budget (was ~100), 13/13
+  responses usable. Only 16 distinct tokens (~0.5%) were ever affected -- the
+  cache already covered the rest -- but they monopolised the budget, so the
+  sweep never made progress and the failure was invisible.
+  **(2) That fix alone changes NOTHING (measured, not assumed):** the 12
+  never-cached tokens all came back with data and none is red-flagged; replaying
+  the full decision before and after gives 175 flagged pools, 167 removed by
+  the dominance filter, 8 survivors, all 8 already delivered -> **0 new**
+  either way. `red_flagged: 9` in the run log is the count AFTER the dominance
+  filter, which is why 175 flagged pools looked like 9.
+  **(3) The actual cause of inserted=0: the dominance filter's `project:`
+  key.** 155 of the 167 exclusions tripped ONLY that key (no repeated token, no
+  Pendle-style template) and carried **149 distinct flagged tokens**;
+  `uniswap-v2` lost 90 pools, `uniswap-v4` 27, `uniswap-v3` 16. The key was
+  built for protocol product families (Pendle), but an open-listing DEX is a
+  venue, not a product, and it's exactly where small-cap gems live (15 of the
+  removed pools carried a simulated honeypot/cannot-sell flag). **Fixed
+  (`PROJECT_REPEAT_RATIO = 0.5`, `collectors/gems_security.py`):** a project key
+  only counts when its flagged pools REPEAT their tokens (distinct flagged
+  addresses <= 0.5 x pools); address and template keys unchanged. Effect on
+  live data: survivors 8 -> 163, **141 new** (90 uniswap-v2, 27 v4, 14 v3, ...;
+  101 Ethereum / 28 Base; median TVL $181k; 13 with a simulated-behaviour
+  flag). **This is a policy change, flagged as one:** the category stops being
+  "rare by design" -- the earlier "~0.5/week" figure in this file was largely
+  the filter, not the market. Delivery stays bounded by `soft_daily_cap` 4/day
+  and per-cycle pacing (1/cycle), so the ~140-row backlog drains over ~5
+  weeks, best-scored first; many flags are blunt contract facts
+  (`creator_percent`, `is_open_source`), so expect noise and judge it on real
+  cards. Revert: set `PROJECT_REPEAT_RATIO = 0.0`.
+- **Unmapped chains (1,754 deferred pools), separately.** Not an error -- a
+  coverage gap. GoPlus's `/supported_chains` now lists 46 chains; the Sept note
+  that Monad wasn't supported is stale. Added, each verified live with a real
+  pool token (code=1 + data): Monad 143, Plasma 9745, Robinhood Chain 4663,
+  Mantle 5000, Sonic 146, Linea 59144, Berachain 80094 (~265 pools; unmapped
+  1,754 -> 1,490). NOT added: Scroll/Unichain (supported, but the one token
+  tried on each returned no data -- insufficient evidence); Hyperliquid L1
+  (127 pools), Flare, Katana (unsupported by GoPlus). **Solana is the real gap
+  (738 pools, $4.5B TVL):** it has a separate GoPlus endpoint with a different
+  response schema -- a feature, not a mapping fix; not done.
+- **Visibility:** `collect_gems_security` run_logs now record
+  `details.goplus` (ok / partial / unavailable / non_address_skipped, with the
+  code), and an ERROR is logged when >50% of >=10 real calls return nothing
+  usable, so a degraded GoPlus reads as a number instead of "quiet".
+- **`hacks_exploits`: inserted=0 is correct -- and not the freshness window.**
+  The collector has no freshness filter (that's in `select_candidates`); it
+  re-fetches all ~770 incidents >= $500k each cycle and inserts only new
+  `name:date` ids. Checked against the live feed: **0 qualifying incidents
+  missing from the DB**; newest is 2026-11-10, ingested 11-11; recent inserts
+  are 3-8/week, so consecutive zero cycles are the normal quiet state. Added
+  `already_stored` to the run details and log so it reads that way. Latent,
+  harmless: 3 pre-2025 incidents share a `name:date` id with another (Gamma,
+  OcelotDex, Merlin) so the second was dropped on insert; not changed
+  (re-keying would re-insert the whole history).
+
 ## Silent write failures (2026-10-06)
 
 - **Approve "not working" on `hacks_exploits` -- root cause was my launch

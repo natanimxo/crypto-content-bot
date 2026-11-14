@@ -28,7 +28,9 @@ risk_line callers build must say so explicitly rather than staying silent
 
 import json
 import logging
+import re
 import time
+from collections import Counter
 
 from pipeline.db import dict_cursor
 from pipeline.http import get_json
@@ -45,6 +47,57 @@ NATIVE_TOKEN_ADDRESS = "0x0000000000000000000000000000000000000000"
 # (a single GitHub Actions job), so there's no concurrent-caller case to guard.
 GOPLUS_REQUEST_INTERVAL_SECONDS = 6.0
 _last_call_at = 0.0
+
+# RESPONSE-CODE HANDLING, fixed 2026-11-14 after a live log review showed
+# gems_security inserting nothing for weeks while "almost every GoPlus call"
+# errored. Three separate defects, all in how a response was interpreted:
+#
+# 1. Only `code == 1` was accepted. GoPlus's docs define code 2 as "Partial
+#    data obtained. The complete data can be requested again in about 15
+#    seconds", and in practice returns `code=3, message="OK"` with 15-16 of the
+#    usual 19-34 fields for some tokens (code 3 is NOT in GoPlus's published
+#    status table; observed live on Base tokens 2026-11-14, data present every
+#    time). The old code threw all of that away AND never cached it, so those
+#    tokens were re-requested -- and discarded again -- on every cycle, forever.
+#    Now: codes 2 and 3 with data present are USED (fields that are missing are
+#    already read as "unknown" by evaluate(), never as clean), tagged
+#    `_goplus_code` in the cached JSON, and cached only PARTIAL_RESULT_TTL_DAYS
+#    so a completed analysis is picked up soon instead of 14 days later.
+# 2. Non-address "token" ids were sent to the API. DefiLlama's underlyingTokens
+#    sometimes holds `coingecko:usd-coin` or a Solana base58 string instead of
+#    a contract address; GoPlus answers every one with `code=5000 system error`.
+#    They can never succeed, so they now short-circuit to "unchecked" with NO
+#    API call (is_checkable_address).
+# 3. A failed lookup was never remembered, so the SAME failing token was
+#    re-requested once per pool containing it (and, via the collector's own
+#    accounting, charged against the per-run call budget each time). A failure
+#    is now remembered for the rest of the process (UNAVAILABLE_BACKOFF_SECONDS).
+PARTIAL_CODES = {2, 3}
+PARTIAL_RESULT_TTL_DAYS = 1
+PARTIAL_MARKER = "_goplus_code"
+UNAVAILABLE_BACKOFF_SECONDS = 6 * 3600
+_unavailable_until: dict[tuple[int, str], float] = {}
+
+# Per-process outcome counters -- collectors copy these into run_logs so a
+# degraded GoPlus shows up as a number instead of staying invisible.
+STATS: Counter = Counter()
+
+_EVM_ADDRESS_RE = re.compile(r"^0x[0-9a-f]{40}$")
+
+
+def is_checkable_address(addr: str | None) -> bool:
+    """True only for a real EVM contract address -- the one id shape GoPlus's
+    numeric-chain-id endpoint can answer."""
+    return bool(addr) and bool(_EVM_ADDRESS_RE.match(addr.lower()))
+
+
+def _is_partial(result) -> bool:
+    return isinstance(result, dict) and result.get(PARTIAL_MARKER) in PARTIAL_CODES
+
+
+def _is_fresh(result, checked_at, cache_ttl_days: float) -> bool:
+    ttl = min(cache_ttl_days, PARTIAL_RESULT_TTL_DAYS) if _is_partial(result) else cache_ttl_days
+    return (time.time() - checked_at.timestamp()) / 86400 < ttl
 
 # DefiLlama's `chain` field is a free-text name; GoPlus's endpoint wants a
 # numeric chain_id. Mapped for the chains that actually show up with real
@@ -69,6 +122,23 @@ CHAIN_NAME_TO_GOPLUS_ID = {
     "fantom": 250,
     "cronos": 25,
     "gnosis": 100,
+    # Added 2026-11-14. The Sept note above said Monad wasn't in GoPlus's chain
+    # enum; it is now (GoPlus /supported_chains lists 46 chains). Each id below
+    # was verified live with a real pool token returning code=1 and data, using
+    # DefiLlama's chain NAME as it appears in the yields feed. Together these
+    # were ~265 qualifying pools previously deferred as "unmapped". Checked and
+    # NOT added: Scroll and Unichain (supported by GoPlus, but the one real
+    # token tried on each returned no data -- not enough evidence), Hyperliquid
+    # L1 / Flare / Katana (not supported by GoPlus at all), Solana/Sui/TON/etc.
+    # (non-EVM; Solana has a separate endpoint with a different response schema
+    # -- feature work, not a mapping fix).
+    "monad": 143,
+    "plasma": 9745,
+    "robinhood chain": 4663,
+    "mantle": 5000,
+    "sonic": 146,
+    "linea": 59144,
+    "berachain": 80094,
 }
 
 # The fields that actually matter for a red-flag determination, each with a
@@ -218,11 +288,10 @@ def bulk_cache_lookup(conn, chain_name: str, contract_addresses: list[str],
             (chain_id, addrs),
         )
         rows = cur.fetchall()
-    now = time.time()
     return {
         row["contract_address"]: row["result"]
         for row in rows
-        if (now - row["checked_at"].timestamp()) / 86400 < cache_ttl_days
+        if _is_fresh(row["result"], row["checked_at"], cache_ttl_days)
     }
 
 
@@ -234,14 +303,17 @@ def would_need_fresh_call(conn, chain_name: str, contract_address: str, *, cache
     cache/chain-mapping/native-address logic to find out."""
     if not contract_address or contract_address.lower() == NATIVE_TOKEN_ADDRESS:
         return False  # never calls the API at all for this address
+    if not is_checkable_address(contract_address):
+        return False  # not a contract address -- short-circuits, no call
     chain_id = CHAIN_NAME_TO_GOPLUS_ID.get((chain_name or "").lower())
     if chain_id is None:
         return False  # skipped, not called
+    if _unavailable_until.get((chain_id, contract_address.lower()), 0) > time.time():
+        return False  # failed earlier this process; not retried yet
     cached = _cache_get(conn, chain_id, contract_address.lower())
     if cached is None:
         return True
-    age_days = (time.time() - cached["checked_at"].timestamp()) / 86400
-    return age_days >= cache_ttl_days
+    return not _is_fresh(cached["result"], cached["checked_at"], cache_ttl_days)
 
 
 def get_token_security(conn, chain_name: str, contract_address: str, *, cache_ttl_days: int = 14) -> dict | None:
@@ -262,26 +334,44 @@ def get_token_security(conn, chain_name: str, contract_address: str, *, cache_tt
     if chain_id is None:
         logger.info("goplus: skipping unmapped chain %r for %s", chain_name, contract_address)
         return None
+    if not is_checkable_address(contract_address):
+        STATS["non_address_skipped"] += 1
+        return None  # e.g. "coingecko:usd-coin" -- GoPlus can only answer 5000 for these
 
     contract_address = contract_address.lower()
     cached = _cache_get(conn, chain_id, contract_address)
-    if cached is not None:
-        age_days = (time.time() - cached["checked_at"].timestamp()) / 86400
-        if age_days < cache_ttl_days:
-            return cached["result"]
+    if cached is not None and _is_fresh(cached["result"], cached["checked_at"], cache_ttl_days):
+        return cached["result"]
+
+    key = (chain_id, contract_address)
+    if _unavailable_until.get(key, 0) > time.time():
+        return cached["result"] if cached is not None else None  # already failed this process
 
     body = _rate_limited_get(
         API_URL_TEMPLATE.format(chain_id=chain_id),
         {"contract_addresses": contract_address},
     )
-    if body.get("code") != 1:
-        logger.warning("goplus: non-OK response for %s@%s: code=%s message=%s",
-                        contract_address, chain_id, body.get("code"), body.get("message"))
-        return cached["result"] if cached is not None else None  # stale cache beats nothing on a transient failure
+    code = body.get("code")
+    raw = body.get("result")
+    result = raw.get(contract_address) if isinstance(raw, dict) else None
 
-    result = (body.get("result") or {}).get(contract_address)
-    _cache_put(conn, chain_id, contract_address, result)
-    return result
+    if code == 1:
+        STATS["ok"] += 1
+        _cache_put(conn, chain_id, contract_address, result)
+        return result
+
+    if code in PARTIAL_CODES and result:
+        STATS["partial"] += 1
+        stored = {**result, PARTIAL_MARKER: code}
+        _cache_put(conn, chain_id, contract_address, stored)
+        return stored
+
+    STATS["unavailable"] += 1
+    STATS[f"unavailable_code_{code}"] += 1
+    _unavailable_until[key] = time.time() + UNAVAILABLE_BACKOFF_SECONDS
+    logger.warning("goplus: no usable response for %s@%s: code=%s message=%s",
+                   contract_address, chain_id, code, body.get("message"))
+    return cached["result"] if cached is not None else None  # stale cache beats nothing on a transient failure
 
 
 def evaluate(result: dict | None) -> dict:

@@ -147,6 +147,27 @@ def _is_known_major(chain: str, address: str) -> bool:
 # letters.
 PROTOCOL_DOMINANCE_THRESHOLD = 3
 
+# 2026-11-14 -- the `project:` key above was over-broad and, in practice, is
+# what held this category at inserted=0 for weeks (diagnosed from live logs:
+# GoPlus flagged ~175 pools a cycle, the filter removed ~167, and the ~8
+# survivors had all been delivered long ago). 155 of those 167 exclusions
+# tripped ONLY the host-project key -- no repeated token, no Pendle-style
+# template -- and carried 149 DISTINCT flagged token addresses. `uniswap-v2`
+# alone lost 90 pools, `uniswap-v4` 27: an open-listing DEX is a venue anyone
+# can list any token on, not one protocol's product repeating, so "3 flagged
+# pools share this host" says nothing about a shared cause there (and those
+# hosts are exactly where small-cap gems live -- 15 of the removed pools carried
+# a SIMULATED honeypot/cannot-sell flag). The key now only counts when the
+# project's flagged pools actually REPEAT their tokens: distinct flagged token
+# addresses must be <= PROJECT_REPEAT_RATIO x the number of pools. The address
+# and template keys are unchanged and still catch a repeated token (Syrup) or a
+# minted family (Pendle PT-/YT-/SY-). Set to 0.0 to restore the old behaviour
+# (every project with >= PROTOCOL_DOMINANCE_THRESHOLD flagged pools excluded).
+# Measured effect against live data when this shipped: survivors 8 -> 163 (141
+# new); delivery stays bounded by gems_security's soft_daily_cap (4/day) and
+# per-cycle pacing (1/cycle).
+PROJECT_REPEAT_RATIO = 0.5
+
 _TOKENIZATION_TEMPLATE_PREFIXES = re.compile(r"^(PT|YT|SY)-", re.IGNORECASE)
 
 
@@ -227,6 +248,23 @@ def collect() -> int:
             fresh_calls = 0
             deferred_budget = 0
             deferred_unmapped_chain = 0
+            goplus.STATS.clear()
+
+            # Every verdict resolved so far THIS RUN, keyed (chain, address).
+            # Fixed 2026-11-14: the loop below used to consult only the
+            # start-of-run cache snapshot, so a token appearing in N pools was
+            # charged to the call budget N times (and, if GoPlus couldn't
+            # answer it, actually re-requested N times). Live replay: a single
+            # Base token consumed 24 of the 28 calls one cycle's budget paid
+            # for, and every one of them was thrown away -- see pipeline/
+            # goplus.py's RESPONSE-CODE HANDLING note. Budget now counts
+            # DISTINCT real calls only.
+            resolved: dict[tuple[str, str], dict | None] = {
+                (chain, addr): res for chain, cache in cache_by_chain.items() for addr, res in cache.items()
+            }
+
+            def _needs_call(chain: str, addr: str) -> bool:
+                return goplus.is_checkable_address(addr) and (chain, addr) not in resolved
 
             for pool in qualifying:
                 chain = pool.get("chain")
@@ -236,12 +274,11 @@ def collect() -> int:
                 ]
                 if not tokens:
                     continue  # nothing left to check -- e.g. an all-major pair like WBTC-USDC
-                chain_cache = cache_by_chain.get(chain, {})
                 if (chain or "").lower() not in goplus.CHAIN_NAME_TO_GOPLUS_ID:
                     deferred_unmapped_chain += 1
                     continue
 
-                cache_misses = [t for t in tokens if t not in chain_cache]
+                cache_misses = [t for t in dict.fromkeys(tokens) if _needs_call(chain, t)]
                 if cache_misses and fresh_calls + len(cache_misses) > MAX_GOPLUS_CALLS_PER_RUN:
                     # Would blow this run's budget -- defer the WHOLE pool to
                     # a later cycle rather than partially screen it (a pool
@@ -253,12 +290,14 @@ def collect() -> int:
 
                 per_token = []
                 for addr in tokens:
-                    if addr in chain_cache:
-                        result = chain_cache[addr]
-                    else:
-                        result = goplus.get_token_security(conn, chain, addr)
-                        fresh_calls += 1
-                    per_token.append({"address": addr, **goplus.evaluate(result)})
+                    key = (chain, addr)
+                    if key not in resolved:
+                        if goplus.is_checkable_address(addr):
+                            resolved[key] = goplus.get_token_security(conn, chain, addr)
+                            fresh_calls += 1
+                        else:
+                            resolved[key] = None  # e.g. "coingecko:usd-coin": reported as unchecked, no API call
+                    per_token.append({"address": addr, **goplus.evaluate(resolved[key])})
 
                 if not any(t["has_red_flag"] for t in per_token):
                     continue  # the whole editorial point: no finding, no post
@@ -313,7 +352,16 @@ def collect() -> int:
             key_occurrences = Counter(
                 key for _, payload in items for key in _dominance_keys(payload)
             )
-            dominant_keys = {k for k, n in key_occurrences.items() if n >= PROTOCOL_DOMINANCE_THRESHOLD}
+            dominant_keys = set()
+            for k, n in key_occurrences.items():
+                if n < PROTOCOL_DOMINANCE_THRESHOLD:
+                    continue
+                if k.startswith("project:"):
+                    host_pools = [pl for _, pl in items if f"project:{pl.get('project')}" == k]
+                    distinct_tokens = {a for pl in host_pools for a in pl.get("flagged_token_addresses") or []}
+                    if len(distinct_tokens) > PROJECT_REPEAT_RATIO * len(host_pools):
+                        continue  # many different tokens on one host -- a venue, not a repeating product
+                dominant_keys.add(k)
             dominance_excluded = 0
             if dominant_keys:
                 kept = []
@@ -331,6 +379,13 @@ def collect() -> int:
                 )
 
             state["details"]["fresh_goplus_calls"] = fresh_calls
+            # GoPlus outcome counts, so a degraded API shows up as a number in
+            # run_logs instead of only in container logs (2026-11-14).
+            state["details"]["goplus"] = dict(goplus.STATS)
+            real_calls = sum(goplus.STATS.get(k, 0) for k in ("ok", "partial", "unavailable"))
+            if real_calls >= 10 and goplus.STATS.get("unavailable", 0) / real_calls > 0.5:
+                logger.error("gems_security: GoPlus UNHEALTHY this run -- %d of %d real calls returned nothing usable: %s",
+                             goplus.STATS["unavailable"], real_calls, dict(goplus.STATS))
             state["details"]["deferred_budget"] = deferred_budget
             state["details"]["deferred_unmapped_chain"] = deferred_unmapped_chain
             state["details"]["dominance_excluded"] = dominance_excluded
@@ -341,9 +396,9 @@ def collect() -> int:
 
             logger.info(
                 "gems_security: fetched=%d qualifying=%d fresh_calls=%d red_flagged=%d inserted=%d "
-                "deferred_budget=%d deferred_unmapped_chain=%d dominance_excluded=%d",
+                "deferred_budget=%d deferred_unmapped_chain=%d dominance_excluded=%d goplus=%s",
                 len(pools), len(qualifying), fresh_calls, len(items), inserted,
-                deferred_budget, deferred_unmapped_chain, dominance_excluded,
+                deferred_budget, deferred_unmapped_chain, dominance_excluded, dict(goplus.STATS),
             )
         return inserted
     finally:
