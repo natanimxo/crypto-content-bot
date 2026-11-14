@@ -33,6 +33,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from dotenv import load_dotenv  # noqa: E402
 
 from pipeline.alerts import check_and_alert  # noqa: E402
+from pipeline.channel_router import SHARED_CATEGORY_CHANNELS  # noqa: E402
 from pipeline.db import dict_cursor, get_conn  # noqa: E402
 from pipeline.llm import generate_triage  # noqa: E402
 from pipeline.run_log import run_log  # noqa: E402
@@ -63,6 +64,35 @@ def _channel_notified_recent_count(conn, channel: str, window_hours: float = CAP
             (channel, window_hours),
         )
         return cur.fetchone()["n"] or 0
+
+
+def _order_channels_for_shared_caps(conn, channels: list[dict]) -> list[dict]:
+    """Visit the channel that has had the LEAST of the shared categories' output
+    in the trailing 24h first. A shared category (news) has one category-wide
+    per-cycle slot (pipeline/select_candidates.py), and whoever is visited first
+    takes it -- with a fixed order the first channel would take it every cycle
+    and the other would starve. Least-served-first makes the slot alternate
+    (3/3 over a day at a 6/day cap); ties go to the channel that was sent a
+    shared-category item longest ago, then to name order. A channel with no
+    eligible candidate this cycle sends nothing and the slot falls through to
+    the next, so it is never wasted."""
+    with dict_cursor(conn) as cur:
+        cur.execute(
+            """SELECT nf.channel, COUNT(*) AS n, MAX(nf.sent_at) AS last_sent
+               FROM notifications nf
+               JOIN raw_items r ON r.id = ANY(nf.candidate_raw_item_ids)
+               WHERE r.category = ANY(%s) AND nf.sent_at > now() - (%s || ' hours')::interval
+               GROUP BY nf.channel""",
+            (list(SHARED_CATEGORY_CHANNELS), CAP_WINDOW_HOURS),
+        )
+        stats = {row["channel"]: row for row in cur.fetchall()}
+    epoch = datetime.min.replace(tzinfo=timezone.utc)
+
+    def key(ch: dict):
+        st = stats.get(ch["channel"])
+        return (st["n"] if st else 0, st["last_sent"] if st else epoch, ch["channel"])
+
+    return sorted(channels, key=key)
 
 
 def notify_channel(conn, channel: str, categories: list[str], soft_daily_cap: int | None = None) -> int | None:
@@ -169,7 +199,7 @@ def run() -> None:
     conn = get_conn()
     try:
         with run_log(conn, "notify") as state:
-            channels = _get_channels(conn)
+            channels = _order_channels_for_shared_caps(conn, _get_channels(conn))
             sent = 0
             for ch in channels:
                 nid = notify_channel(conn, ch["channel"], ch["categories"], ch.get("soft_daily_cap"))

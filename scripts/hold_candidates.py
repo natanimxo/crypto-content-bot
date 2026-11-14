@@ -28,14 +28,16 @@ from pipeline.db import dict_cursor, get_conn  # noqa: E402
 def set_held(conn, raw_item_ids: list[int], held: bool) -> int:
     with dict_cursor(conn) as cur:
         cur.execute(
-            "UPDATE raw_items SET held = %s WHERE id = ANY(%s) RETURNING id",
+            # Expired rows (raw_items.expired_at, 2026-11-14 queue cleanup) are
+            # never released -- they are past any useful life, not just paused.
+            "UPDATE raw_items SET held = %s WHERE id = ANY(%s) AND expired_at IS NULL RETURNING id",
             (held, raw_item_ids),
         )
         updated = [row["id"] for row in cur.fetchall()]
     conn.commit()
     missing = set(raw_item_ids) - set(updated)
     if missing:
-        print(f"warning: no raw_item found for id(s) {sorted(missing)}")
+        print(f"warning: no raw_item found (or expired) for id(s) {sorted(missing)}")
     return len(updated)
 
 

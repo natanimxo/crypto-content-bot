@@ -65,6 +65,7 @@ import math
 from datetime import datetime, timezone
 
 from pipeline import entities as entity_lib
+from pipeline.channel_router import SHARED_CATEGORY_CHANNELS
 from pipeline.db import dict_cursor
 from pipeline.score import load_category_config
 
@@ -100,6 +101,14 @@ CYCLE_HOURS = 4.0
 # ceil(), not floor -- a cap of 4 with 6 cycles/day must still allow 1/cycle,
 # not round down to 0.
 CYCLES_PER_DAY = 24.0 / CYCLE_HOURS
+
+# For a category shared between channels, the per-cycle cap is category-wide
+# too (see get_new_candidates), so "already sent THIS cycle" has to be measured
+# across channels. A cycle's notify step finishes within minutes and cycles are
+# CYCLE_HOURS (4h) apart, so 1h cleanly separates "earlier in this run" from
+# "last cycle". Side effect, intended: a manual off-grid run within an hour of
+# a cron cycle sees the shared category's per-cycle slot as already used.
+SHARED_CYCLE_WINDOW_HOURS = 1.0
 
 # How far back a candidate is compared against items ALREADY NOTIFIED, to catch
 # a feed re-serving a story that already went out (real incident 2026-09-18..20:
@@ -263,21 +272,26 @@ def _recently_notified_stories(conn, category: str, days: float = NOTIFIED_DEDUP
 
 
 def _category_notified_recent_count(conn, channel: str, category: str,
-                                     window_hours: float = CAP_WINDOW_HOURS) -> int:
+                                     window_hours: float = CAP_WINDOW_HOURS,
+                                     all_channels: bool = False) -> int:
     """How many items of this specific category were notified to this channel
     in the trailing `window_hours` — category_config.soft_daily_cap is a
     per-category pace, not a channel-wide one (channel_config.soft_daily_cap
     is the separate combined cap, applied in bot/notify.py across all of a
     channel's categories -- see that module's _channel_notified_recent_count,
-    same rolling-window mechanism)."""
+    same rolling-window mechanism).
+
+    all_channels=True counts the category across EVERY channel instead -- used
+    for categories shared between channels (SHARED_CATEGORY_CHANNELS), whose
+    cap is category-wide, see get_new_candidates."""
     with dict_cursor(conn) as cur:
         cur.execute(
             """SELECT COUNT(*) AS n
                FROM notifications nf
                JOIN raw_items r ON r.id = ANY(nf.candidate_raw_item_ids)
-               WHERE nf.channel = %s AND r.category = %s
+               WHERE (%s OR nf.channel = %s) AND r.category = %s
                  AND nf.sent_at > now() - (%s || ' hours')::interval""",
-            (channel, category, window_hours),
+            (all_channels, channel, category, window_hours),
         )
         return cur.fetchone()["n"] or 0
 
@@ -302,6 +316,7 @@ def get_new_candidates(conn, category: str, channel: str) -> list[dict]:
                FROM raw_items r
                JOIN scores s ON s.raw_item_id = r.id
                WHERE r.category = %s AND s.score >= %s AND r.held = FALSE
+                 AND r.expired_at IS NULL
                  AND (r.payload->>'assigned_channel' IS NULL OR r.payload->>'assigned_channel' = %s)""",
             (category, threshold, channel),
         )
@@ -395,13 +410,27 @@ def get_new_candidates(conn, category: str, channel: str) -> list[dict]:
 
     soft_cap = cfg.get("soft_daily_cap")
     if soft_cap is not None:
-        already_recent = _category_notified_recent_count(conn, channel, category)
+        # A category shared between channels (news: Wall Street / Alpha Edge)
+        # has ONE cap for the whole category, not one per channel -- 2026-11-14
+        # (operator direction): per-channel counting let each channel spend the
+        # full cap, so the operator got up to 2 news cards per channel per
+        # cycle (3-4 at once) and approved exactly one of them in 68 of 71
+        # batches. See SHARED_CYCLE_WINDOW_HOURS for the per-cycle half.
+        shared = category in SHARED_CATEGORY_CHANNELS
+        already_recent = _category_notified_recent_count(conn, channel, category, all_channels=shared)
         remaining_24h = max(0, int(soft_cap) - already_recent)
         # Per-cycle pacing: this cycle may use at most ceil(daily_cap /
         # CYCLES_PER_DAY) of that remaining headroom, never more -- the 24h
         # count above stays the true ceiling, this only stops one cycle from
         # spending all of it. See CYCLES_PER_DAY's comment above.
         per_cycle_cap = math.ceil(int(soft_cap) / CYCLES_PER_DAY)
+        if shared:
+            # notify() visits channels one after another inside the same run, so
+            # whatever an earlier channel was just sent this cycle already counts
+            # against the per-cycle cap here.
+            this_cycle = _category_notified_recent_count(
+                conn, channel, category, SHARED_CYCLE_WINDOW_HOURS, all_channels=True)
+            per_cycle_cap = max(0, per_cycle_cap - this_cycle)
         remaining = min(remaining_24h, per_cycle_cap)
         candidates = candidates[:remaining]
 

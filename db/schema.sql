@@ -287,3 +287,11 @@ ALTER TABLE post_previews DROP COLUMN IF EXISTS variant_b_model;
 ALTER TABLE post_previews DROP COLUMN IF EXISTS variant_b_text;
 ALTER TABLE post_previews DROP COLUMN IF EXISTS content_b_message_id;
 ALTER TABLE post_previews DROP COLUMN IF EXISTS chosen_variant;
+
+-- 2026-11-14 (operator-directed queue cleanup): a raw_item that was held and never
+-- released, and is now past any useful life, is marked expired rather than deleted --
+-- the row must stay (UNIQUE(source_id, external_id) is what stops a collector from
+-- re-inserting it as "new"). Not a decision: raw_items never had approvals rows, so
+-- nothing here touches calibration. get_new_candidates and hold_candidates.release
+-- both skip expired rows.
+ALTER TABLE raw_items ADD COLUMN IF NOT EXISTS expired_at TIMESTAMPTZ;

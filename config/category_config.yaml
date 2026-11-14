@@ -271,7 +271,14 @@ news:
   # subject; genuine developments still get through via the status-change
   # keyword override in collectors/news.py, not by raising this.
   cooldown_hours: 12
-  soft_daily_cap: 10
+  # 10 -> 6, 2026-11-14 (operator direction, backed by calibration): the
+  # operator was getting 3-4 news cards at once (2 per channel per cycle) and
+  # approving exactly one -- 68 of the 71 batches that had any approval, and
+  # the accepted card was the top-scored one in 64 of those 68. Now ONE cap for
+  # the whole category across Wall Street + Alpha Edge (see
+  # pipeline/select_candidates.py): ceil(6/6) = 1 card per cycle, 6 a day,
+  # channels taking turns (bot/notify.py).
+  soft_daily_cap: 6
 
   triage_model: template   # a headline is already a one-line summary
   write_model: deepseek-v4-flash
@@ -321,7 +328,10 @@ tool_launches:
 
   review_threshold: 50
   cooldown_hours: 24
-  soft_daily_cap: 8
+  # 8 -> 6, 2026-11-14: same one-from-a-batch pattern as news -- accepts came
+  # from 20 of 67 multi-card batches, exactly one card each time, and it was
+  # the top-scored in 18 of the 20. ceil(6/6) = 1 card per cycle.
+  soft_daily_cap: 6
 
   triage_model: template   # points/stars/comments are already structured facts
   write_model: deepseek-v4-flash
