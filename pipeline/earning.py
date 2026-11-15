@@ -155,10 +155,22 @@ def gate(text: str) -> list[str]:
 # ----------------------------------------------------------------------------- extraction
 
 _FX = {"$": 1.0, "usd": 1.0, "us$": 1.0, "€": 1.08, "eur": 1.08, "£": 1.27, "gbp": 1.27, "aud": 0.65, "a$": 0.65, "cad": 0.73,
-       "c$": 0.73, "inr": 0.012, "₹": 0.012, "rs": 0.012}
+       "c$": 0.73, "r$": 0.18, "brl": 0.18, "inr": 0.012, "₹": 0.012, "rs": 0.012}
 _AMOUNT_RE = re.compile(
-    r"(?P<up>up to |worth |over |\+ ?)?(?:(?P<cur1>US\$|A\$|C\$|\$|€|£|₹|USD |EUR |GBP |AUD |CAD |INR |Rs\.? ?)(?P<n1>(?:\d{1,3}(?:[ \u00a0]\d{3})+|\d[\d,]*)(?:\.\d+)?)(?P<k1>[kKmM])?"
-    r"|(?P<n2>(?:\d{1,3}(?:[ \u00a0]\d{3})+|\d[\d,]*)(?:\.\d+)?)(?P<k2>[kKmM])? ?(?P<cur2>USD|EUR|GBP|AUD|CAD|INR|USDT|USDC))", re.IGNORECASE)
+    r"(?P<up>up to |worth |over |\+ ?)?(?:(?P<cur1>R\$|US\$|A\$|C\$|\$|€|£|₹|USD |EUR |GBP |AUD |CAD |INR |Rs\.? ?)(?P<n1>(?:\d{1,3}(?:[ \u00a0]\d{3})+|\d[\d,]*)(?:\.\d+)?)(?P<k1>[kKmM])?"
+    r"|(?P<n2>(?:\d{1,3}(?:[ \u00a0]\d{3})+|\d[\d,]*)(?:\.\d+)?)(?P<k2>[kKmM])? ?(?P<cur2>USD|EUR|GBP|AUD|CAD|INR|BRL|USDT|USDC))", re.IGNORECASE)
+
+
+def _to_number(n: str) -> float:
+    """'4 000' -> 4000, '1,500' -> 1500, '10.000' -> 10000 (dot thousands: exactly three digits after each dot), '1.50' -> 1.5."""
+    n = re.sub(r"[\s\u00a0]", "", n)
+    if re.fullmatch(r"\d{1,3}(?:\.\d{3})+(?:,\d+)?", n):
+        n = n.replace(".", "").replace(",", ".")
+    elif re.fullmatch(r"\d+,\d{1,2}", n):
+        n = n.replace(",", ".")
+    else:
+        n = n.replace(",", "")
+    return float(n)
 
 
 def extract_amounts_usd(text: str) -> list[float]:
@@ -168,7 +180,7 @@ def extract_amounts_usd(text: str) -> list[float]:
         n = m.group("n1") or m.group("n2")
         k = (m.group("k1") or m.group("k2") or "").lower()
         try:
-            v = float(re.sub(r"[,\s\u00a0]", "", n))
+            v = _to_number(n)
         except ValueError:
             continue
         v *= {"k": 1e3, "m": 1e6}.get(k, 1)
@@ -179,8 +191,8 @@ def extract_amounts_usd(text: str) -> list[float]:
     return out
 
 
-_REWARD_BEFORE_RE = re.compile(r"(?:win|won|prize|prizes|reward|rewards|bonus|earn|earning|get|receive|receiving|credit|credits|gift ?card|voucher|cash ?back|worth|valued? at|up to|free|claim|giveaway|pool of|total of|приз\w*|наград\w*|бонус\w*|получ\w*|выигра\w*|раздел\w*|пул\w*|pr[eê]mio\w*|recompensa\w*|b[oô]nus|ganhe|ganhar|receba|receber)(?:\W+\w{1,4}){0,2}\W{0,3}[^\w$€£]{0,25}$", re.IGNORECASE)
-_REWARD_AFTER_RE = re.compile(r"^\s{0,2}(?:/\w+ )?(?:bonus|credits?|reward|rewards|prize|prizes|gift ?card|voucher|cash ?back|in (?:prizes|rewards|credits|tokens|bonuses)|worth|value|giveaway|airdrop|free)|бонус\w*|наград\w*|приз\w*|в токен\w+|pr[eê]mio\w*|b[oô]nus|recompensa\w*|em pr[eê]mios", re.IGNORECASE)
+_REWARD_BEFORE_RE = re.compile(r"(?:win|won|prize|prizes|reward|rewards|bonus|earn|earning|get|receive|receiving|credit|credits|gift ?card|voucher|cash ?back|worth|valued? at|up to|free|claim|giveaway|pool of|total of|приз\w*|наград\w*|бонус\w*|получ\w*|выигра\w*|раздел\w*|пул\w*|pr[eê]mio\w*|recompensa\w*|b[oô]nus|ganhe|ganhar|receba|receber|giving away|give away|разыгрыва\w*|сумму|pr[eê]mio total|pool de|sorteio de|каждому\w*|каждого|cada)(?:\W+\w{1,9}){0,2}\W{0,3}[^\w$€£]{0,25}$", re.IGNORECASE)
+_REWARD_AFTER_RE = re.compile(r"^\s{0,2}(?:/\w+ )?(?:bonus|credits?|reward|rewards|prize|prizes|gift ?card|voucher|cash ?back|in (?:prizes|rewards|credits|tokens|bonuses)|worth|value|giveaway|airdrop|free)|бонус\w*|наград\w*|приз\w*|в токен\w+|pr[eê]mio\w*|b[oô]nus|recompensa\w*|em pr[eê]mios|shared|distributed|up for grabs|split|pool|each|per (?:person|winner|user)|разыгрываем|за каждого|cada|por pessoa", re.IGNORECASE)
 _NOT_REWARD_RE = re.compile(r"raise[ds]?|привлек\w*|раунд\w*|инвестиц\w*|оценк\w*|капитализац\w*|объ[её]м\w*|стоимост\w*|levantou|rodada|avalia[cç][aã]o|pre[cç]o|funding|valuation|tvl|market ?cap|\bfdv\b|\bround\b|series [a-d]\b|volume|investors?|\bprice[ds]?\b|\bcosts?\b|msrp|\brrp\b|\bwas \W|\bonly \W|\bjust \W|\bsave\b|saving|\boff\b|per month|/mo\b|a month|subscription|deposit|minimum|balance|spend|purchase|\bbuy\b|\bfrom \W|\bnow \W|\bfor \W|instead of", re.IGNORECASE)
 
 
@@ -208,29 +220,71 @@ def extract_reward_usd(text: str, type_: str = "other") -> float | None:
     return best
 
 
+# ---- What KIND of amount is it? (operator, 2026-11-15: "the cross-penalty is the most aggressive rule in the system and it fires
+# on a value-derived signal -- any misread of value silently destroys trust"). The payout-for-nothing penalty may fire ONLY on an
+# amount that is unambiguously what ONE reader receives (or a stated maximum -- a deliberate choice, see BACKLOG). A pool, a total, an
+# amount split among N winners, or anything unclear is recorded as such and can neither inflate value nor cost trust.
 _POOL_RE = re.compile(
-    r"\bpool\b|\bpool of\b|\bshare[ds]? (?:among|between|by)\b|\bsplit\b|\bdistribut\w+|\bprize pool\b|"
-    r"\bпул\b|раздел\w+|поровну|между участник\w+|между всеми|"
-    r"sorteio|dividid\w+|\bdividir\b|distribu[ií]\w+", re.IGNORECASE)
+    r"\bpool\b|\bprize fund\b|\btotal (?:rewards?|prizes?|prize|pool|of|payout|value)\b|\b(?:in|worth of) (?:prizes?|rewards?|tokens?|bonuses|total)\b|"
+    r"\bshare[ds]? (?:among|between|by|with)\b|\bsplit\b|\bdistribut\w+|\bup for grabs\b|\bgiv(?:e|ing) away\b.{0,25}\b(?:among|between|to)\b|\bto be shared\b|"
+    r"призов\w+ фонд\w*|\bфонд\w* наград\w*|\bпул\b|общ\w+ (?:пул|фонд|сумм\w+)|раздел\w+|разыгр\w+|поровну|между (?:всеми|участник\w+|победител\w+)|\bна сумму\b|в наградах|в призах|\bвсего\b|"
+    r"pr[eê]mio total|premia[cç][aã]o|\bpool de\b|distribu[ií]\w+|dividid\w+|\bdividir\b|sorte\w+ (?:entre|para)|em pr[eê]mios|em recompensas|\bsorteio\b", re.IGNORECASE)
+_WINNERS_RE = re.compile(
+    r"\b(?:for|to|among|between|across)\s+(?:the\s+)?(?:top\s+)?\d[\d,]*\s+(?:winners?|lucky|users?|participants?|people|traders?|creators?|holders?)\b|"
+    r"\b\d[\d,]*\s+winners?\b|\d[\d\s]*\s*победител\w+|\bдля\s+\d[\d\s]*\s+(?:человек|участник\w+|пользовател\w+)|"
+    r"\b\d[\d.]*\s+(?:vencedores?|ganhadores?|sortead\w+)|\bpara\s+\d[\d.]*\s+(?:vencedores?|pessoas|usu[aá]rios)", re.IGNORECASE)
+_PER_PERSON_RE = re.compile(
+    r"\beach\b|\bper (?:person|winner|user|participant|referral|account)\b|\bevery (?:user|winner|participant)\b|\ba piece\b|"
+    r"\bкаждому\b|\bкаждого\b|\bна каждого\b|\bза каждого\b|\bпо \$|\bcada\b|\bpor (?:pessoa|usu[aá]rio|conta|indica[cç][aã]o)\b", re.IGNORECASE)
+_MAX_BEFORE_RE = re.compile(r"(?:up to|upto|as much as|до|вплоть до|at[eé]|ate|hasta|m[aá]x(?:imum|imo)?|макс\w*)\W{0,3}[^\w$€£]{0,6}$", re.IGNORECASE)
 
 
 def extract_reward(text: str, type_: str = "other") -> tuple[float | None, str | None]:
-    """(amount, kind): kind is 'pool' when the amount is a total SHARED among participants ("разделяем $70 000", "a $50,000 prize
-    pool") -- not what one reader receives, so it must never be treated as a per-person payout (it would trip the
-    payout-for-nothing penalty and inflate value) -- else 'stated'. Found by re-running the airdrop channels after the multilingual fix:
-    the Russian reward cues started detecting "Разделяем $70 000 ..." and four items collapsed to trust 0."""
+    """(amount, kind), kind one of:
+       'stated'  -- what one reader receives ("a $500 gift card", "$250 bonus", "каждому по $50")  -> may be penalised
+       'max'     -- a stated maximum ("up to $15,000", "до $15 000")                              -> may be penalised (deliberate)
+       'pool'    -- a total shared among participants ("$50,000 prize pool", "разделяем $70 000")  -> never penalised, never a payout
+       'unclear' -- an amount tied to N winners, where per-person vs total cannot be told         -> never penalised, never a payout
+    Precedence: an explicit per-person cue wins; then pool/total; then a winners count; then a maximum; else stated."""
     amount = extract_reward_usd(text, type_)
     if amount is None:
         return None, None
     t = text or ""
     for m in _AMOUNT_RE.finditer(t):
         vals = extract_amounts_usd(m.group(0))
-        if vals and abs(vals[0] - amount) < 0.5:
-            around = t[max(0, m.start() - 45):m.end() + 45]
-            if _POOL_RE.search(around):
-                return amount, "pool"
-            break
+        if not (vals and abs(vals[0] - amount) < 0.5):
+            continue
+        before, after = t[max(0, m.start() - 45):m.start()], t[m.end():m.end() + 45]
+        around = before + m.group(0) + after
+        if (m.group("up") or "").strip().lower() == "up to" and not _PER_PERSON_RE.search(after[:25]) and not _POOL_RE.search(around) and not _WINNERS_RE.search(around):
+            return amount, "max"
+        if _PER_PERSON_RE.search(after[:25]) or _PER_PERSON_RE.search(before[-14:]):
+            return amount, "stated"
+        if _POOL_RE.search(around):
+            return amount, "pool"
+        if _WINNERS_RE.search(around):
+            return amount, "unclear"
+        if _MAX_BEFORE_RE.search(before[-18:]):
+            return amount, "max"
+        return amount, "stated"
     return amount, "stated"
+
+
+# ---- Roundups are not offers (operator ruling 2026-11-15): "a reader can't participate in 'Daily Roundup'". A digest of several
+# projects was being scored as ONE offer, taking the first linked project's domain facts -- the same class of error as scoring
+# airdrops.io's domain instead of the project's. Detected on the title (and first line): such a post is stored held, with the reason, and
+# never becomes a candidate. A single offer inside a roundup reaches us through the project's own channel or a second source.
+_ROUNDUP_RE = re.compile(
+    r"round-?up|\bdigest\b|\brecap\b|\bradar\b|weekly (?:radar|digest|recap|summary|update)|daily (?:radar|digest|recap|summary|update)|"
+    r"\b\d+\s+(?:\w+\s+){0,2}(?:airdrops|projects|campaigns|tasks|opportunities)\b|\btop[- ]\d+\b|\blist of\b|\bour picks\b|"
+    r"подборк\w*|отжимк\w*|дайджест\w*|итоги (?:недели|дня|месяца)|\bобзор\w*|\bсводк\w*|"
+    r"resumo (?:semanal|di[aá]rio|da semana)|\bcompila[cç][aã]o\b|\bsemanal\b.*\bresumo\b|\bdestaques\b", re.IGNORECASE)
+
+
+def is_roundup(title: str, text: str = "") -> bool:
+    """True for a digest / roundup / list of several projects (or an article about one, "Обзор биржи"): not a single opportunity."""
+    first_line = (text or "").strip().split("\n")[0][:140]
+    return bool(_ROUNDUP_RE.search(title or "") or _ROUNDUP_RE.search(first_line))
 
 
 _MONTHS = {m: i for i, m in enumerate(["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"], 1)}
@@ -552,7 +606,14 @@ def payout_for_nothing_penalty(payload: dict) -> float:
     """The cross-link. A big nominal payout for next to no capital or effort from a source nobody vets is the shape of a
     scam, so it costs TRUST. Official (tier 1) sources are exempt. Ratio = nominal payout / (capital + 1 + 0.25/min)."""
     nominal = payload.get("payout_usd")
-    if not nominal or payload.get("payout_kind") == "ev" or payload.get("source_tier") == 1:
+    # Only a text-claimed per-person amount or a stated maximum. A structured "worth" (GamerPower's retail value), an expected
+    # value, a pool or an unclear amount are never grounds to cut trust: a misread of VALUE must not silently destroy TRUST.
+    if not nominal or payload.get("payout_kind") not in ("stated", "max") or payload.get("source_tier") == 1:
+        return 0.0
+    # "For nothing" must be KNOWN. If the text carries another figure of at least half the nominal that was NOT read as a reward -- a
+    # price, a deposit, a fee (e.g. a $5,500 solar battery deal with "$3,500 worth" of extras) -- the offer is not demonstrably free, the
+    # capital in the ratio is unknown rather than zero, and cutting trust on it would be the same misread-value-destroys-trust bug.
+    if (payload.get("other_amount_max") or 0.0) >= 0.5 * nominal:
         return 0.0
     minutes = payload.get("effort_minutes") or _EFFORT_DEFAULT_MIN.get(payload.get("type") or "other", 20)
     ratio = nominal / ((payload.get("capital_usd") or 0.0) + 1.0 + 0.25 * minutes)

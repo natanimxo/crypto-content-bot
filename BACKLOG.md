@@ -1950,3 +1950,51 @@ FIRST linked project's domain facts -- a multi-project post is not a single oppo
 nominal payout and trips the penalty for tier-3 sources (WEEX/OKX exchange sign-up bonuses score trust 0) -- defensible, but it is a
 judgement call; (c) near misses: 9 items at trust 34-38.
 
+### Phase 5 follow-ups, round 3 (2026-11-15, operator rulings: roundups, "up to", near misses, the payout audit)
+
+**1. Roundups are non-offers -- excluded.** A digest of several projects was scored as ONE offer and took the first linked project's domain
+facts (6 of the 25 airdrop passes): the same class of error as scoring airdrops.io's domain. `earning.is_roundup` (title / first line:
+roundup, digest, recap, radar, "N confirmed/early airdrops|campaigns", "top N", Russian подборка / отжимка / дайджест / итоги / обзор,
+Portuguese resumo semanal / compilação) now gates them: stored HELD with the reason "not an offer: a digest / roundup of several
+projects" (13 on the last run), never a candidate. A single offer that merely says "weekly"/"daily" ("Weekly giveaway: win a $100 gift
+card", "Daily check-in reward") is deliberately NOT matched (tested). A genuinely good offer inside a roundup is expected to arrive through the
+project's own channel or a second source.
+
+**2. "Up to $15,000" welcome bonuses -- DELIBERATE CHOICE, not an oversight.** A stated MAXIMUM is scored as the payout and can trip the
+payout-for-nothing penalty for an unvetted source. The operator's reasoning: a tiered sign-up bonus where almost nobody gets the headline
+figure is exactly what the readers should not be sent chasing; if a specific exchange bonus is genuinely good it should clear on stated terms
+(real terms, an old domain, a second source). Fixed alongside: the matcher could not SEE "up to" (the optional group made the text before the
+match empty), so a max was being recorded as a plain per-person amount; it is now recorded as kind `max` and covered by tests in English,
+Russian ("до $15 000") and Portuguese ("até $300").
+
+**3. Near misses (trust 34-38) -- the floor stays.** Nine items one fact short is the floor working. If similar items later turn out to be
+consistently good, that is calibration data, not a reason to move the floor now.
+
+**4. The payout audit (the cross-penalty is the most aggressive rule and fires on a value-derived signal, so a misread of value silently
+destroys trust).** Findings and fixes:
+- The penalty now fires ONLY on an amount the text itself claims for one reader (`stated`) or a stated maximum (`max`). A pool/total
+  (`pool`), an amount tied to N winners (`unclear`), a structured retail value (`worth`, e.g. GamerPower) and an expected value (`ev`) are
+  recorded as such and can neither inflate value nor cost trust. Pool / unclear amounts are stored as `pool_usd` / `unclear_usd`, and the post
+  facts say "shared among participants" or "not clear whether per person or a total".
+- Phrasings now classified, in three languages (33 cases in `scripts/check_earning.py`): "prize pool", "total rewards", "in prizes / rewards / tokens",
+  "shared among", "distributed", "up for grabs", "giving away ... among", "to be shared"; призовой фонд, общий пул, разыгрываем, на сумму,
+  в наградах, между участниками, поровну; prêmio total, pool de, premiação, sorteio, dividido entre, em prêmios; "$X for N winners" /
+  "для N победителей" / "N vencedores" -> unclear; an explicit per-person cue NEXT TO the amount ("each", "per winner", "каждому по",
+  "cada", "por pessoa") wins over a pool word elsewhere in the sentence. A mixed phrasing ("$10 per winner from a $1,000 pool") records the larger
+  (pool) figure, which is penalty-safe.
+- Bugs found by the audit: Portuguese "$10.000" (dot thousands) was read as $10 -- now ten thousand ("1.50" stays a dollar fifty); Russian/Portuguese
+  pool and per-person wordings were not detected at all (the amount was simply missed); Brazilian "R$" amounts were not parsed.
+- Another misread, found on the last real run: a $5,500 solar-battery deal on OzBargain ("$3,500 worth" of extras) scored trust 0 because the
+  "worth" figure was read as a payout for a "free" offer. The penalty now requires that "for nothing" is DEMONSTRATED: if the text carries
+  another figure of at least half the nominal that was not read as a reward (a price, a deposit, a fee), capital is unknown rather than zero
+  and the penalty is skipped.
+- Result on real candidates: the penalty fired on 3 of 323 live items before that last fix (the AI-agent $1,000 credit from a 4-day-old
+  domain -- correct; the WEEX "up to $15,000" -- the deliberate choice above; the solar deal -- the misread just fixed), 2 after.
+- **Observation, not changed:** the penalty ignores ODDS. A chance-based giveaway with a $1,000 prize from an unvetted source is treated like
+  a guaranteed $1,000. Tier-3 items cannot reach the floor without stated facts anyway, so the practical effect is small, but it is a design
+  question: should `giveaway` / raffle types be exempt from a rule built for guaranteed payouts?
+
+**Airdrop channels after all fixes (real candidates):** 46 live items (13 roundups held out), 19 pass both floors, 26 have value >= 40 and
+trust < 40: 7 correctly rejected, 5 genuinely unproven, 10 with partial evidence still under 40, 4 still blind (Russian posts with no
+detectable term). Russian term recall 22 of 29.
+

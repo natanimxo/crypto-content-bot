@@ -248,6 +248,8 @@ def facts_earning_opportunities(p: dict) -> str:
         reward = f"{kind} ${p['payout_usd']:,.0f}"
     elif not reward and p.get("pool_usd"):
         reward = f"a pool of ${p['pool_usd']:,.0f} shared among participants; what one person receives is not stated"
+    elif not reward and p.get("unclear_usd"):
+        reward = f"an amount of ${p['unclear_usd']:,.0f} is mentioned, but it is not clear whether it is per person or a total shared among winners"
     cap = p.get("capital_usd")
     cost = enriched.get("cost") or ("nothing is stated as required up front" if cap == 0 else
                                     (f"about ${cap:,.0f} of your own money is needed" if cap else "not stated"))

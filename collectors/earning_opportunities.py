@@ -271,13 +271,15 @@ def build_payload(raw: dict, now: datetime) -> dict:
         src["default_type"] if raw["source"] != "gamerpower" else ("free_game" if extra.get("gp_type") in ("Game", "Loot", "Beta") else earning.classify_type(text, "giveaway")))
     payout = extra.get("payout_usd")
     payout_kind = extra.get("payout_kind")
-    pool_usd = extra.get("pool_usd")
+    pool_usd, unclear_usd = extra.get("pool_usd"), None
     if payout is None and type_ != "hackathon":
         stated, kind = earning.extract_reward(text, type_)
         if stated is not None and kind == "pool":
             pool_usd = stated          # a total shared among participants: stated, but not what one reader receives
+        elif stated is not None and kind == "unclear":
+            unclear_usd = stated       # tied to N winners: per-person vs total cannot be told
         elif stated is not None:
-            payout, payout_kind = stated, "stated"
+            payout, payout_kind = stated, kind      # 'stated' (one reader) or 'max' ("up to": deliberately treated as the payout)
     deadline = None
     if extra.get("deadline"):
         try:
@@ -295,10 +297,11 @@ def build_payload(raw: dict, now: datetime) -> dict:
         "title": raw["title"] or text[:100], "description": text[:1200], "source": raw["source"], "source_name": src["name"],
         "source_tier": src["tier"], "kind": src["kind"], "published_at": raw["published_at"], "url": raw["url"],
         "landing_url": landing_norm, "landing_domain": earning.registrable_domain(host), "referral_link": earning.is_referral_link(landing_raw or ""),
-        "type": type_, "payout_usd": payout, "payout_kind": payout_kind, "pool_usd": pool_usd,
+        "type": type_, "payout_usd": payout, "payout_kind": payout_kind, "pool_usd": pool_usd, "unclear_usd": unclear_usd,
+        "other_amount_max": max([a for a in earning.extract_amounts_usd(text) if payout is None or abs(a - payout) > 0.5] or [0.0]),
         "deadline": _iso(deadline) if deadline else None, "capital_usd": capital, "effort_minutes": effort, "prereqs": prereqs, "geo": geo,
         "steps_text": extra.get("steps_text") or "",
-        "terms": {"deadline": deadline is not None, "eligibility": eligibility, "payout": payout is not None or pool_usd is not None or earning.payout_stated(text)},
+        "terms": {"deadline": deadline is not None, "eligibility": eligibility, "payout": payout is not None or pool_usd is not None or unclear_usd is not None or earning.payout_stated(text)},
         "engagement": {k: extra.get(k) for k in ("views", "reactions", "channel_median_views", "engagement_ratio") if k in extra} or None,
         "topic_key": (landing_norm if landing_norm and earning.domain_of(landing_raw) not in AGGREGATOR_LANDINGS
                       else earning.title_key(raw["title"] or text[:80], type_)),
@@ -594,6 +597,8 @@ def collect() -> int:
                         continue
                 payload = build_payload(raw, now)
                 reasons = earning.gate(raw["text"] + " " + " ".join(raw["links"] or []))
+                if earning.is_roundup(raw["title"], raw["text"]):
+                    reasons.append("not an offer: a digest / roundup of several projects")
                 if reasons:
                     payload["gate"] = {"excluded": True, "reasons": reasons}
                     gated.append((ext, payload))

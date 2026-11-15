@@ -176,6 +176,8 @@ def render_earning_opportunities(raw_item: dict) -> str:
         parts.append(f"{kind}${p['payout_usd']:,.0f}")
     elif p.get("pool_usd"):
         parts.append(f"shared pool ${p['pool_usd']:,.0f}")
+    elif p.get("unclear_usd"):
+        parts.append(f"amount unclear (${p['unclear_usd']:,.0f}: per person or total?)")
     else:
         parts.append("payout not stated")
     cap = p.get("capital_usd")

@@ -200,12 +200,80 @@ def main():
     check("a Russian reward amount is read", E.extract_reward_usd("Разделяем награду в $4 000 за качественный контент", "airdrop"), 4000.0)
     check("a Russian funding round is not a reward", E.extract_reward_usd("Проект привлек $20M в раунде", "airdrop"), None)
 
-    # ---- a pool shared among participants is NOT a per-person payout (it must not trip the payout-for-nothing penalty)
-    check("a Russian shared pool is a pool", E.extract_reward("Разделяем $70 000 на TrueNorth и торгуем", "airdrop"), (70000.0, "pool"))
-    check("an English prize pool is a pool", E.extract_reward("A $50,000 prize pool shared among all traders", "airdrop"), (50000.0, "pool"))
-    check("a gift card is what one reader gets", E.extract_reward("Win a $500 gift card", "giveaway"), (500.0, "stated"))
-    check("a bonus is what one reader gets", E.extract_reward("Get a $250 bonus", "bank_bonus"), (250.0, "stated"))
-    check("no reward cue, no amount", E.extract_reward("Proekt raised $20M", "airdrop"), (None, None))
+    # ---- WHAT KIND OF AMOUNT: the payout-for-nothing penalty must fire only on what one reader receives (or a stated maximum).
+    # Same shape of bug as "Разделяем $70 000", other wordings, three languages. (amount, kind) per phrasing:
+    for text, want in [
+        # pools / totals -- never a per-person payout
+        ("A $50,000 prize pool for the community", (50000.0, "pool")),
+        ("Total rewards of $10,000 for early users", (10000.0, "pool")),
+        ("$100,000 in prizes for the top builders", (100000.0, "pool")),
+        ("$20,000 shared among the top traders", (20000.0, "pool")),
+        ("$5,000 distributed to all participants", (5000.0, "pool")),
+        ("$8,000 up for grabs this week", (8000.0, "pool")),
+        ("Giving away $2,000 among our followers", (2000.0, "pool")),
+        ("Разделяем $70 000 на TrueNorth и торгуем", (70000.0, "pool")),
+        ("Призовой фонд $30 000 для участников", (30000.0, "pool")),
+        ("Общий пул наград $100 000", (100000.0, "pool")),
+        ("Разыгрываем $5 000 между всеми участниками", (5000.0, "pool")),
+        ("Награды на сумму $10 000", (10000.0, "pool")),
+        ("Prêmio total de $10.000 para a comunidade", (10000.0, "pool")),
+        ("Pool de $5.000 dividido entre os participantes", (5000.0, "pool")),
+        ("Sorteio de $1.000 entre os seguidores", (1000.0, "pool")),
+        # an amount tied to N winners -- per person or total cannot be told
+        ("Reward: $5 for 160 winners", (5.0, "unclear")),
+        ("Win $1,000 -- 3 winners", (1000.0, "unclear")),
+        ("Награда $500 для 10 победителей", (500.0, "unclear")),
+        ("Ganhe $200 -- 5 vencedores", (200.0, "unclear")),
+        # a stated maximum -- deliberately treated as the payout (BACKLOG)
+        ("Up to $15,000 welcome bonus", (15000.0, "max")),
+        ("Бонусы до $15 000 на WEEX", (15000.0, "max")),
+        ("Bônus de até $300", (300.0, "max")),
+        # what one reader receives
+        ("Win a $500 gift card", (500.0, "stated")),
+        ("Get a $250 bonus", (250.0, "stated")),
+        ("Free $1000 credit for your AI Agent", (1000.0, "stated")),
+        ("Каждому участнику по $50", (50.0, "stated")),
+        ("$20 each for the first 100 users", (20.0, "stated")),
+        ("Ganhe $30 por pessoa indicada", (30.0, "stated")),
+        # a per-person cue wins over a pool word
+        ("$10 per winner from a $1,000 pool", (1000.0, "pool")),   # both present: the larger (pool) is recorded -- penalty-safe
+        # no reward cue at all
+        ("Proekt raised $20M", (None, None)),
+    ]:
+        check(f"reward kind {text[:46]!r}", E.extract_reward(text, "airdrop"), want)
+
+    # ---- the penalty only ever fires on 'stated' / 'max' text claims -- never a pool, an unclear amount, a structured worth, an EV
+    big = dict(base, payout_usd=70000.0, effort_minutes=5, source_tier=3, domain_age_days=800)
+    for kind, want in [("stated", 50.0), ("max", 50.0), ("pool", 0.0), ("unclear", 0.0), ("worth", 0.0), ("ev", 0.0), (None, 0.0)]:
+        check(f"penalty on payout_kind={kind!r}", E.payout_for_nothing_penalty(dict(big, payout_kind=kind)), want)
+    check("a figure that is a PRICE (not a reward) means 'for nothing' is not demonstrated: no penalty",
+          E.payout_for_nothing_penalty(dict(big, payout_kind="stated", payout_usd=3500.0, other_amount_max=5500.0, type="freebie")), 0.0)
+    check("a bare big claim with no other figure is still penalised",
+          E.payout_for_nothing_penalty(dict(big, payout_kind="stated", payout_usd=500.0, other_amount_max=0.0)), 30.0)
+    check("a misread pool can no longer zero trust", E.score_earning(dict(big, payout_kind="pool", payout_usd=None, pool_usd=70000.0))["trust"] >= 40, True)
+
+    # ---- roundups are not offers (operator ruling): excluded, but a single offer that says 'weekly' / 'daily' is not a roundup
+    for title, want in [
+        ("📡 Airdrop Radar — Daily Roundup (November 5, 2026)", True),
+        ("🛰 AIRDROP WEEKLY RADAR · Oct 31 → Nov 6", True),
+        ("🪂 18 Confirmed November Airdrops", True),
+        ("📆 3 November Campaigns u didn't hear", True),
+        ("3 Early Projects on our radar 👀", True),
+        ("Отжимка по дропам за 06.11 - 09.11", True),
+        ("Где фармить объемы прямо сейчас: подборка PerpDEX", True),
+        ("Обзор криптобиржи WEEX: разбираем функционал", True),
+        ("Resumo semanal de airdrops", True),
+        ("Weekly giveaway: win a $100 gift card", False),
+        ("Daily check-in reward: 10 points", False),
+        ("Elysium Mainnet Today", False),
+        ("🎙 $4,000 in $MNT for creators", False),
+        ("Axis Update Season 2 starts TODAY", False),
+        ("Новости Metric", False),
+        ("Free Steam game until Nov 21", False),
+    ]:
+        check(f"roundup {title[:44]!r}", E.is_roundup(title), want)
+
+    # ---- aggregator landing: follow airdrops.io's page
 
     # ---- WHOIS fallback for the ccTLDs RDAP does not cover (.io / .me): parse only here, the lookup is covered live
     from collectors import earning_opportunities as W
