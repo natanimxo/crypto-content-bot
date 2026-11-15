@@ -937,16 +937,27 @@ _ADVICE_MODAL_RE = re.compile(
     r"|\b(?:you(?:'d| would)? )?(?:might|may) want to\b|\bit(?:'s| is) (?:wise|smart|prudent) to\b",
     re.IGNORECASE)
 _ADVICE_IMPERATIVE_RE = re.compile(
-    r"^\W*(?:plan|prepare|brace|consider|budget|hedge|lock|buy|sell|hold|invest|avoid|stock|cut|raise|"
-    r"reduce|increase|review|revisit|renegotiate|diversify|save|spend|borrow|refinance|delay|accelerate|"
-    r"build|adjust|factor|price in|set aside|make sure|be sure|don't|do not)\b",
+    r"^\W*(?:(?:plan|prepare|brace|consider|budget|hedge|lock|invest|avoid|stock|"
+    r"revisit|renegotiate|diversify|borrow|refinance|accelerate|adjust|factor|price in|set aside|"
+    r"make sure|be sure|don't|do not)\b"
+    # These verbs are also NOUNS that open a news sentence: "Increase in oil prices lifted costs", "Review of the
+    # tariff schedule begins Monday", "Spend on data centers rose 12%", "Build-out of the grid", "Sell-off in
+    # bonds" (2026-11-15 audit) -- so they only count as an instruction when not used that way.
+    r"|(?:buy|sell|hold|cut|raise|reduce|increase|review|save|spend|delay|build)\b(?!-)"
+    r"(?!\s+(?:in|of|on|from|by|at|to|for|across|among|is|was|are|were|has|have|had|will|would|could|may|might|can)\b))",
     re.IGNORECASE)
 READER_ADVICE_CHECKED_CATEGORIES = {"macro_news"}
 
 
 def _find_reader_advice(parsed: dict) -> list[str]:
     issues = []
-    for sentence in _SENTENCE_SPLIT_RE.split(_prose_text(parsed)):
+    # Each field (title, then each paragraph) is checked on its own. Joined into one string, the first sentence
+    # of paragraph 1 follows the title with no sentence break, so "Plan for higher costs..." was never at the
+    # START of a sentence and slipped through (2026-11-15 audit -- the guard's imperative test was dead for it).
+    pieces = [str(parsed.get(k, "")) for k in ("title", "narrative", "why_it_matters")]
+    pieces += [str(x) for x in (parsed.get("paragraphs") or [])]
+    sentences = [sent for piece in pieces for sent in _SENTENCE_SPLIT_RE.split(piece)]
+    for sentence in sentences:
         s = sentence.strip()
         # An advisory imperative may follow a colon or dash ("Watch rates: plan for ...") -- check each clause.
         clauses = re.split(r"[:;—]\s+|\s--\s|,\s+(?:so|and|then|but)\s+", s)

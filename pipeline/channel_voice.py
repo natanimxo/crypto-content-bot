@@ -67,7 +67,11 @@ _NUMBER_RE = re.compile(r"\d")
 _QUESTION_OPENERS = {
     "why", "how", "what", "when", "where", "who", "which", "is", "are", "can", "does",
     "do", "should", "inside", "anatomy", "understanding",
+    # concept-style openers a real explainer title uses (2026-11-15 audit: these were rejected as "headlines")
+    "spotting", "reading", "decoding", "checking", "tracing", "verifying", "behind",
 }
+# "Honeypots, explained" / "The anatomy of a mint exploit" -- concept titles that do not open with a question word.
+_CONCEPT_PHRASE_RE = re.compile(r"\b(?:explained|explainer|anatomy of|mechanics of|how it works|what it means)\b", re.IGNORECASE)
 
 
 class VoiceProfileError(ValueError):
@@ -216,6 +220,37 @@ Return ONLY a JSON object (no markdown fence, no commentary) with exactly this s
 """
 
 
+# ---------------------------------------------------------------- banned words
+
+# A banned word is a banned EVALUATION ("a major outflow", "huge", "key level"). The same string is a proper
+# noun or a technical term elsewhere, and a check that rejects a correct draft is silent -- the post just
+# never generates. Found by a 2026-11-15 audit after the "US"/"us" bug: "key" bans every crypto story about a
+# private key or key compromise, "big" bans Big Tech and the One Big Beautiful Bill, "major" bans Major League
+# Baseball. Two exemptions, both narrow: a Capitalized use that is NOT at the start of a sentence, or that is
+# followed by another Capitalized word, is a name; and "key" next to a cryptography noun is the noun.
+_KEY_NOUN_BEFORE_RE = re.compile(
+    r"(?:private|public|api|signing|admin|master|encryption|access|deployer|seed|secret|hot|cold)\s+$", re.IGNORECASE)
+_KEY_NOUN_AFTER_RE = re.compile(
+    r"^\s+(?:compromise\w*|management|pairs?|holders?|rotation|signers?|leak\w*|theft|exposure|material|"
+    r"generation|derivation)\b", re.IGNORECASE)
+_SENTENCE_START_BEFORE_RE = re.compile(r"(?:^|[.!?:;\n]\s*|[\"'(“]\s*)$")
+
+
+def _banned_word_used(word: str, pieces: list[str]) -> bool:
+    for text in pieces:
+        for m in re.finditer(rf"\b{re.escape(word)}\b", text, re.IGNORECASE):
+            before, after = text[:m.start()], text[m.end():]
+            if word.lower() == "key" and (_KEY_NOUN_BEFORE_RE.search(before) or _KEY_NOUN_AFTER_RE.search(after)):
+                continue
+            if m.group(0)[:1].isupper():
+                at_sentence_start = bool(_SENTENCE_START_BEFORE_RE.search(before))
+                next_word = re.match(r"\s+([A-Za-z][\w'-]*)", after)
+                if not at_sentence_start or (next_word and next_word.group(1)[:1].isupper()):
+                    continue
+            return True
+    return False
+
+
 # ------------------------------------------------------------------ checks
 
 def _prose(parsed: dict) -> str:
@@ -267,7 +302,7 @@ def find_voice_issues(profile: VoiceProfile, parsed: dict, post_chars: int | Non
         issues.append("the title must lead with data and contain at least one figure (a number, amount or percentage)")
     if profile.title_check == "question_or_concept":
         first = re.sub(r"[^\w']", "", title.split()[0].lower()) if title.split() else ""
-        if not (title.endswith("?") or first in _QUESTION_OPENERS):
+        if not (title.endswith("?") or first in _QUESTION_OPENERS or _CONCEPT_PHRASE_RE.search(title)):
             issues.append("the title must be a question or name a concept to learn (e.g. start with Why / How / "
                           "What, or end in a question mark), not a news headline")
 
@@ -280,6 +315,6 @@ def find_voice_issues(profile: VoiceProfile, parsed: dict, post_chars: int | Non
                           f"\"you\", \"your\", \"we\", \"our\")")
 
     for word in profile.banned_words:
-        if re.search(rf"\b{re.escape(word)}\b", prose, re.IGNORECASE):
+        if _banned_word_used(word, [title] + [str(x) for x in paragraphs]):
             issues.append(f"remove the banned word \"{word}\"")
     return issues

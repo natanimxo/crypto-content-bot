@@ -1612,7 +1612,7 @@ pointed at Notebook, and `collectors/gems_security.HOLD_ALL_CANDIDATES` flipped 
    paragraph (the model under-corrects every round otherwise); (b) the code-built risk line of a gems post is
    91-417 characters (median 290) -- inside a 600-900 range that leaves the three-paragraph explainer 183-510
    characters; new profile field `length_excludes_risk_line`, true for Notebook (**a deviation from ruling #1
-   "count the whole post except Source and hashtags" -- needs the operator's confirmation, see the report**);
+   "count the whole post except Source and hashtags" -- CONFIRMED by the operator 2026-11-15, see Phase 3 follow-ups**);
    (c) retries 3 -> 5, because the longest profile still ended 1-50 characters over on 3 of 15 gems items
    after (a) and (b). Result over the same 21 items: 3 failed -> 0 on the final run (gems 3-attempt
    successes; hacks 6/6 in <=2). Other channels' regression sample: 17/18 at <=2 attempts; the one failure was
@@ -1634,4 +1634,42 @@ voice under a "CoinCraft" label. Not expired or re-homed -- only the gems cards 
 **To verify on the first cycle after deploy:** notify visits CoinCraft with no categories without error; the
 first hacks/gems card arrives under Crypto Notebook; approving it writes in the explainer voice (3
 paragraphs, 600-900 excluding the evidence line, hashtags).
+
+### Phase 3 follow-ups (2026-11-15, operator rulings)
+
+**Length-basis deviation, ratified and recorded.** Crypto Notebook's 600-900 does NOT count the code-built
+evidence/risk line (`length_excludes_risk_line: true`). Operator reasoning: the original ruling ("count the whole
+post except Source and hashtags") was about the history and cross-category lines, which are optional garnish; the
+gems evidence line is 91-417 characters of *mandatory structured output*, and counting it leaves the explainer as
+little as 183 characters, which defeats the educational voice. Every other channel still counts the risk line.
+
+**Six pending hacks_exploits cards re-homed to Crypto Notebook** (notifications 577, 614, 661, 675, 678, 738 --
+each held exactly one pending hacks item), instead of expired: Kava Lend is from today, and they now get Notebook's
+voice and label. The Telegram cards already sent still read "for coincraft" in their text. Verified through the
+real approval path (`generate_post(..., 'crypto_notebook', Kava)` -> explainer voice, evidence line shown).
+
+**Defi_yields stays whole on Alpha Edge** (no split) until a week of real Notebook volume has been seen.
+
+**Voice-check audit (after the "US" bug).** `scripts/check_voice_checks.py` is a no-DB regression table of awkward
+cases; it found five more silent misfires, all fixed:
+1. *banned words* matched proper nouns and technical terms: "key" banned every crypto story about a private key or
+   key compromise, "big" banned Big Tech and the One Big Beautiful Bill, "major" banned Major League Baseball. Now a
+   Capitalized use that is not at the start of a sentence (or is followed by a Capitalized word) is a name, and "key"
+   beside a cryptography noun (private/public/API key, key compromise, ...) is the noun. "a major outflow", "huge",
+   "key level" are still rejected.
+2. *Notebook concept titles* "Spotting a hidden owner...", "Reading a GoPlus flag", "The anatomy of a mint exploit",
+   "Honeypots, explained" were rejected as headlines (cost: a retry each). Added gerund/concept openers and an
+   "explained / anatomy of / mechanics of" phrase test; "Kava Lend loses $3.7M..." is still rejected.
+3. *Reader-advice guard was dead for the first sentence of paragraph 1*: the text was joined title + paragraph with
+   no sentence break, so "Plan for higher costs..." never sat at the START of a sentence. Each field is now checked
+   separately (found only because the test cases did not pass -- not visible in any real generation).
+4. ...and once it works, it would have rejected *nouns*: "Increase in oil prices...", "Review of the tariff
+   schedule...", "Spend on data centers...", "Build-out of the grid", "Sell-off in bonds". Nominal uses are now
+   exempt; "plan/prepare/brace/budget/hedge" are unconditional.
+5. The second-person check (Hustle) held up: it needs one "you/your/you're" in any case; no misfire found.
+Empirical side: 60 real generations across every channel/category (WS news 10, AE news 6, whale 6, defi 6, tools 8,
+jobs 6, macro 6, hacks 6, gems 6): 0 failures, and the only non-length rejections were the verbatim-reproduction
+guard on Wall Street news (13 hits, all recovered by retry). Not touched (operator-approved lists, floors by
+design): the macro neutrality patterns ("crackdown on" is flagged as an unattributed motive phrase though it is a
+common neutral noun phrase; "reckless", "propaganda" likewise) -- worth a look if macro posts start failing.
 
