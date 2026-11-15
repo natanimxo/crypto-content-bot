@@ -1998,3 +1998,22 @@ destroys trust).** Findings and fixes:
 trust < 40: 7 correctly rejected, 5 genuinely unproven, 10 with partial evidence still under 40, 4 still blind (Russian posts with no
 detectable term). Russian term recall 22 of 29.
 
+
+### Phase 5 follow-ups, round 4 (2026-11-16, operator ruling: income only)
+
+**Scope rule.** earning_opportunities carries INCOME only: money (cash, stablecoin, crypto) that ends up in the reader's pocket. A discount is
+a cheaper purchase and a free game is a free purchase; neither is income. Removed ENTIRELY (collectors deleted, not filtered): Epic API,
+GamerPower, EpicSteamGames, FreeGamesNews, r_FreeGamesOnSteam, OzBargain, Dealabs, MyDealz (Slickdeals was never built). 226 old rows from those
+sources were expired (kept for the record, never candidates again). What is left: Devpost (hackathons), Doctor of Credit's bank-account-bonus
+feed (cash sign-up bonuses), four airdrop Telegram channels (airdropfind, airdrops_io, incrypted_airdrops, criptinho). A second safety net:
+`earning.NON_INCOME_TYPES` (free_game, freebie, credits) is held with the reason "not income: saves money, does not pay it", so a future
+source cannot smuggle a freebie in. railway.ts now declares the `collect-earning` service (cron `30 */2 * * *`); `railway config apply` is
+authoritative if the operator picked a preset.
+
+**Volume left per day (estimate before dedupe and the cap):** about 10 eligible items/day across the five remaining sources; most of
+that is Devpost (largely stock listings that repeat) and the airdrop channels (noisy estimate). Actual sends are capped at 8/day for
+CoinCraft and 1 per 2-hour cycle by the pacing rule, so the cap is not the binding constraint any more -- supply is.
+
+**Research cycle: Railway-side probe.** `pipeline/source_probe.py` holds a probe list of candidate income sources; `scripts/collect_earning.py`
+runs it at most once per 20h, AFTER notify, and stores the compact result in run_logs `source_probe`. A source is not verified until it has run
+from Railway (OKX served a different feed from there, Bybit returned 403).
