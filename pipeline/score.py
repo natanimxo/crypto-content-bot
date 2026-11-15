@@ -851,6 +851,60 @@ def score_hacks_exploits(conn, raw_item_id: int, payload: dict) -> dict:
     }
 
 
+# exchange_listings (2026-11-15, operator-approved: spot token listings on Binance / OKX / Bybit / KuCoin).
+# Pure function of the stored payload -- the collector already resolved everything (prior listings on the
+# other tracked exchanges, the trading start time), so scoring needs no query.
+#
+# Every weight below is a PRIOR, not a measurement: there is no operator decision history for this category
+# yet (re-fit with scripts/calibration_report.py after ~20 decisions, the way whale_movements' impact weight
+# was). The shape, though, is deliberate:
+#   * `novelty` is the prior-listing fact turned into a number -- a first listing on a major exchange is a
+#     different event from a fifth listing, and that is the one thing about a listing an announcement cannot
+#     tell a reader. Decays with age inside the 24h freshness window.
+#   * `impact` is the exchange's tier. Ordered by how much a listing there moves attention -- a judgement, not
+#     a fitted number, and the gap between tiers is sized so a repeat listing on the lowest tier falls below
+#     the review threshold while the same repeat on Binance does not.
+#   * `credibility` is flat: it is the exchange's own announcement.
+#   * `actionability` is whether the announcement gives a trading start time still in the future (a window to
+#     act on); unknown is a neutral 60, never coded as clear.
+EXCHANGE_LISTINGS_TIER = {"binance": 100.0, "okx": 80.0, "bybit": 70.0, "kucoin": 55.0}
+EXCHANGE_LISTINGS_PRIOR_NOVELTY = {0: 100.0, 1: 70.0, 2: 45.0}   # 3+ prior listings -> 25
+EXCHANGE_LISTINGS_MAX_AGE_HOURS = 24.0   # kept in sync with pipeline/select_candidates.py FRESHNESS_MAX_AGE_HOURS
+
+
+def _listing_age_hours(payload: dict) -> float:
+    try:
+        return max(0.0, (datetime.now(timezone.utc) - datetime.fromisoformat(payload["published_at"])).total_seconds() / 3600)
+    except (KeyError, ValueError, TypeError):
+        return EXCHANGE_LISTINGS_MAX_AGE_HOURS
+
+
+def _listing_novelty(payload: dict) -> float:
+    base = EXCHANGE_LISTINGS_PRIOR_NOVELTY.get(int(payload.get("prior_count") or 0), 25.0)
+    freshness = max(0.6, 1.0 - 0.4 * min(1.0, _listing_age_hours(payload) / EXCHANGE_LISTINGS_MAX_AGE_HOURS))
+    return round(base * freshness, 1)
+
+
+def _listing_actionability(payload: dict) -> float:
+    start = payload.get("trading_start")
+    if not start:
+        return 60.0
+    try:
+        return 100.0 if datetime.fromisoformat(start) > datetime.now(timezone.utc) else 40.0
+    except ValueError:
+        return 60.0
+
+
+@register_scorer("exchange_listings")
+def score_exchange_listings(conn, raw_item_id: int, payload: dict) -> dict:
+    return {
+        "impact": EXCHANGE_LISTINGS_TIER.get(payload.get("exchange_key"), 50.0),
+        "novelty": _listing_novelty(payload),
+        "credibility": 100.0,
+        "actionability": _listing_actionability(payload),
+    }
+
+
 def score_new_items(conn, category: str) -> int:
     """Score every raw_item in this category that doesn't have a score row yet.
     Returns the number scored."""

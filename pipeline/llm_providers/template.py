@@ -135,6 +135,17 @@ def render_hacks_exploits(raw_item: dict) -> str:
     return " · ".join(parts)
 
 
+@register_template("exchange_listings")
+def render_exchange_listings(raw_item: dict) -> str:
+    p = raw_item["payload"]
+    prior = p.get("prior_listings") or []
+    parts = [p.get("title") or ""]
+    parts.append("already on " + ", ".join(x["exchange"] for x in prior) if prior else "no earlier listing on the other tracked exchanges")
+    if p.get("trading_start"):
+        parts.append(f"trading opens {p['trading_start'][:16].replace('T', ' ')} UTC")
+    return " · ".join(parts)
+
+
 @register_template("startup_jobs")
 def render_startup_jobs(raw_item: dict) -> str:
     p = raw_item["payload"]

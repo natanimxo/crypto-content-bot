@@ -597,3 +597,48 @@ hacks_exploits:
     don't editorialize about the odds of recovery. No hype, no "DYOR" advice-
     giving beyond stating the fact of the incident. No emoji beyond what the
     template itself adds.
+
+exchange_listings:
+  # Added 2026-11-15 (Phase 4, operator direction) -- new SPOT token listings announced by Binance, OKX, Bybit and
+  # KuCoin, for Crypto Wall Street only. Perpetuals, futures, tokenized stocks, new trading pairs and delistings are
+  # excluded by a strict title filter (collectors/exchange_listings.py). Upbit and Coinbase are deliberately out until
+  # these four have a track record. No price, no market data -- facts only.
+  #
+  # Every weight is a PRIOR: there is no operator decision history for this category yet. Re-fit with
+  # scripts/calibration_report.py after ~20 decisions, the way whale_movements' impact weight was.
+  score_weights:
+    impact: 0.35          # the exchange's tier (Binance 100 / OKX 80 / Bybit 70 / KuCoin 55) -- a judgement, not a
+                            # fit. The gaps are sized so a REPEAT listing on the lowest tier falls under the review
+                            # threshold while the same repeat on Binance does not.
+    novelty: 0.35         # the prior-listing fact as a number: 0 earlier listings on the other tracked exchanges = 100,
+                            # 1 = 70, 2 = 45, 3+ = 25, then decayed to 60% across the 24h freshness window. A first
+                            # listing on a major exchange is a different event from a fifth -- and it is the one thing the
+                            # announcement itself cannot tell a reader.
+    credibility: 0.10     # flat 100: it is the exchange's own announcement
+    actionability: 0.20   # a trading start time still in the future = 100, already past = 40, not stated = 60 (unknown
+                            # is never coded as clear)
+
+  review_threshold: 50    # same convention as every category -- not lowered to manufacture volume
+  # topic_key is symbol:exchange (not the symbol alone) so the SAME token listing on a SECOND exchange is a separate
+  # event, not suppressed by a cooldown. The cooldown only absorbs a re-announcement on the same exchange.
+  cooldown_hours: 12
+  soft_daily_cap: 4       # a sanity ceiling, not a pacing target: real volume across the four exchanges is ~1-3 a
+                            # week (measured 2026-11-15 over 14-22 months of history). It binds only if an exchange
+                            # dumps a batch.
+
+  triage_model: template   # structured facts, nothing to synthesise
+  write_model: deepseek-v4-flash
+
+  label: "🏦 EXCHANGE LISTING"
+
+  emoji: "🏦"
+  display_label: "Exchange Listings"
+  hashtags: []             # Crypto Wall Street's voice profile has hashtags off
+
+  voice: market_summary
+  # Legacy-path fields only: Crypto Wall Street writes this category through its channel voice profile
+  # (config/channel_voices.yaml) with the facts, brief and guardrails in pipeline/post_facts.py.
+  prompt_notes: >
+    Report the exchange, the token and the timing from the announcement. State, in the title or the first two
+    sentences, whether the token was already listed on another tracked exchange. No price, no performance, no
+    prediction.

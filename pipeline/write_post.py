@@ -21,7 +21,8 @@ from pipeline import channel_voice, llm, post_format
 from pipeline.db import dict_cursor
 from pipeline.http import get_json
 from pipeline.post_facts import (
-    FACT_SPECS, WHALE_READ_CONVENTION, facts_defi_yields, facts_gems_security, facts_hacks_exploits, facts_job_listing,
+    FACT_SPECS, WHALE_READ_CONVENTION, facts_defi_yields, facts_exchange_listings, facts_gems_security, facts_hacks_exploits,
+    facts_job_listing,
     facts_tool_launches,
     facts_whale_movements, facts_wire_story,
 )
@@ -967,6 +968,63 @@ def _find_reader_advice(parsed: dict) -> list[str]:
     return issues
 
 
+# Exchange-listings guard (2026-11-15, operator-approved: "no price -- a stale number reads as a call, and we have no
+# guardrail that makes that safe"; and "the prior-listing fact must be prominent, not a footnote"). Both are checked
+# on the output, not just requested: a listing post is rejected if it talks price or performance, claims a debut
+# the four-exchange record cannot support, or buries (or omits) the prior-listing fact.
+_LISTING_PRICE_RE = re.compile(
+    r"\b(?:price|prices|pump\w*|rall(?:y|ies|ied)|surg\w*|jump\w*|soar\w*|moon\w*|bullish|bearish|upside|"
+    r"spik\w*|gains?|expected to (?:rise|climb|gain))\b", re.IGNORECASE)
+_LISTING_ABSOLUTE_RE = re.compile(r"\b(?:first[- ]ever|debut\w*|brand[- ]new|newly (?:created|launched|minted)|only exchange)\b", re.IGNORECASE)
+_LISTING_NEGATION_RE = re.compile(r"\b(?:no|not|none|neither|never|without)\b", re.IGNORECASE)
+_LISTING_NO_PRIOR_RE = re.compile(r"\b(?:not previously listed|no (?:earlier|prior|previous) listing|no earlier)\b", re.IGNORECASE)
+_LISTING_ALREADY_RE = re.compile(r"\b(?:already (?:listed|trad\w+)|previously listed|earlier listed)\b", re.IGNORECASE)
+LISTING_CHECKED_CATEGORIES = {"exchange_listings"}
+
+
+def _find_listing_issues(parsed: dict, payload: dict) -> list[str]:
+    title = str(parsed.get("title", ""))
+    paragraphs = [str(x) for x in (parsed.get("paragraphs") or [])]
+    text = " ".join([title] + paragraphs)
+    issues = []
+    m = _LISTING_PRICE_RE.search(text)
+    if m:
+        issues.append(f"it talks about price or performance (\"{m.group(0)}\") -- facts only: exchange, token, timing and the "
+                      f"prior-listing record, nothing about price or what the listing might do")
+    m = _LISTING_ABSOLUTE_RE.search(text)
+    if m:
+        issues.append(f"\"{m.group(0)}\" claims more than the four-exchange record shows -- say 'not previously listed on the "
+                      f"other tracked exchanges' instead")
+    for sentence in _SENTENCE_SPLIT_RE.split(text):
+        if re.search(r"\bfirst\b", sentence, re.IGNORECASE) and not re.search(r"\btracked\b", sentence, re.IGNORECASE):
+            issues.append("a sentence says 'first' without saying 'tracked' -- the record covers four exchanges only, so say "
+                          "'first among the tracked exchanges' or drop the claim")
+            break
+    if not payload.get("trading_start") and re.search(r"\btrading (?:opens?|will open|starts?|begins?)\b|\bopens? (?:for )?trading\b", text, re.IGNORECASE):
+        issues.append("the announcement did not state when trading opens -- say nothing about trading time")
+    first_para = paragraphs[0] if paragraphs else ""
+    head = " ".join([title] + _SENTENCE_SPLIT_RE.split(first_para)[:2])
+    prior = payload.get("prior_listings") or []
+    if prior and _LISTING_NO_PRIOR_RE.search(text):
+        issues.append("the facts say the token WAS already listed on another tracked exchange, but the post says no earlier "
+                      "listing exists -- say which exchange(s) listed it earlier, and drop 'no earlier / not previously listed'")
+    if not prior and _LISTING_ALREADY_RE.search(text):
+        issues.append("the facts say NO earlier listing appears among the other tracked exchanges, but the post says the token "
+                      "was already listed -- say that no earlier listing appears")
+    if prior:
+        missing = [x["exchange"] for x in prior if x["exchange"].lower() not in text.lower()]
+        if missing:
+            issues.append(f"the token was already listed on {', '.join(missing)} (tracked record) -- name every earlier exchange")
+        elif not any(x["exchange"].lower() in head.lower() for x in prior):
+            issues.append("state the earlier listing in the title or the first two sentences -- it is the point of the post, "
+                          "not a footnote")
+    else:
+        if not (re.search(r"\btracked\b", head, re.IGNORECASE) and _LISTING_NEGATION_RE.search(head)):
+            issues.append("state in the title or the first two sentences that no earlier listing appears among the tracked "
+                          "exchanges (use the word 'tracked' and a plain negative) -- it is the point of the post")
+    return issues
+
+
 def _generate_checked_write(conn, category: str, prompt: str, *, model_override: str | None = None,
                              source_excerpt: str | None = None, check_neutrality: bool = False,
                              check_no_speculation: bool = False) -> str:
@@ -1142,6 +1200,40 @@ def compute_hacks_exploits_elements(conn, raw_item: dict, history: list) -> dict
     risk_line = "; ".join(parts) + "."
 
     return {"history_line": None, "risk_line": risk_line, "source_name": "DefiLlama"}
+
+
+@register_prompt_builder("exchange_listings")
+def build_exchange_listings_prompt(cfg: dict, region_profile: str, raw_item: dict, history: list) -> str:
+    """Legacy-shape prompt. Exchange listings only ever go to a channel with a voice profile (Crypto Wall Street),
+    so the channel-voice path in generate_post_with_report writes them and this is a fallback for a channel without
+    one -- kept so a category never raises NotImplementedError. The rules it carries are the FactSpec's."""
+    p = raw_item["payload"]
+    spec = FACT_SPECS["exchange_listings"]
+    return f"""You are writing prose for a crypto market channel. Voice: {cfg.get('voice', 'market desk')}.
+{cfg.get('prompt_notes', '')}
+
+{facts_exchange_listings(p)}
+
+WHAT THE POST MUST COVER: {spec.content_brief}
+
+{spec.guardrails}
+
+Return ONLY a JSON object (no markdown fence, no commentary) with exactly these three string fields:
+{{
+  "title": "one specific title naming the exchange and the token. No emoji.",
+  "narrative": "2 sentences: the listing, then whether the token was already listed on another tracked exchange.",
+  "why_it_matters": "EXACTLY one sentence on what the prior-listing record tells a reader. Not a prediction."
+}}
+"""
+
+
+@register_post_computer("exchange_listings")
+def compute_exchange_listings_elements(conn, raw_item: dict, history: list) -> dict:
+    """No history_line / context_line / risk_line: the prior-listing fact lives IN the post body (it is the point of
+    the post), not in a blockquote a terse channel would drop."""
+    p = raw_item["payload"]
+    return {"history_line": None, "context_line": None, "risk_line": None,
+            "source_name": f"{p.get('exchange')} announcement"}
 
 
 @register_prompt_builder("news")
@@ -1712,7 +1804,7 @@ def generate_post_with_report(conn, category: str, channel: str, raw_item: dict,
     prompt = channel_voice.build_prompt(profile, display_name=_get_display_name(conn, channel), spec=spec,
                                         region_profile=region_profile, raw_item=raw_item, overhead_chars=overhead)
     source_excerpt = (raw_item.get("payload") or {}).get("description")
-    facts_have_figures = bool(re.search(r"\d", spec.facts(raw_item["payload"])))
+    facts_have_figures = channel_voice._spec_has_figures(spec, spec.facts(raw_item["payload"]))
 
     def check(parsed: dict) -> list[str]:
         if not isinstance(parsed.get("paragraphs"), list):
@@ -1724,6 +1816,8 @@ def generate_post_with_report(conn, category: str, channel: str, raw_item: dict,
             hits += _find_speculation_issues(parsed)
         if category in READER_ADVICE_CHECKED_CATEGORIES:
             hits += _find_reader_advice(parsed)
+        if category in LISTING_CHECKED_CATEGORIES:
+            hits += _find_listing_issues(parsed, raw_item["payload"])
         chars = channel_voice.measure(assemble(str(parsed.get("title", "")), parsed["paragraphs"], final=False))
         return hits + channel_voice.find_voice_issues(profile, parsed, chars, facts_have_figures)
 

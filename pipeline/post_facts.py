@@ -157,6 +157,58 @@ def facts_hacks_exploits(p: dict) -> str:
 - Recovery status: {recovery_note}"""
 
 
+def facts_exchange_listings(p: dict) -> str:
+    import datetime as _dt
+
+    def day(iso: str | None) -> str:
+        """'Nov 4' -- a wire dispatch does not print ISO dates."""
+        try:
+            d = _dt.datetime.fromisoformat(iso)
+            return f"{d.strftime('%b')} {d.day}"
+        except (TypeError, ValueError):
+            return ""
+
+    me = p.get("exchange")
+    others = [n for n in ("Binance", "OKX", "Bybit", "KuCoin") if n != me]
+    prior = p.get("prior_listings") or []
+    if prior:
+        prior_line = "YES -- " + "; ".join(
+            f"{x['exchange']} (announced {day(x.get('announced_at'))}"
+            f"{', an earlier announcement by this same exchange' if x.get('exchange_key') == p.get('exchange_key') else ''})"
+            for x in prior)
+    else:
+        prior_line = (f"NO -- no earlier listing of this token appears in the record of the other tracked exchanges "
+                      f"({', '.join(others)}). That is a statement about the record, not proof it is listed nowhere else.")
+    since = p.get("record_since") or {}
+    record = ", ".join(f"{k} from {v}" for k, v in since.items()) or "unknown"
+    # Derived from the same record, and the reason a thin announcement still has something true to say: how many of
+    # the four tracked exchanges list it now, and how long after the first one this listing came.
+    distinct = {x["exchange_key"] for x in prior} | {p.get("exchange_key")}
+    standing = f"listed on {len(distinct)} of the 4 tracked exchanges once this listing is counted"
+    if prior:
+        try:
+            gap = (_dt.datetime.fromisoformat(p["published_at"]) - _dt.datetime.fromisoformat(prior[0]["announced_at"])).total_seconds() / 86400
+            when = ("the same day as" if gap < 1 else f"{int(gap)} days after")
+            standing += f"; this announcement came {when} the first tracked one ({prior[0]['exchange']}, {day(prior[0].get('announced_at'))})"
+        except (KeyError, TypeError, ValueError):
+            pass
+    else:
+        standing = "the only tracked exchange to have announced it so far"
+    start = p.get("trading_start")
+    trading_line = f"\n- Trading opens: {day(start)} {start[11:16]} UTC, as stated in the announcement" if start else ""
+    flags = p.get("flags") or []
+    flag_line = f"\n- The exchange's own labels for it: {'; '.join(flags)}" if flags else ""
+    name, sym = p.get("token_name"), p.get("symbol")
+    token = f"{name} ({sym})" if name and name.upper() != (sym or "").upper() else f"{sym}"
+    return f"""Facts about this listing (the exchange's own announcement, plus the record we keep of every spot listing announced by Binance, OKX, Bybit and KuCoin):
+- Exchange: {me}
+- Token: {token}
+- Announced: {day(p.get('published_at'))}, {(p.get('published_at') or '')[11:16]} UTC{trading_line}{flag_line}
+- ALREADY LISTED ON ANOTHER TRACKED EXCHANGE (our own record -- the one thing the announcement does not tell a reader): {prior_line}
+- Where that leaves it: {standing}
+- Background for you, NOT for the post: the record goes back to {record}, so a listing before those dates would not appear in it."""
+
+
 @dataclass(frozen=True)
 class FactSpec:
     audience: str | None          # who the CATEGORY's content is about, when not the channel's default crypto readership
@@ -169,6 +221,10 @@ class FactSpec:
     # reconcile them -- guardrails beat voice, applied at prompt-design level. Only ever used for
     # a role that would otherwise ask for advice; the channel's tone/length/person still apply.
     role_overrides: dict[int, str] | None = None
+    # Whether the facts contain a real FIGURE a title could carry. None = detect (any digit in the facts). A category
+    # whose facts hold only dates and counts (exchange_listings) sets False, so a voice that wants a figure in the
+    # title is told there is none instead of being failed on every draft for lacking one.
+    title_figures: bool | None = None
 
 
 _NO_SCORES = "Never mention scores or internal categorization."
@@ -332,6 +388,39 @@ FACT_SPECS: dict[str, FactSpec] = {
             "'suspected to be'). Never say a recovery is likely or unlikely beyond the recovery status "
             "given. Never tell the reader what to do with their own money. " + _NO_SCORES
         ),
+    ),
+    "exchange_listings": FactSpec(
+        audience=None,
+        facts=facts_exchange_listings,
+        content_brief=(
+            "Say which exchange listed which token and, only if the facts give it, when trading opens (otherwise say "
+            "nothing about trading time). The post's title or its first two sentences MUST also say whether the token was "
+            "already listed on another tracked exchange. If the facts say YES: name each exchange and when it announced, "
+            "and never also say 'no earlier listing' or 'not previously listed'. If the facts say NO: say that no earlier "
+            "listing appears among the other tracked exchanges. That prior-listing fact is the point of the post, not a "
+            "footnote: it is the one thing a reader cannot get from the announcement itself. After it, say where that leaves "
+            "the token (how many of the four tracked exchanges list it now, and how long after the first one this "
+            "announcement came) -- real, derived facts, never filler. Do not recite the record's start dates. Write "
+            "dates like 'Nov 4'. Report an exchange label (Seed Tag, World Premiere) only as the "
+            "exchange's own label."
+        ),
+        guardrails=(
+            "HARD RULES, no exceptions: facts only. No price, price move, market cap, volume or trading performance, and "
+            "nothing that predicts or implies one (no 'pump', 'rally', 'surge', 'expected to rise', 'upside'). Never call "
+            "this a token's first listing anywhere, its debut, or brand new -- the record covers four exchanges and a "
+            "limited period. Say 'no earlier listing among the other tracked exchanges' ONLY when the facts say NO, and "
+            "use the word 'tracked' when you do. Never say what the project does or whether it is good. Never tell the "
+            "reader to buy, trade or position. " + _NO_SCORES
+        ),
+        # The market-desk paragraph role says "lead with the figures"; a listing has none, so the category states
+        # what this dispatch leads with instead (the channel's tone, length and person still apply).
+        role_overrides={1: (
+            "The whole dispatch in one tight paragraph of one to three short sentences: which exchange listed which "
+            "token; then -- within the first two sentences -- whether the token was already listed on another tracked "
+            "exchange (name each one and when it announced) or that no earlier listing appears among the tracked "
+            "exchanges; then when trading opens, only if the facts give it."
+        )},
+        title_figures=False,
     ),
     "gems_security": FactSpec(
         audience=None,

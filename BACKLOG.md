@@ -1673,3 +1673,55 @@ guard on Wall Street news (13 hits, all recovered by retry). Not touched (operat
 design): the macro neutrality patterns ("crackdown on" is flagged as an unattributed motive phrase though it is a
 common neutral noun phrase; "reckless", "propaganda" likewise) -- worth a look if macro posts start failing.
 
+## Phase 4: exchange_listings (2026-11-15)
+
+Operator-approved scope: new SPOT token listings on Binance, OKX, Bybit and KuCoin, to Crypto Wall Street only
+(market-desk voice). Perpetuals, futures, margin, tokenized stocks, equity perps, collateral, new trading PAIRS for
+an already-listed token, delistings and migrations are excluded by a deliberately strict title filter -- if it is
+too strict it shows as zero volume and gets loosened. No price, no market data (a stale number reads as a call and
+nothing here makes one safe). Cap 4/day is a sanity ceiling. **Upbit and Coinbase are deliberately NOT included yet:**
+Coinbase's blog returns 403 to scripts; Upbit's API failed certificate verification from the dev machine (not
+bypassed). Retry Upbit FROM RAILWAY once the core four have a track record -- the cert failure may be local, and
+Korean listings move prices harder than most.
+
+**The prior-listing fact is the point of the post** (operator: "the one piece a reader can't get from the
+announcement itself... make sure it's prominent, not a footnote"). Every stored listing carries `prior_listings`
+-- earlier announcements of the same token on the other tracked exchanges, from our own record, computed at
+collection time against the database plus the batch, strictly by announcement time. It is in the title or first two
+sentences of every post (a code check, not a request), and the guard rejects a post that says "no earlier listing"
+when the record shows one (or "already listed" when it shows none), names fewer exchanges than the record, or buries
+it. Identity: normalised token NAME, or SYMBOL when >= 3 characters (Binance's "AIGENSYN" is OKX's "AI"; a 2-letter
+symbol alone is not safe). Same exchange + same token within 30 days is a re-announcement (Bybit published "Bybit to
+List KOR Protocol" twice in two days), skipped, not a second listing.
+
+**What was built:** `collectors/exchange_listings.py` (four fetchers, strict parser, identity + prior-listing
+computation, `--backfill`, per-exchange isolation, stale-source alert at 7 days, Binance article body -> "open
+trading ... at <UTC>" for the trading start, KuCoin description likewise; a start time is never guessed), scorer in
+`pipeline/score.py`, `post_facts.FACT_SPECS['exchange_listings']` (facts, brief, guardrails, role override,
+`title_figures=False` -- the facts hold dates, not figures, so the market desk's "title must contain a figure" is not
+applied), a `_find_listing_issues` output guard in `pipeline/write_post.py`, template triage, category_config row,
+Crypto Wall Street routing, freshness 24h / no age bonus in `select_candidates`, `collect_cycle` entry, and
+`scripts/check_exchange_listings.py` (no-DB regression table: parser, identity, prior listings, scorer, guard).
+
+**Backfill (run once, 2026-11-15):** `python -m collectors.exchange_listings --backfill` -> 306 listings over up to 730 days
+(Binance 52, OKX 90, Bybit 69, KuCoin 95). Record starts: Binance 2024-09, OKX 2024-11, Bybit 2025-03, KuCoin 2026-03
+(KuCoin's API reaches back least). Rows older than the 24h freshness window can never become candidates; they exist
+so a new listing can say what came before it.
+
+**Measured volume (last 90 days): 47 listings, ~3.6/week, not 1-3 -- 60% of them KuCoin first listings of small
+tokens.** With the prior weights EVERY one of them clears the review threshold of 50 (the lowest, KuCoin with three
+earlier listings and no stated start time, sits at 50), so the threshold does not filter at all yet; ordering and the
+4/day cap do the work. All weights are priors (tiers Binance 100 / OKX 80 / Bybit 70 / KuCoin 55; novelty 100/70/45/25
+by number of earlier listings, decayed to 60% across the 24h window) -- re-fit with `scripts/calibration_report.py`
+after ~20 decisions. If KuCoin tail listings are noise, raise the threshold (a KuCoin first listing with a trading
+time ahead scores ~84, so it would have to be well above 60 to matter) or drop KuCoin's tier.
+
+**Found while testing (all fixed):** (a) Post drafts said "was already listed on Binance, Bybit and KuCoin ... so it
+was not previously listed on the other tracked exchanges" -- the guardrail phrase invited it; now conditional, and a
+code check rejects the contradiction either way. (b) Drafts invented "Trading opens when OKX says so" when no start
+time exists -- rejected in code. (c) A short post stuck at 197 characters (min 200) through five retries asking for
+"78 more": under-length feedback is now 15% over and names what to add (facts already given, no filler), same fix as
+the over-length one. (d) The daily LLM spend alert (threshold $0.10) fired from tagged dev/test calls (572 calls,
+$0.101 today, production share $0.0007) and said "across 6 calls ... something may be looping" -- it now reports
+production and tagged calls separately and says so when almost all of it is test traffic.
+

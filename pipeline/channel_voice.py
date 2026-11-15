@@ -155,6 +155,13 @@ def measure(post_html: str) -> int:
 
 # ------------------------------------------------------------------ prompt
 
+def _spec_has_figures(spec, facts: str) -> bool:
+    """Does the item have a figure a title could carry? A category can say (FactSpec.title_figures); otherwise any
+    digit in its facts counts."""
+    declared = getattr(spec, "title_figures", None)
+    return bool(_NUMBER_RE.search(facts)) if declared is None else bool(declared)
+
+
 def build_prompt(profile: VoiceProfile, *, display_name: str, spec, region_profile: str,
                  raw_item: dict, overhead_chars: int) -> str:
     """Channel voice + category facts/brief/guardrails + the output contract."""
@@ -182,7 +189,7 @@ def build_prompt(profile: VoiceProfile, *, display_name: str, spec, region_profi
         # Found by the first real run (2026-11-14): a hard "title must contain a figure" rule
         # made the writer fail three drafts in a row on a story with no number in it -- the only
         # way to comply was to invent one. The rule applies only when the facts have a figure.
-        rules.append("The title must contain at least one of the story's figures." if _NUMBER_RE.search(facts)
+        rules.append("The title must contain at least one of the story's figures." if _spec_has_figures(spec, facts)
                      else "This story has no figures: lead the title with the concrete fact instead, and "
                           "NEVER invent or estimate a number.")
         rules_block = "\n" + "\n".join(f"- {r}" for r in rules)
@@ -294,7 +301,12 @@ def find_voice_issues(profile: VoiceProfile, parsed: dict, post_chars: int | Non
                    f"-- not just adjectives. {per_para}; keep the title about {len(title)} characters "
                    f"(aim for roughly {mid} in total)")
         else:
-            fix = f"add about {mid - post_chars} characters (aim for roughly {mid} in total)"
+            # Same under-correction as cutting: asked for 15% more than the gap, and told what to add -- facts
+            # already given, not padding (found 2026-11-15: a short listing post sat at 197 characters, three
+            # under the 200 minimum, through five retries that each asked for "about 78 more").
+            add = int((mid - post_chars) * 1.15)
+            fix = (f"add about {add} characters of facts already given (a date, the exchange's own label, the "
+                   f"trading time, a fuller statement of the earlier listing) -- no filler (aim for roughly {mid} in total)")
         issues.append(f"the finished post is {post_chars} characters but must be {profile.length_min}-"
                       f"{profile.length_max} -- {fix}")
 

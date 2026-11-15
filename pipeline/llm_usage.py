@@ -165,6 +165,7 @@ def today_totals(conn) -> dict:
             """SELECT COUNT(*) FILTER (WHERE source IS NULL) AS calls,
                       COUNT(*) FILTER (WHERE source IS NOT NULL) AS tagged_calls,
                       COALESCE(SUM(est_cost_usd), 0)::float AS spend,
+                      COALESCE(SUM(est_cost_usd) FILTER (WHERE source IS NULL), 0)::float AS untagged_spend,
                       COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
                       COALESCE(SUM(completion_tokens), 0) AS completion_tokens
                FROM llm_usage WHERE (ts AT TIME ZONE 'UTC')::date = (now() AT TIME ZONE 'UTC')::date"""
@@ -310,9 +311,12 @@ def _check_daily(conn) -> None:
     if t["spend"] >= spend_cap:
         _alert_once_per_day(
             conn, "spend",
-            f"💸 <b>LLM spend alert</b>\nEstimated spend today (UTC): ${t['spend']:.3f} across {t['calls']} calls "
-            f"(threshold ${spend_cap:g}). A normal day is well under a cent.\n"
-            f"Something may be looping -- check the Railway poller logs for repeated write failures.",
+            f"💸 <b>LLM spend alert</b>\nEstimated spend today (UTC): ${t['spend']:.3f} (threshold ${spend_cap:g}) -- "
+            f"{t['calls']} production calls (${t['untagged_spend']:.4f}) + {t['tagged_calls']} tagged dev/test calls.\n"
+            + ("Almost all of it is tagged dev/test traffic (build/test sessions), not a loop. "
+               if t["untagged_spend"] < spend_cap / 2 else
+               "Production calls alone are a large share of it -- something may be looping; check the Railway poller logs for repeated write failures. ")
+            + "A normal production day is well under a cent.",
         )
     if t["calls"] >= calls_cap:
         _alert_once_per_day(

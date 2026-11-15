@@ -106,7 +106,7 @@ via `category_config_exists()` until built.
 
 | Channel | Display name | Categories (live) | Region profile |
 |---|---|---|---|
-| `crypto_wall_street` | Crypto Wall Street | `whale_movements`, `news` (shared via alternation) | `default` |
+| `crypto_wall_street` | Crypto Wall Street | `whale_movements`, `news` (shared via alternation), `exchange_listings` (2026-11-15, Phase 4) | `default` |
 | `alpha_edge_crypto` | Alpha Edge Crypto | `defi_yields`, `news` (shared via alternation) | `us` |
 | `crypto_notebook` | Crypto Notebook | `gems_security`, `hacks_exploits` (moved from CoinCraft 2026-11-15) | `default` |
 | `coincraft` | CoinCraft | *(none -- earning opportunities arrive in Phase 5)* | `default` |

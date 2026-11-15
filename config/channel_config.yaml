@@ -29,7 +29,7 @@
 # channel in Phase 5, and the row has to survive until then. A channel with `categories: []` is
 # safe everywhere it is read (bot/notify.py visits it, finds no candidates, sends nothing). The
 # category -> channel table is now:
-#   crypto_wall_street: news (shared), whale_movements
+#   crypto_wall_street: news (shared), whale_movements, exchange_listings (2026-11-15)
 #   alpha_edge_crypto:  news (shared), defi_yields (whole -- NOT split)
 #   crypto_notebook:    gems_security, hacks_exploits
 #   hustle_to_million:  tool_launches, startup_jobs, macro_news
@@ -71,6 +71,7 @@ crypto_wall_street:
   categories:
     - news            # shared with alpha_edge_crypto since 2026-09-30, see note above
     - whale_movements
+    - exchange_listings   # added 2026-11-15 (Phase 4): spot listings on Binance/OKX/Bybit/KuCoin, WS only
   region_profile: default
   soft_daily_cap: 16   # raised from 12 -- see 2026-09-30 note above
   chat_id: "-1001200205264"

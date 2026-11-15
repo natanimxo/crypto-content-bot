@@ -164,7 +164,7 @@ AGE_BONUS_MAX_POINTS = 12.0
 # as good as a fresh one (a job posting, a tool, a yield pool). For
 # time-sensitive categories, older is WORSE, not owed a turn for waiting; see
 # FRESHNESS_MAX_AGE_HOURS below for the harder cutoff on the same principle.
-NO_AGE_BONUS_CATEGORIES = {"news", "macro_news", "whale_movements", "hacks_exploits"}
+NO_AGE_BONUS_CATEGORIES = {"news", "macro_news", "whale_movements", "hacks_exploits", "exchange_listings"}
 # hacks_exploits added 2026-09-30 -- a confirmed past incident is the same
 # "older is worse, not owed a turn" shape as news/macro_news/whale_movements,
 # just on a longer real-world clock (DefiLlama's own feed lags by days, not
@@ -185,6 +185,9 @@ NO_AGE_BONUS_CATEGORIES = {"news", "macro_news", "whale_movements", "hacks_explo
 # reverse.
 FRESHNESS_MAX_AGE_HOURS = {
     "news": 48.0, "macro_news": 48.0, "whale_movements": 24.0,
+    # exchange_listings (2026-11-15): an announcement is a market event; a day-old one is history. Same line as
+    # whale_movements, and the same number as EXCHANGE_LISTINGS_MAX_AGE_HOURS in pipeline/score.py.
+    "exchange_listings": 24.0,
     # 336h (14 days), matching pipeline/score.py's HACKS_EXPLOITS_MAX_AGE_HOURS
     # (kept in sync manually, same cross-module-constant reasoning as every
     # other duplicated constant in this file) -- longer than news' 48h
