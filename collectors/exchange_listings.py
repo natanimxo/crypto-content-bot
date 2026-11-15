@@ -62,8 +62,13 @@ HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; crypto-content-bot)", "Accept
 BINANCE_LIST_URL = "https://www.binance.com/bapi/composite/v1/public/cms/article/list/query"
 BINANCE_DETAIL_URL = "https://www.binance.com/bapi/composite/v1/public/cms/article/detail/query"
 BINANCE_ARTICLE_URL = "https://www.binance.com/en/support/announcement/detail/{code}"
-OKX_URL = "https://www.okx.com/api/v5/support/announcements"
-BYBIT_URL = "https://api.bybit.com/v5/announcements/index"
+# Hosts, tried in order. Found 2026-11-15 from the FIRST Railway cycle (the dev machine saw different data):
+#  * OKX answers by IP region. From Railway's US address, www.okx.com serves the OKX-US feed (en-us URLs, newest item 23
+#    days old, a different set of listings); my.okx.com (the EEA endpoint) serves the global feed from anywhere.
+#  * Bybit returns 403 to cloud/US addresses on api.bybit.com; its alternate API domains are tried after it.
+OKX_URLS = ["https://my.okx.com/api/v5/support/announcements", "https://www.okx.com/api/v5/support/announcements"]
+BYBIT_URLS = ["https://api.bybit.com/v5/announcements/index", "https://api.bytick.com/v5/announcements/index",
+              "https://api.bybit.nl/v5/announcements/index"]
 KUCOIN_URL = "https://api.kucoin.com/api/v3/announcements"
 KUCOIN_ARTICLE_URL = "https://www.kucoin.com/announcement/{slug}"
 
@@ -198,16 +203,35 @@ def _binance_page(page: int, size: int) -> list[dict]:
              "url": BINANCE_ARTICLE_URL.format(code=a["code"]), "desc": ""} for a in arts]
 
 
+def _first_working(urls: list[str], params: dict):
+    """GET the first host that answers; raise the last error if none does."""
+    last = None
+    for url in urls:
+        try:
+            return get_json(url, params=params, headers=HEADERS)
+        except Exception as exc:
+            last = exc
+            logger.warning("exchange_listings: %s failed (%s), trying the next host", url, exc)
+    raise last
+
+
+def _okx_canonical(url: str) -> str:
+    """One id per announcement whichever regional host served it: .../en-us/help/<slug>, .../en-eu/help/<slug> and
+    .../help/<slug> are the same announcement."""
+    m = re.search(r"/help/([^/?#]+)", url or "")
+    return f"https://www.okx.com/help/{m.group(1)}" if m else url
+
+
 def _okx_page(page: int, size: int) -> tuple[list[dict], int]:
-    d = get_json(OKX_URL, params={"annType": "announcements-new-listings", "page": page}, headers=HEADERS)
+    d = _first_working(OKX_URLS, {"annType": "announcements-new-listings", "page": page})
     block = (d.get("data") or [{}])[0]
-    rows = [{"id": a["url"], "title": a["title"], "ts_ms": int(a["pTime"]), "url": a["url"], "desc": ""}
+    rows = [{"id": _okx_canonical(a["url"]), "title": a["title"], "ts_ms": int(a["pTime"]), "url": _okx_canonical(a["url"]), "desc": ""}
             for a in block.get("details") or []]
     return rows, int(block.get("totalPage") or 1)
 
 
 def _bybit_page(page: int, size: int) -> list[dict]:
-    d = get_json(BYBIT_URL, params={"locale": "en-US", "type": "new_crypto", "limit": size, "page": page}, headers=HEADERS)
+    d = _first_working(BYBIT_URLS, {"locale": "en-US", "type": "new_crypto", "limit": size, "page": page})
     return [{"id": a.get("url") or a["title"], "title": a["title"], "ts_ms": int(a["dateTimestamp"]),
              "url": a.get("url") or "", "desc": a.get("description") or ""} for a in (d.get("result") or {}).get("list") or []]
 
@@ -326,8 +350,13 @@ def attach_prior_listings(candidates: list[dict], known: list[dict]) -> None:
         c["prior_count"] = len(lines)
         # The same exchange announcing the same token again within DUPLICATE_WINDOW_DAYS is a re-announcement
         # (Bybit published "Bybit to List KOR Protocol" twice in two days), not a second listing.
-        c["duplicate"] = any(u["exchange_key"] == c["exchange_key"] and (c["ts_ms"] - u["ts_ms"]) <= DUPLICATE_WINDOW_DAYS * 86_400_000
-                             for u in priors)
+        window = DUPLICATE_WINDOW_DAYS * 86_400_000
+        c["duplicate"] = any(u["exchange_key"] == c["exchange_key"] and same_token(c, u) and (
+            # an earlier announcement by the same exchange ...
+            0 < c["ts_ms"] - u["ts_ms"] <= window
+            # ... or a row we ALREADY STORE for it, whichever came first: the same announcement can reach us under
+            # a different id (a regional host's URL), and the stored row wins
+            or (u.get("stored") and abs(c["ts_ms"] - u["ts_ms"]) <= window)) for u in universe)
         # ...and it must not count as a "prior listing" of itself on the same exchange for later comparisons either
 
 
@@ -356,7 +385,7 @@ def _load_known(conn) -> list[dict]:
         if not p.get("published_at") or not p.get("exchange_key"):
             continue
         known.append({
-            "external_id": r["external_id"], "exchange_key": p["exchange_key"], "exchange": p.get("exchange"),
+            "external_id": r["external_id"], "stored": True, "exchange_key": p["exchange_key"], "exchange": p.get("exchange"),
             "token_name": p.get("token_name") or "", "symbol": p.get("symbol") or "", "published_at": p["published_at"],
             "ts_ms": int(datetime.fromisoformat(p["published_at"]).timestamp() * 1000),
         })
@@ -407,6 +436,9 @@ def collect(backfill: bool = False) -> int:
                         now, 7 * 24 * 60)
             state["details"]["exchange_errors"] = errors
             state["details"]["stale_sources"] = stale
+            # what each host actually returned -- a dev machine and Railway see different data (2026-11-15)
+            state["details"]["newest_announcement"] = {
+                ex: _iso(max(r["ts_ms"] for r in rows)) for ex, rows in raw_by_exchange.items() if rows}
             if len(errors) == len(EXCHANGES):
                 raise RuntimeError("every exchange announcement source failed")
             state["details"]["announcements"] = {k: len(v) for k, v in raw_by_exchange.items()}

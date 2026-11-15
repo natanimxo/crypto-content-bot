@@ -1785,3 +1785,21 @@ and "since", and rejects "newly listed", "new token", "only tracked", "sole" as 
 brand new". Found while testing: a fixture that quoted "Mar 2026" for a KuCoin listing was correctly rejected (the right
 window there is Mar 2025) -- the check is doing its job.
 
+### exchange_listings: the first Railway cycle saw different data than the dev machine (2026-11-15 16:00 UTC)
+
+**Lesson, twice now (Upbit's cert failure, and this): a source that works from the dev machine is NOT verified until it
+has run from Railway.** The first production cycle: Binance 100 announcements and KuCoin 18 (fine); **Bybit 403** on
+`api.bybit.com` (cloud/US addresses are refused); **OKX answered by IP region** -- from Railway's US address `www.okx.com`
+served the OKX-US feed (`/en-us/help/...` URLs, a different set of listings, newest item 23 days old). Effects: the
+stale-source alert fired for OKX at 16:06 (a true statement about the feed Railway was given, not about OKX), and 20
+OKX-US rows were inserted under different external ids (duplicates of rows the backfill already held, plus US-only
+listings that are not "OKX" for this record). None were notified (all >24h old). The 20 rows and their scores were
+deleted (none had approvals or notifications).
+Fixes: OKX is fetched from `my.okx.com` (the EEA endpoint, global feed) first, then `www.okx.com`; Bybit tries
+`api.bybit.com`, `api.bytick.com`, `api.bybit.nl` in order; an OKX announcement gets ONE id whichever regional host served
+it (`/help/<slug>`); a new row is skipped as a duplicate when the same exchange already has the same token stored within
+30 days under any id; each run records `newest_announcement` per exchange so the next cycle shows what Railway actually
+received. **Not yet verified from Railway:** whether the Bybit alternates are reachable and whether `my.okx.com` returns the
+global feed there -- check `collect_exchange_listings.details.{exchange_errors,newest_announcement}` on the next cycle.
+If Bybit stays blocked, the record is Binance/OKX/KuCoin only and the "four tracked exchanges" wording is wrong.
+
