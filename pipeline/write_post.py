@@ -22,7 +22,7 @@ from pipeline.db import dict_cursor
 from pipeline.http import get_json
 from pipeline.post_facts import (
     FACT_SPECS, WHALE_READ_CONVENTION, facts_defi_yields, facts_exchange_listings, facts_gems_security, facts_hacks_exploits,
-    facts_job_listing,
+    facts_job_listing, listing_record_window,
     facts_tool_launches,
     facts_whale_movements, facts_wire_story,
 )
@@ -975,10 +975,13 @@ def _find_reader_advice(parsed: dict) -> list[str]:
 _LISTING_PRICE_RE = re.compile(
     r"\b(?:price|prices|pump\w*|rall(?:y|ies|ied)|surg\w*|jump\w*|soar\w*|moon\w*|bullish|bearish|upside|"
     r"spik\w*|gains?|expected to (?:rise|climb|gain))\b", re.IGNORECASE)
-_LISTING_ABSOLUTE_RE = re.compile(r"\b(?:first[- ]ever|debut\w*|brand[- ]new|newly (?:created|launched|minted)|only exchange)\b", re.IGNORECASE)
+_LISTING_ABSOLUTE_RE = re.compile(
+    r"\b(?:first[- ]ever|debut\w*|brand[- ]new|newly (?:created|launched|minted|listed)|new (?:token|coin|asset)|"
+    r"only (?:exchange|venue|tracked)|sole)\b", re.IGNORECASE)
 _LISTING_NEGATION_RE = re.compile(r"\b(?:no|not|none|neither|never|without)\b", re.IGNORECASE)
 _LISTING_NO_PRIOR_RE = re.compile(r"\b(?:not previously listed|no (?:earlier|prior|previous) listing|no earlier)\b", re.IGNORECASE)
-_LISTING_ALREADY_RE = re.compile(r"\b(?:already (?:listed|trad\w+)|previously listed|earlier listed)\b", re.IGNORECASE)
+_LISTING_ALREADY_RE = re.compile(
+    r"(?<!not )(?<!never )(?<!n't )\b(?:already (?:listed|trad\w+)|previously listed|earlier listed)\b", re.IGNORECASE)
 LISTING_CHECKED_CATEGORIES = {"exchange_listings"}
 
 
@@ -995,10 +998,14 @@ def _find_listing_issues(parsed: dict, payload: dict) -> list[str]:
     if m:
         issues.append(f"\"{m.group(0)}\" claims more than the four-exchange record shows -- say 'not previously listed on the "
                       f"other tracked exchanges' instead")
-    for sentence in _SENTENCE_SPLIT_RE.split(text):
-        if re.search(r"\bfirst\b", sentence, re.IGNORECASE) and not re.search(r"\btracked\b", sentence, re.IGNORECASE):
-            issues.append("a sentence says 'first' without saying 'tracked' -- the record covers four exchanges only, so say "
-                          "'first among the tracked exchanges' or drop the claim")
+    # "First" is only a risk when the record shows NO earlier listing (then it reads as "first anywhere"). When it
+    # does show one, "the first tracked announcement was Binance's" is simply the record's own order of events.
+    for sentence in ([] if payload.get("prior_listings") else _SENTENCE_SPLIT_RE.split(text)):
+        if re.search(r"\bfirst\b", sentence, re.IGNORECASE) and not (
+                re.search(r"\btracked\b", sentence, re.IGNORECASE) and re.search(r"\bsince\b", sentence, re.IGNORECASE)):
+            issues.append("a sentence says 'first' without 'tracked' and 'since <month year>' -- the record covers four "
+                          "exchanges and a short period only, so drop 'first' or say 'first among the tracked exchanges since "
+                          "<month year>'")
             break
     if not payload.get("trading_start") and re.search(r"\btrading (?:opens?|will open|starts?|begins?)\b|\bopens? (?:for )?trading\b", text, re.IGNORECASE):
         issues.append("the announcement did not state when trading opens -- say nothing about trading time")
@@ -1022,6 +1029,10 @@ def _find_listing_issues(parsed: dict, payload: dict) -> list[str]:
         if not (re.search(r"\btracked\b", head, re.IGNORECASE) and _LISTING_NEGATION_RE.search(head)):
             issues.append("state in the title or the first two sentences that no earlier listing appears among the tracked "
                           "exchanges (use the word 'tracked' and a plain negative) -- it is the point of the post")
+        window = listing_record_window(payload)
+        if window and not (re.search(r"\bsince\b", text, re.IGNORECASE) and window.lower() in text.lower()):
+            issues.append(f"the record is short: say 'since {window}' beside the claim that no earlier listing appears, so it "
+                          f"can never be read as 'never listed anywhere'")
     return issues
 
 

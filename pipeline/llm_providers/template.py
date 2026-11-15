@@ -137,10 +137,29 @@ def render_hacks_exploits(raw_item: dict) -> str:
 
 @register_template("exchange_listings")
 def render_exchange_listings(raw_item: dict) -> str:
+    """The digest line (operator, 2026-11-15: "which exchange, and how many of the four already list it -- a first
+    Binance listing and a fourth-exchange KuCoin listing should be distinguishable before I open anything").
+    Leads with a colour dot and the position -- 1st/2nd/3rd/4th of the four tracked exchanges to list the token --
+    then who already lists it, so the signal reads at a glance. When nobody else does, the window of that claim is
+    shown too (the record is short), so a 'FIRST' is never read as 'first anywhere'."""
+    from pipeline.post_facts import listing_record_window
     p = raw_item["payload"]
-    prior = p.get("prior_listings") or []
-    parts = [p.get("title") or ""]
-    parts.append("already on " + ", ".join(x["exchange"] for x in prior) if prior else "no earlier listing on the other tracked exchanges")
+    me = p.get("exchange_key")
+    earlier = []
+    for x in p.get("prior_listings") or []:
+        if x.get("exchange_key") != me and x["exchange"] not in earlier:
+            earlier.append(x["exchange"])
+    position = len(earlier) + 1
+    dot = {1: "🟢", 2: "🟡"}.get(position, "⚪")
+    ordinal = {1: "1st", 2: "2nd", 3: "3rd", 4: "4th"}.get(position, f"{position}th")
+    if earlier:
+        detail = "already on " + ", ".join(earlier)
+    else:
+        window = listing_record_window(p)
+        detail = f"none of the other 3 list it in our record{f' since {window}' if window else ''}"
+    token = p.get("token_name")
+    token = f"{token} ({p.get('symbol')})" if token and token.upper() != (p.get("symbol") or "").upper() else f"{p.get('symbol')}"
+    parts = [f"{dot} {p.get('exchange')} · {ordinal} of 4 tracked ({detail})", token]
     if p.get("trading_start"):
         parts.append(f"trading opens {p['trading_start'][:16].replace('T', ' ')} UTC")
     return " · ".join(parts)

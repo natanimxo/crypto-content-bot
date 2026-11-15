@@ -157,6 +157,20 @@ def facts_hacks_exploits(p: dict) -> str:
 - Recovery status: {recovery_note}"""
 
 
+def listing_record_window(p: dict) -> str | None:
+    """'Mar 2026' -- how far back EVERY other tracked exchange's record reaches (the latest of their start dates).
+    This is the window a "no earlier listing" statement is true for, and it can be short: KuCoin's announcement API
+    only reaches back to 2026-03, so a token KuCoin listed in 2025 does not appear in the record at all. A post may
+    never say "no earlier listing" without saying "since <this>" (pipeline/write_post.py checks it)."""
+    import calendar
+    since = p.get("record_since") or {}
+    starts = [v for k, v in since.items() if k != p.get("exchange") and v]
+    if not starts:
+        return None
+    year, month = max(starts).split("-")[:2]
+    return f"{calendar.month_abbr[int(month)]} {year}"
+
+
 def facts_exchange_listings(p: dict) -> str:
     import datetime as _dt
 
@@ -177,8 +191,12 @@ def facts_exchange_listings(p: dict) -> str:
             f"{', an earlier announcement by this same exchange' if x.get('exchange_key') == p.get('exchange_key') else ''})"
             for x in prior)
     else:
+        window = listing_record_window(p)
         prior_line = (f"NO -- no earlier listing of this token appears in the record of the other tracked exchanges "
-                      f"({', '.join(others)}). That is a statement about the record, not proof it is listed nowhere else.")
+                      f"({', '.join(others)}). That is a statement about the record, not proof it is listed nowhere else"
+                      + (f": those records only go back to {window}, so a listing before then would not appear. "
+                         f"Whenever the post says no earlier listing appears, it MUST say 'since {window}' right "
+                         f"beside it." if window else "."))
     since = p.get("record_since") or {}
     record = ", ".join(f"{k} from {v}" for k, v in since.items()) or "unknown"
     # Derived from the same record, and the reason a thin announcement still has something true to say: how many of
@@ -193,7 +211,7 @@ def facts_exchange_listings(p: dict) -> str:
         except (KeyError, TypeError, ValueError):
             pass
     else:
-        standing = "the only tracked exchange to have announced it so far"
+        standing = "this is the one tracked exchange with a listing of it in the record (1 of the 4)"
     start = p.get("trading_start")
     trading_line = f"\n- Trading opens: {day(start)} {start[11:16]} UTC, as stated in the announcement" if start else ""
     flags = p.get("flags") or []
@@ -397,7 +415,8 @@ FACT_SPECS: dict[str, FactSpec] = {
             "nothing about trading time). The post's title or its first two sentences MUST also say whether the token was "
             "already listed on another tracked exchange. If the facts say YES: name each exchange and when it announced, "
             "and never also say 'no earlier listing' or 'not previously listed'. If the facts say NO: say that no earlier "
-            "listing appears among the other tracked exchanges. That prior-listing fact is the point of the post, not a "
+            "listing appears among the other tracked exchanges SINCE the month the facts give -- the window is part of the "
+            "claim, because the record is short and a reader must never take it for 'never listed anywhere'. That prior-listing fact is the point of the post, not a "
             "footnote: it is the one thing a reader cannot get from the announcement itself. After it, say where that leaves "
             "the token (how many of the four tracked exchanges list it now, and how long after the first one this "
             "announcement came) -- real, derived facts, never filler. Do not recite the record's start dates. Write "
@@ -408,8 +427,9 @@ FACT_SPECS: dict[str, FactSpec] = {
             "HARD RULES, no exceptions: facts only. No price, price move, market cap, volume or trading performance, and "
             "nothing that predicts or implies one (no 'pump', 'rally', 'surge', 'expected to rise', 'upside'). Never call "
             "this a token's first listing anywhere, its debut, or brand new -- the record covers four exchanges and a "
-            "limited period. Say 'no earlier listing among the other tracked exchanges' ONLY when the facts say NO, and "
-            "use the word 'tracked' when you do. Never say what the project does or whether it is good. Never tell the "
+            "limited period. Say 'no earlier listing among the other tracked exchanges since <month year>' ONLY when the "
+            "facts say NO, using the word 'tracked' and the window the facts give. Never write 'first', 'new', 'newly' or "
+            "'only' about the token itself. Never say what the project does or whether it is good. Never tell the "
             "reader to buy, trade or position. " + _NO_SCORES
         ),
         # The market-desk paragraph role says "lead with the figures"; a listing has none, so the category states

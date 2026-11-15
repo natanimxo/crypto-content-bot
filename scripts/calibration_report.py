@@ -87,7 +87,7 @@ POSITION_CAVEAT = (
 
 def fetch_rows(conn, category: str | None = None) -> list[dict]:
     query = """
-        SELECT r.id AS raw_item_id, r.category, a.decision, a.decided_at, a.expired_reason,
+        SELECT r.id AS raw_item_id, r.category, r.payload, a.decision, a.decided_at, a.expired_reason,
                s.score, s.score_breakdown, n.id AS notification_id, n.sent_at,
                RANK() OVER (PARTITION BY n.id, r.category ORDER BY s.score DESC) AS digest_rank,
                COUNT(*) OVER (PARTITION BY n.id, r.category) AS digest_size
@@ -227,6 +227,8 @@ def report(rows: list[dict], ignore_after_days: float) -> None:
         scored_neg = [float(r["score"]) for r in negatives if r["score"] is not None]
         print(f"  {verdict(scored_pos, scored_neg)}")
 
+        print_segments(category, resolved)
+
         # acted-on rate by score band (terciles of the resolved set)
         scored_resolved = sorted((r for r in resolved if r["score"] is not None), key=lambda r: float(r["score"]))
         if len(scored_resolved) >= MIN_FOR_BANDS:
@@ -254,6 +256,43 @@ def report(rows: list[dict], ignore_after_days: float) -> None:
                   f"lower half {acc_low}/{len(low)} accepted   "
                   f"({acc_low} of {len(g['accepted'])} accepted cards came from the lower half of a "
                   f"multi-card digest)")
+
+
+# Per-category SEGMENT breakdowns (2026-11-15): where a category's score does not separate accepted from rejected,
+# the useful question is which kind of item the operator keeps. exchange_listings: all 47 listings in the last 90 days
+# cleared the review threshold, ~60% of them KuCoin first listings of small tokens -- the operator asked NOT to retune
+# blind: let real cards go out, and if after ~20 resolved cards the KuCoin ones are consistently rejected, that is the
+# calibration data to drop KuCoin's tier (pipeline/score.py EXCHANGE_LISTINGS_TIER).
+def _listing_others_listing(p: dict) -> str:
+    me = p.get("exchange_key")
+    n = len({x.get("exchange_key") for x in (p.get("prior_listings") or []) if x.get("exchange_key") != me})
+    return {0: "first of the 4 tracked", 1: "2nd of 4", 2: "3rd of 4"}.get(n, "4th of 4")
+
+
+SEGMENTS = {
+    "exchange_listings": [
+        ("by exchange", lambda p: p.get("exchange") or "?"),
+        ("by position among the four", _listing_others_listing),
+    ],
+}
+SEGMENT_MIN_FOR_VERDICT = 20   # resolved cards in the category before a segment table means anything
+
+
+def print_segments(category: str, resolved: list[dict]) -> None:
+    for title, key in SEGMENTS.get(category, []):
+        groups = defaultdict(list)
+        for r in resolved:
+            groups[key(r["payload"] or {})].append(r)
+        print(f"  {title}:")
+        for name in sorted(groups, key=lambda k: -len(groups[k])):
+            g = groups[name]
+            acc = sum(1 for r in g if r["cls"] == "accepted")
+            rej = sum(1 for r in g if r["cls"] == "rejected")
+            ign = sum(1 for r in g if r["cls"] == "ignored")
+            print(f"     {name:28} {acc}/{len(g)} accepted  (rejected {rej}, ignored {ign})")
+    if category in SEGMENTS and len(resolved) < SEGMENT_MIN_FOR_VERDICT:
+        print(f"  (only {len(resolved)} resolved cards -- the operator's rule is ~{SEGMENT_MIN_FOR_VERDICT} before dropping "
+              f"any tier on this evidence)")
 
 
 def main():

@@ -5,6 +5,19 @@ Now that this repo is pushed (github.com/natanimxo/crypto-content-bot), these
 could move to GitHub Issues instead; until that switch is made, this file is
 the one place to check.
 
+## READ FIRST -- traps that look like bugs and are not
+
+- **DeepSeek's account balance lags the calls by MINUTES and reports whole cents.** Compare `fetch_deepseek_balance_usd()`
+  against `llm_usage` only after waiting several minutes and only over a spend of ~$0.05 or more. Checked 2026-11-15: 20
+  seconds after a $0.09 burst the balance showed a $0.05 drop, which reads as "the estimator over-counts 2x"; minutes later it
+  had settled at $0.09 and agreed with the estimate (rates also match DeepSeek's published pricing). There is no 2x
+  estimator bug -- do not re-discover it. Full trail: "LLM cost estimator verified" near the end of this file.
+- **The daily LLM spend alert counts TAGGED dev/test calls** (they are real money). A heavy build/test day trips it once;
+  the message separates production from tagged calls and says when it is almost all test traffic. "N production calls"
+  in it is NOT the number of calls that produced the dollar figure.
+- **exchange_listings "no earlier listing" is a statement about a SHORT record** (KuCoin's API reaches back to 2026-03;
+  the others 2024-09 to 2025-03). Posts must say "since <month year>" beside it; never "first anywhere". See Phase 4 follow-ups.
+
 ## Scoring
 
 - **DeFi yields: APY spikes and near-zero yields -- FIXED 2026-09-21
@@ -1747,4 +1760,28 @@ Prompted by the daily spend alert ("$0.100 across 6 calls"). **The calls were ne
   ~$0.05 or more (it reports whole cents).
 - *Consequence for the guard:* the $0.10 daily threshold is real dollars to within ~20%. Tagged dev/test calls still count
   toward it (real money), so a heavy build day (like 2026-11-15, 695 test calls) will trip it once; the message now says so.
+
+### Phase 4 follow-ups (2026-11-15, operator rulings)
+
+**No blind retune of exchange_listings.** 47 listings in 90 days, all 47 clearing the threshold, ~60% KuCoin first
+listings of small tokens: the score does not filter (the same near-constant-score problem web3_jobs had). Operator: do
+not adjust tiers or threshold from the description; send real cards and judge from actual output. If after ~20 resolved
+cards the KuCoin ones are consistently rejected, that is the calibration data to drop KuCoin's tier
+(`pipeline/score.py` `EXCHANGE_LISTINGS_TIER`). `scripts/calibration_report.py exchange_listings` now prints accept rate
+by exchange and by position among the four, and says how many resolved cards it has against the ~20 rule.
+
+**The digest line carries the signal** (`pipeline/llm_providers/template.py`): `🟢 Binance · 1st of 4 tracked (none of
+the other 3 list it in our record since Mar 2026) · PREDICT` versus `⚪ KuCoin · 4th of 4 tracked (already on Binance,
+OKX, Bybit) · MegaETH (MEGA)`. Dot: green 1st, yellow 2nd, white 3rd/4th; the window is shown whenever it is a "1st".
+The same exchange's own earlier announcement does not count as "another exchange already lists it".
+
+**Thin-record wording, enforced in code.** The record is short and uneven (Binance from 2024-09, OKX 2024-11, Bybit 2025-03,
+KuCoin 2026-03), so "no earlier listing appears among the other tracked exchanges" is only true for the window the OTHER
+exchanges' records all cover (the LATEST of their start dates: a Bybit or Binance listing is judged against KuCoin's
+2026-03; a KuCoin listing against Bybit's 2025-03). `post_facts.listing_record_window` computes it; the facts tell the
+writer the window is part of the claim; `_find_listing_issues` rejects a "no earlier listing" post that does not say
+`since <that month year>` (a wrong window is rejected too), rejects "first" unless the same sentence has both "tracked"
+and "since", and rejects "newly listed", "new token", "only tracked", "sole" as well as the earlier "debut / first-ever /
+brand new". Found while testing: a fixture that quoted "Mar 2026" for a KuCoin listing was correctly rejected (the right
+window there is Mar 2025) -- the check is doing its job.
 

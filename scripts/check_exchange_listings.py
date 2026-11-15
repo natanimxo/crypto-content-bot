@@ -18,6 +18,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from collectors import exchange_listings as L  # noqa: E402
 from pipeline.score import SCORERS  # noqa: E402,F401  (import registers the scorers)
 from pipeline.score import score_exchange_listings  # noqa: E402
+from pipeline.llm_providers.template import render_exchange_listings  # noqa: E402
+from pipeline.post_facts import listing_record_window  # noqa: E402
 from pipeline.write_post import _find_listing_issues  # noqa: E402
 
 FAILS: list[str] = []
@@ -137,23 +139,24 @@ def main():
 
     # ---- output guard
     prior_one = {"prior_listings": [{"exchange": "Bybit"}], "trading_start": None}
-    prior_none = {"prior_listings": [], "trading_start": None}
-    with_start = {"prior_listings": [], "trading_start": "2026-11-11T11:00:00+00:00"}
+    thin = {"Binance": "2024-09", "OKX": "2024-11", "Bybit": "2025-03", "KuCoin": "2026-03"}   # KuCoin's record is the short one
+    prior_none = {"exchange": "Bybit", "prior_listings": [], "trading_start": None, "record_since": thin}
+    with_start = {"exchange": "KuCoin", "prior_listings": [], "trading_start": "2026-11-11T11:00:00+00:00", "record_since": thin}
 
     def issues(parsed, payload):
         return _find_listing_issues(parsed, payload)
     check("clean post with a prior listing",
           issues({"title": "OKX lists Canton (CC); Bybit listed Nov 7", "paragraphs": ["OKX listed Canton (CC). Bybit announced the token on Nov 7, so it was already listed on another tracked exchange."]}, prior_one), [])
     check("clean post with no prior listing",
-          issues({"title": "Bybit lists KOR", "paragraphs": ["Bybit listed KOR Protocol (KOR) on Nov 2. No earlier listing appears among the other tracked exchanges."]}, prior_none), [])
+          issues({"title": "Bybit lists KOR", "paragraphs": ["Bybit listed KOR Protocol (KOR) on Nov 2. No earlier listing appears among the other tracked exchanges since Mar 2026."]}, prior_none), [])
     check("price talk is rejected",
-          bool(issues({"title": "Bybit lists KOR", "paragraphs": ["Bybit listed KOR. No earlier listing appears among the other tracked exchanges. The price could rally."]}, prior_none)), True)
+          bool(issues({"title": "Bybit lists KOR", "paragraphs": ["Bybit listed KOR. No earlier listing appears among the other tracked exchanges since Mar 2026. The price could rally."]}, prior_none)), True)
     check("'debut' is rejected",
-          bool(issues({"title": "Bybit lists KOR in a debut", "paragraphs": ["Bybit listed KOR. No earlier listing appears among the other tracked exchanges."]}, prior_none)), True)
+          bool(issues({"title": "Bybit lists KOR in a debut", "paragraphs": ["Bybit listed KOR. No earlier listing appears among the other tracked exchanges since Mar 2026."]}, prior_none)), True)
     check("'first' without 'tracked' is rejected",
-          bool(issues({"title": "Bybit lists KOR first", "paragraphs": ["Bybit listed KOR. No earlier listing appears among the other tracked exchanges."]}, prior_none)), True)
+          bool(issues({"title": "Bybit lists KOR first", "paragraphs": ["Bybit listed KOR. No earlier listing appears among the other tracked exchanges since Mar 2026."]}, prior_none)), True)
     check("'first among the tracked exchanges' is allowed",
-          issues({"title": "Bybit lists KOR", "paragraphs": ["Bybit listed KOR, the first among the tracked exchanges to do so. No earlier listing appears among the other tracked exchanges."]}, prior_none), [])
+          issues({"title": "Bybit lists KOR", "paragraphs": ["Bybit listed KOR, the first among the tracked exchanges since Mar 2026 to do so. No earlier listing appears among the other tracked exchanges since Mar 2026."]}, prior_none), [])
     check("a prior exchange left out is rejected",
           bool(issues({"title": "OKX lists Canton (CC)", "paragraphs": ["OKX listed Canton (CC) on Feb 12 and the token was already listed elsewhere among the tracked exchanges."]}, prior_one)), True)
     check("prior listing buried after the second sentence is rejected",
@@ -163,9 +166,38 @@ def main():
     check("'already listed' when the record shows none is rejected",
           bool(issues({"title": "Bybit lists KOR", "paragraphs": ["Bybit listed KOR, already listed on the tracked exchanges. No earlier listing appears among the tracked exchanges."]}, prior_none)), True)
     check("a trading time nobody stated is rejected",
-          bool(issues({"title": "Bybit lists KOR", "paragraphs": ["Bybit listed KOR. No earlier listing appears among the other tracked exchanges. Trading opens soon."]}, prior_none)), True)
-    check("a stated trading time is fine",
-          issues({"title": "KuCoin lists Matrix (MTX)", "paragraphs": ["KuCoin listed Matrix (MTX). No earlier listing appears among the other tracked exchanges. Trading opens Nov 11 at 11:00 UTC."]}, with_start), [])
+          bool(issues({"title": "Bybit lists KOR", "paragraphs": ["Bybit listed KOR. No earlier listing appears among the other tracked exchanges since Mar 2026. Trading opens soon."]}, prior_none)), True)
+    check("a stated trading time is fine (and the window is the OTHER exchanges' latest start: Mar 2025 for a KuCoin listing)",
+          issues({"title": "KuCoin lists Matrix (MTX)", "paragraphs": ["KuCoin listed Matrix (MTX). No earlier listing appears among the other tracked exchanges since Mar 2025. Trading opens Nov 11 at 11:00 UTC."]}, with_start), [])
+
+    # ---- THIN RECORD: "no earlier listing" must carry its window, so it can never read as "never listed anywhere"
+    check("the record window for a Bybit listing is KuCoin's start", listing_record_window(prior_none), "Mar 2026")
+    check("the record window for a KuCoin listing is Bybit's start (KuCoin's own is not 'another exchange')", listing_record_window(with_start), "Mar 2025")
+    check("'no earlier listing' without the window is rejected",
+          bool(issues({"title": "Bybit lists KOR", "paragraphs": ["Bybit listed KOR Protocol (KOR). No earlier listing appears among the other tracked exchanges."]}, prior_none)), True)
+    check("the WRONG window is rejected (Mar 2025 quoted for a record that starts Mar 2026)",
+          bool(issues({"title": "Bybit lists KOR", "paragraphs": ["Bybit listed KOR Protocol (KOR). No earlier listing appears among the other tracked exchanges since Mar 2025."]}, prior_none)), True)
+    check("'first' with 'tracked' but no 'since' is rejected",
+          bool(issues({"title": "Bybit lists KOR", "paragraphs": ["Bybit is the first tracked exchange to list KOR. No earlier listing appears among the other tracked exchanges since Mar 2026."]}, prior_none)), True)
+    check("with an earlier listing on record, 'the first tracked announcement' is just the record's order and is allowed",
+          issues({"title": "OKX lists Canton (CC); Bybit listed Nov 7", "paragraphs": ["OKX listed Canton (CC). Bybit made the first tracked announcement on Nov 7, so the token was already listed on another tracked exchange."]}, prior_one), [])
+    check("'not already listed' under a NO record is not a contradiction",
+          issues({"title": "Bybit lists KOR", "paragraphs": ["Bybit listed KOR Protocol (KOR). The token is not already listed elsewhere: no earlier listing appears among the other tracked exchanges since Mar 2026."]}, prior_none), [])
+    for phrase in ("Bybit newly listed KOR.", "KOR is a new token on Bybit.", "Bybit is the only tracked exchange with KOR.", "KOR is a sole listing."):
+        check(f"{phrase!r} is rejected", bool(issues({"title": "Bybit lists KOR", "paragraphs": [phrase + " No earlier listing appears among the other tracked exchanges since Mar 2026."]}, prior_none)), True)
+
+    # ---- the digest line: position among the four, who already lists it, and the window when it is a 'first'
+    def line(ex_key, ex_name, prior_exchanges):
+        p = {"exchange": ex_name, "exchange_key": ex_key, "token_name": "Predict", "symbol": "PREDICT", "record_since": thin,
+             "prior_listings": [{"exchange": n, "exchange_key": n.lower()} for n in prior_exchanges], "trading_start": None}
+        return render_exchange_listings({"payload": p})
+    first = line("binance", "Binance", [])
+    fourth = line("kucoin", "KuCoin", ["Binance", "OKX", "Bybit"])
+    check("a first listing reads as 1st with a green dot and its window", ("1st of 4" in first, first.startswith("\U0001F7E2"), "since Mar 2025" in first or "since Mar 2026" in first), (True, True, True))
+    check("a fourth listing reads as 4th with a plain dot and names who already lists it", ("4th of 4" in fourth, fourth.startswith("⚪"), "already on Binance, OKX, Bybit" in fourth), (True, True, True))
+    check("the two are visibly different at a glance", first[:1] != fourth[:1] and "1st" not in fourth, True)
+    check("the same exchange's earlier announcement does not count as 'another exchange already lists it'",
+          "2nd of 4" in line("okx", "OKX", ["Bybit", "OKX"]), True)
 
     if FAILS:
         print(f"{len(FAILS)} MISMATCH(ES):")
