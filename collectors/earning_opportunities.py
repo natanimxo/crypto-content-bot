@@ -5,16 +5,11 @@ extracts, runs the gate, looks up the checkable trust facts (RDAP domain age, op
 GoPlus for a token contract), works out independent corroboration, and stores the result. Scoring happens later
 in pipeline/score.py from the stored payload alone.
 
-SOURCES (live-checked 2026-11-15 from the dev machine -- NOT yet from Railway, which saw different data for two
-exchanges the same day; every source here reports what it actually returned in the run log so the first Railway cycle
-is the check):
-  api  Epic Games Store freeGamesPromotions (official, tier 1)   api  GamerPower giveaways (tier 2, carries the steps)
-  api  Devpost hackathons (tier 2)                               rss  Doctor of Credit bank bonuses (tier 2)
-  rss  OzBargain / MyDealz / Dealabs freebies (tier 3, single-country)
-  telegram  airdropfind, airdrops_io, incrypted_airdrops, criptinho, EpicSteamGames, FreeGamesNews, r_FreeGamesOnSteam
+SOURCES (scope: money INTO the reader's pocket -- see pipeline/earning.py; deals, discounts and free games were REMOVED on 2026-11-15):
+  api  Devpost hackathons (tier 2)          rss  Doctor of Credit bank bonuses (tier 2)
+  telegram  airdropfind, airdrops_io, incrypted_airdrops, criptinho (tier 3)
   corroboration only (never candidates): OKXAnnouncements, Bybit_Announcements, CoinMarketCapAnnouncements
-Not built yet: Discord hub (operator sets up the server and bot first), Product Hunt (needs a token), GG.deals
-(API key), GiveawayBase (403), Betalist / Startup Perks (404), MaalFreeKaa (DNS), Safe Browsing / URLhaus keys.
+New sources are being researched (see BACKLOG); each must be verified from Railway, not only from the dev machine.
 
 DEAD SOURCES FLAG THEMSELVES: a Telegram channel whose newest post is older than 30 days, or a feed/API silent for
 longer than its own limit, is recorded in the run log and the operator gets one alert per week per source (6 of the 20
@@ -53,22 +48,19 @@ HEADERS = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KH
 CALL_DELAY = 1.0
 
 TELEGRAM_STALE_DAYS = 30
-STALE_DAYS = {"gamerpower": 7, "doctorofcredit": 14, "ozbargain": 7, "mydealz": 7, "dealabs": 7, "devpost": 14}
+STALE_DAYS = {"doctorofcredit": 14, "devpost": 14}
 MIN_ENGAGEMENT_RATIO = 0.2          # a Telegram post seen by under a fifth of the channel's median is dropped
 MAX_AGE_HOURS_DEFAULT = 72          # items with no stated deadline stop being candidates after this (select_candidates)
 CORROBORATION_LOOKBACK_DAYS = 7
 
 RSS_FEEDS = {
     "doctorofcredit": ("https://www.doctorofcredit.com/category/bank-account-bonuses/feed/", None),
-    "ozbargain": ("https://www.ozbargain.com.au/feed", re.compile(r"\bfree\b", re.IGNORECASE)),
-    "mydealz": ("https://www.mydealz.de/rss/gruppe/freebies", None),
-    "dealabs": ("https://www.dealabs.com/rss/groupe/gratuit", None),
 }
 # a single-country source says so (the offer is local) unless its own text says otherwise
-SOURCE_GEO_DEFAULT = {"ozbargain": "single", "mydealz": "single", "dealabs": "single", "doctorofcredit": "single"}
+SOURCE_GEO_DEFAULT = {"doctorofcredit": "single"}
 
 # links that are an aggregator's own redirect/page, not the offer's landing page: the topic key falls back to the title
-AGGREGATOR_LANDINGS = {"gamerpower.com", "doctorofcredit.com", "ozbargain.com.au", "mydealz.de", "dealabs.com", "airdrops.io"}
+AGGREGATOR_LANDINGS = {"doctorofcredit.com", "airdrops.io"}
 
 # posts that are discussion or housekeeping, not an offer (found on real r/FreeGamesOnSteam relays: "Weekly Discussion Thread")
 _NOT_AN_OFFER_RE = re.compile(r"discussion thread|megathread|weekly thread|daily thread|read the rules|subreddit rules|\bAMA\b|poll:", re.IGNORECASE)
@@ -120,50 +112,6 @@ def _iso(dt: datetime) -> str:
 
 # ---------------------------------------------------------------- fetchers: each returns (raws, newest_datetime | None)
 # raw = {"source","ext_id","title","text","links":[...],"url","published_at": iso, "extra": {...}}
-
-def fetch_epic(now: datetime):
-    d = get_json("https://store-site-backend-static.ak.epicgames.com/freeGamesPromotions", params={"locale": "en-US"}, headers=HEADERS)
-    raws = []
-    for e in ((d.get("data") or {}).get("Catalog") or {}).get("searchStore", {}).get("elements", []):
-        offers = ((e.get("promotions") or {}).get("promotionalOffers") or [])
-        live = [o for blk in offers for o in blk.get("promotionalOffers", []) if (o.get("discountSetting") or {}).get("discountPercentage") == 0]
-        if not live:
-            continue
-        o = live[0]
-        slug = e.get("productSlug") or (e.get("catalogNs", {}).get("mappings") or [{}])[0].get("pageSlug") or e.get("urlSlug")
-        price = ((e.get("price") or {}).get("totalPrice") or {})
-        orig = (price.get("originalPrice") or 0) / (10 ** (price.get("currencyInfo", {}).get("decimals", 2) or 2))
-        cur = price.get("currencyCode") or "USD"
-        raws.append({
-            "source": "epic_free_games", "ext_id": e.get("id"), "title": f"{e.get('title')} is free on the Epic Games Store",
-            "text": f"{e.get('title')} - free to keep on the Epic Games Store until {o.get('endDate', '')[:10]}. {e.get('description') or ''}",
-            "links": [f"https://store.epicgames.com/en-US/p/{slug}"] if slug else [], "url": f"https://store.epicgames.com/en-US/p/{slug}" if slug else "",
-            "published_at": o.get("startDate") or _iso(now),
-            "extra": {"payout_usd": round(orig, 2) if cur == "USD" and orig else None, "payout_kind": "worth", "deadline": o.get("endDate"),
-                      "geo": "worldwide", "winners": None, "steps_text": "Open the store page.\nSign in to an Epic account.\nPress Get, then Place Order (the total is zero)."},
-        })
-    return raws, now
-
-
-def fetch_gamerpower(now: datetime):
-    d = get_json("https://www.gamerpower.com/api/giveaways", headers=HEADERS)
-    raws, newest = [], None
-    for g in d:
-        if (g.get("status") or "").lower() != "active":
-            continue
-        pub = datetime.strptime(g["published_date"], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc) if g.get("published_date") else now
-        newest = max(newest, pub) if newest else pub
-        worth = earning.extract_amounts_usd(g.get("worth") or "")
-        end = g.get("end_date") if g.get("end_date") and g.get("end_date") != "N/A" else None
-        raws.append({
-            "source": "gamerpower", "ext_id": str(g["id"]), "title": g.get("title") or "", "published_at": _iso(pub),
-            "text": f"{g.get('title')}. {g.get('description') or ''} {g.get('instructions') or ''}",
-            "links": [g.get("open_giveaway_url")] if g.get("open_giveaway_url") else [], "url": g.get("gamerpower_url") or g.get("open_giveaway_url") or "",
-            "extra": {"payout_usd": worth[0] if worth else None, "payout_kind": "worth", "deadline": (end.replace(" ", "T") + "+00:00") if end else None,
-                      "geo": None, "winners": None, "steps_text": (g.get("instructions") or "").strip(), "gp_type": g.get("type"), "users": g.get("users")},
-        })
-    return raws, newest or now
-
 
 def fetch_devpost(now: datetime):
     d = get_json("https://devpost.com/api/hackathons", params={"status[]": "open", "per_page": 40}, headers=HEADERS)
@@ -267,8 +215,7 @@ def build_payload(raw: dict, now: datetime) -> dict:
     # trusted structured sources link out through their own redirect (GamerPower); the landing for trust purposes is that link
     landing_norm = earning.normalize_url(landing_raw) if landing_raw else None
     host = earning.domain_of(landing_raw) if landing_raw else None
-    type_ = earning.classify_type(text, src["default_type"]) if src["kind"] == "telegram" or src["kind"] == "rss" else (
-        src["default_type"] if raw["source"] != "gamerpower" else ("free_game" if extra.get("gp_type") in ("Game", "Loot", "Beta") else earning.classify_type(text, "giveaway")))
+    type_ = earning.classify_type(text, src["default_type"]) if src["kind"] in ("telegram", "rss") else src["default_type"]
     payout = extra.get("payout_usd")
     payout_kind = extra.get("payout_kind")
     pool_usd, unclear_usd = extra.get("pool_usd"), None
@@ -554,8 +501,6 @@ def collect() -> int:
                 diag[name] = d
                 return rows
 
-            raws += run("epic_free_games", lambda: fetch_epic(now), None)
-            raws += run("gamerpower", lambda: fetch_gamerpower(now), STALE_DAYS["gamerpower"])
             raws += run("devpost", lambda: fetch_devpost(now), None)
             for sid in RSS_FEEDS:
                 raws += run(sid, lambda sid=sid: fetch_rss(sid, now), STALE_DAYS[sid])
@@ -599,22 +544,14 @@ def collect() -> int:
                 reasons = earning.gate(raw["text"] + " " + " ".join(raw["links"] or []))
                 if earning.is_roundup(raw["title"], raw["text"]):
                     reasons.append("not an offer: a digest / roundup of several projects")
+                income_reason = earning.not_income_reason(payload["type"])
+                if income_reason:
+                    reasons.append(income_reason)
                 if reasons:
                     payload["gate"] = {"excluded": True, "reasons": reasons}
                     gated.append((ext, payload))
                     continue
                 items.append({"ext": ext, "payload": payload})
-
-            # GamerPower links out through its own redirect; the trust facts belong to where it actually lands
-            resolved = 0
-            for it in items:
-                p = it["payload"]
-                if p["source"] == "gamerpower" and p.get("landing_url") and resolved < 60:
-                    final = resolve_redirect(p["landing_url"])
-                    resolved += 1
-                    if final and earning.domain_of(final) not in AGGREGATOR_LANDINGS:
-                        p["landing_url"], p["landing_domain"] = earning.normalize_url(final), earning.registrable_domain(earning.domain_of(final))
-                        p["topic_key"] = earning.title_key(p["title"], p["type"])
 
             # An aggregator's own page is not the offer: follow it to the project's real site so the domain facts (RDAP age) and
             # corroboration describe the PROJECT. If it cannot be resolved the domain is left unknown, never the aggregator's.

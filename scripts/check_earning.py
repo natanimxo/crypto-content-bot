@@ -359,6 +359,17 @@ def main():
     check("active yesterday is not stale", C.is_stale(NOW - timedelta(days=1), NOW, C.TELEGRAM_STALE_DAYS), False)
     check("a source with no limit is never stale", C.is_stale(NOW - timedelta(days=500), NOW, None), False)
 
+    # ---- SCOPE (operator ruling): money INTO the pocket, not money SAVED. Deals / discounts / free games have no collectors at all.
+    removed = {"epic_free_games", "gamerpower", "ozbargain", "mydealz", "dealabs", "tg:EpicSteamGames", "tg:FreeGamesNews", "tg:r_FreeGamesOnSteam"}
+    check("removed sources are gone from the registry", sorted(removed & set(C.earning.SOURCES)), [])
+    check("removed sources have no collector functions", [n for n in ("fetch_epic", "fetch_gamerpower") if hasattr(C, n)], [])
+    check("only Doctor of Credit is left as an RSS feed", sorted(C.RSS_FEEDS), ["doctorofcredit"])
+    check("the registry is exactly the income sources", sorted(C.earning.SOURCES),
+          ["devpost", "doctorofcredit", "tg:airdropfind", "tg:airdrops_io", "tg:criptinho", "tg:incrypted_airdrops"])
+    for t, gated in [("free_game", True), ("freebie", True), ("credits", True), ("airdrop", False), ("hackathon", False),
+                     ("bank_bonus", False), ("bounty", False), ("giveaway", False), ("cashback", False)]:
+        check(f"not-income gate for type {t}", bool(C.earning.not_income_reason(t)), gated)
+
     # ---- the three exchange-announcement channels are corroboration only, never opportunity sources
     check("exchange channels are not candidate sources", [h for h in C.earning.CORROBORATION_ONLY_TELEGRAM if f"tg:{h}" in C.earning.SOURCES], [])
     check("the dead / absent handles are not configured", [h for h in ("WWGiveaways", "freestuff_hub", "FREE_UDEMY_COURSES1", "bugbountyplzen", "officialairdropalert", "cryptosale_tg", "2top_airdrop")

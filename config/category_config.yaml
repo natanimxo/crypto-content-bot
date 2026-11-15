@@ -644,8 +644,10 @@ exchange_listings:
     prediction.
 
 earning_opportunities:
-  # Added 2026-11-15 (Phase 5, operator direction) -- anything a reader can take part in to earn money or get something
-  # of value: giveaways, free games, signup/account bonuses, free credits, hackathon prizes, bounties, airdrops. CoinCraft's
+  # Added 2026-11-15 (Phase 5, operator direction) -- anything a reader can take part in to EARN money: money INTO the
+  # pocket, not money SAVED (a discount is a cheaper purchase and a free game is a free purchase -- neither is earning; those
+  # sources were removed 2026-11-15). In scope: airdrops, hackathons / bounties, giveaways with cash or crypto prizes, signup and
+  # deposit bonuses, paid beta testing, bug bounties, paid research / surveys, cashback that pays out in money. CoinCraft's
   # category (a GLOBAL, non-crypto audience: internationally accessible beats single-country). Telegram (t.me/s/) and
   # RSS/API sources first; Discord later. See pipeline/earning.py for the gate and both scores, and BACKLOG.md.
   #

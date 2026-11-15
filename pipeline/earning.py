@@ -41,21 +41,20 @@ VALUE_FLOOR = 40.0
 # tier 1 = the offer's own platform announcing it (an official API); tier 2 = a curated or structured aggregator
 # with editorial or data discipline; tier 3 = an open aggregator / Telegram channel anyone can post to.
 SOURCES = {
-    "epic_free_games": {"name": "Epic Games Store (official)", "tier": 1, "kind": "api", "default_type": "free_game"},
-    "gamerpower": {"name": "GamerPower", "tier": 2, "kind": "api", "default_type": "free_game"},
     "devpost": {"name": "Devpost", "tier": 2, "kind": "api", "default_type": "hackathon"},
     "doctorofcredit": {"name": "Doctor of Credit", "tier": 2, "kind": "rss", "default_type": "bank_bonus"},
-    "ozbargain": {"name": "OzBargain", "tier": 3, "kind": "rss", "default_type": "freebie"},
-    "mydealz": {"name": "MyDealz", "tier": 3, "kind": "rss", "default_type": "freebie"},
-    "dealabs": {"name": "Dealabs", "tier": 3, "kind": "rss", "default_type": "freebie"},
     "tg:airdropfind": {"name": "Airdrop Finder (Telegram)", "tier": 3, "kind": "telegram", "default_type": "airdrop"},
     "tg:airdrops_io": {"name": "AIRDROPS.IO (Telegram)", "tier": 3, "kind": "telegram", "default_type": "airdrop"},
     "tg:incrypted_airdrops": {"name": "Incrypted Airdrops (Telegram)", "tier": 3, "kind": "telegram", "default_type": "airdrop"},
     "tg:criptinho": {"name": "Criptinho (Telegram)", "tier": 3, "kind": "telegram", "default_type": "airdrop"},
-    "tg:EpicSteamGames": {"name": "Free PC Games (Telegram)", "tier": 3, "kind": "telegram", "default_type": "free_game"},
-    "tg:FreeGamesNews": {"name": "Free Games and Giveaways (Telegram)", "tier": 3, "kind": "telegram", "default_type": "free_game"},
-    "tg:r_FreeGamesOnSteam": {"name": "r/FreeGamesOnSteam (Telegram)", "tier": 3, "kind": "telegram", "default_type": "free_game"},
 }
+# SCOPE RULE (operator ruling 2026-11-15): money INTO the reader's pocket, not money SAVED. A discount is a cheaper purchase and a free
+# game is a free purchase -- neither is earning. REMOVED, not filtered: Epic Games Store, GamerPower, OzBargain, Dealabs, MyDealz and the
+# three free-games Telegram channels (EpicSteamGames, FreeGamesNews, r_FreeGamesOnSteam) no longer have collectors, so no calls are spent
+# on them. In scope: airdrops, hackathons / bounties, giveaways with cash or crypto prizes, signup and deposit bonuses, paid beta
+# testing, bug bounties, paid research and surveys, and cashback that pays out in money (never via a referral).
+# Anything that still slips in from an in-scope source (a "free credit", a freebie) is gated by NON_INCOME_TYPES below.
+NON_INCOME_TYPES = {"free_game", "freebie", "credits"}
 
 # Used only to CORROBORATE (a campaign they also announce raises trust) and never as a source of opportunities: they
 # overlap exchange_listings and Crypto Wall Street, and the same event must not reach two channels by two paths.
@@ -138,6 +137,11 @@ _FEE_RE = re.compile(
     r"\bsend\s+(?:\d[\d.,]*\s*)?(?:eth|btc|usdt|usdc|bnb|sol|tokens?|coins?)\b[^.\n]{0,50}\b(?:to receive|to get|to claim|and (?:receive|get)|back)\b|"
     r"\b(?:double|2x|10x|triple) your (?:crypto|eth|btc|usdt|bnb|sol|coins?|deposit|money)\b|"
     r"\bpay\s+(?:\$|€|£)?\d[\d.,]*\s*(?:usd|usdt|eur|gbp)?\s+(?:to (?:claim|receive|unlock|participate|enter|join|withdraw)|and (?:you|get|receive|win))", re.IGNORECASE)
+
+
+def not_income_reason(type_: str) -> str | None:
+    """Why an item is out of scope as 'not income' (it saves the reader money; it does not pay them), or None."""
+    return "not income: saves money, does not pay it (free game / freebie / credit)" if type_ in NON_INCOME_TYPES else None
 
 
 def gate(text: str) -> list[str]:
