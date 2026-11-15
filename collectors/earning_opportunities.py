@@ -27,6 +27,7 @@ gate is excluding. They can never become candidates.
 import hashlib
 import html
 import logging
+import os
 import re
 import statistics
 import sys
@@ -338,6 +339,53 @@ def domain_age_days(conn, domain: str | None, now: datetime) -> int | None:
     return (now.date() - created).days if created else None
 
 
+def reputation_checks(urls: list[str]) -> dict[str, dict]:
+    """{url: {"safe_browsing": clean|flagged|unchecked, "urlhaus": clean|flagged|unchecked}} for the landing URLs.
+
+    Both need a key (GOOGLE_SAFE_BROWSING_API_KEY, URLHAUS_AUTH_KEY); without one the answer is 'unchecked'. ANY failure or
+    unexpected response is 'unchecked' too -- a check we could not run is never coded as clean. NOT yet exercised against the
+    live services (no keys at the time of writing): the response handling follows each service's documented shape and is
+    covered by a mocked test only. Licensing is the operator's call: Safe Browsing v4 is "for non-commercial use only (not for
+    sale or revenue generating purposes)" -- Google points commercial users to Web Risk -- and URLhaus' free community API is
+    fair-use with commercial use possibly needing abuse.ch's paid API.
+    """
+    out = {u: {"safe_browsing": "unchecked", "urlhaus": "unchecked"} for u in urls}
+    if not urls:
+        return out
+    sb_key = os.environ.get("GOOGLE_SAFE_BROWSING_API_KEY")
+    if sb_key:
+        try:
+            body = {"client": {"clientId": "crypto-content-bot", "clientVersion": "1.0"},
+                    "threatInfo": {"threatTypes": ["MALWARE", "SOCIAL_ENGINEERING", "UNWANTED_SOFTWARE", "POTENTIALLY_HARMFUL_APPLICATION"],
+                                   "platformTypes": ["ANY_PLATFORM"], "threatEntryTypes": ["URL"],
+                                   "threatEntries": [{"url": u} for u in urls[:500]]}}
+            r = requests.post("https://safebrowsing.googleapis.com/v4/threatMatches:find", params={"key": sb_key}, json=body, timeout=20)
+            if r.status_code == 200 and isinstance(r.json(), dict):
+                bad = {m.get("threat", {}).get("url") for m in r.json().get("matches", [])}
+                for u in urls[:500]:
+                    out[u]["safe_browsing"] = "flagged" if u in bad else "clean"
+        except Exception as exc:
+            logger.warning("earning: Safe Browsing check failed (left unchecked): %s", exc)
+    uh_key = os.environ.get("URLHAUS_AUTH_KEY")
+    if uh_key:
+        seen: dict[str, str] = {}
+        for u in urls[:60]:
+            host = earning.domain_of(u)
+            if not host:
+                continue
+            if host not in seen:
+                try:
+                    r = requests.post("https://urlhaus-api.abuse.ch/v1/host/", data={"host": host}, headers={"Auth-Key": uh_key}, timeout=20)
+                    status = (r.json() or {}).get("query_status") if r.status_code == 200 else None
+                    seen[host] = "clean" if status == "no_results" else "flagged" if status == "ok" else "unchecked"
+                except Exception as exc:
+                    logger.warning("earning: URLhaus check failed for %s (left unchecked): %s", host, exc)
+                    seen[host] = "unchecked"
+                time.sleep(0.3)
+            out[u]["urlhaus"] = seen[host]
+    return out
+
+
 def goplus_for_text(conn, text: str) -> dict:
     """GoPlus on a token contract mentioned in the text. 'none' = no contract; 'unchecked' = a contract we could not
     get a verdict for (never coded as clean); 'flagged' = a gating red flag (the item is excluded); 'clean' otherwise."""
@@ -499,6 +547,15 @@ def collect() -> int:
                 p["goplus"] = goplus_for_text(conn, p["description"])
                 if p["goplus"]["status"] == "flagged":
                     p["gate"] = {"excluded": True, "reasons": ["token contract flagged by GoPlus: " + "; ".join(p["goplus"].get("flags", []))[:160]]}
+            # Safe Browsing / URLhaus on the landing URLs of what is left (keys optional; 'unchecked' without them, never 'clean')
+            live = [it for it in items if not it["payload"]["gate"]["excluded"] and it["payload"].get("landing_url")]
+            rep = reputation_checks(sorted({it["payload"]["landing_url"] for it in live}))
+            for it in live:
+                p = it["payload"]
+                p["reputation"] = rep.get(p["landing_url"], p["reputation"])
+                bad = [k for k, v in p["reputation"].items() if v == "flagged"]
+                if bad:
+                    p["gate"] = {"excluded": True, "reasons": ["landing URL flagged by " + " and ".join(bad)]}
             survivors = [it for it in items if not it["payload"]["gate"]["excluded"]]
             gated += [(it["ext"], it["payload"]) for it in items if it["payload"]["gate"]["excluded"]]
             attach_corroboration(survivors, known, reference)

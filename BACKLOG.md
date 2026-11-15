@@ -1871,3 +1871,42 @@ service and its variables is an account/secrets action, so it was not done. Unti
 when the service is created. The 2-hour job notifies CoinCraft ONLY (`notify.run(only_channels=["coincraft"], job_name="notify_earning")`),
 because the full notify at 2 hours would double every other channel's per-cycle pacing.
 
+### Phase 5 follow-ups (2026-11-15, operator rulings and the airdrop trust analysis)
+
+**Operator rulings.** Daily cap 8 stays as a prior, revisit after real cards. Until the 2-hour service exists the 4-hour cycle is
+fine. **Dead sources are settled -- do not chase:** GG.deals, GiveawayBase, Betalist, Startup Perks Directory, MaalFreeKaa,
+Product Hunt, AirdropAlert (7 of the research list, alongside the 6 dead Telegram handles). The surviving set is what we work with.
+
+**Correction to an earlier note:** the Phase 5 entry said Safe Browsing and URLhaus were "wired". They were not -- the field existed
+and always read "unchecked". They are now (`collectors/earning_opportunities.reputation_checks`; keys `GOOGLE_SAFE_BROWSING_API_KEY`,
+`URLHAUS_AUTH_KEY`), covered by a MOCKED test only because no keys exist yet; any failure or unexpected response is "unchecked",
+never "clean", and a "flagged" landing URL is gated out. Licensing the operator should decide before adding keys: Safe Browsing v4 is
+"for non-commercial use only (not for sale or revenue generating purposes)" and Google points commercial users to Web Risk (paid);
+URLhaus' free community API is fair-use and "commercial or for-profit use may require the paid enhanced abuse.ch API". The URLhaus
+lookup request shape (host endpoint, `Auth-Key` header) was not documented on the page I could read -- verify on the first keyed run.
+
+**Why 52 of 58 airdrop-channel items fail the trust floor (the question: junk correctly rejected, or a whole source type penalised?).**
+Baseline arithmetic first: there is no "unvetted baseline of 35" -- an uncorroborated tier-3 item is 14 (tier) + 4 (reputation,
+unchecked) = 18 before domain age (0/4/10/15, unknown 6) and stated terms (5 each, max 15); the ceiling with no keys and no second
+source is 14 + 15 + 15 + 4 = 48. Classified by the facts the system could see:
+  A. 5 correctly rejected -- a domain 2-4 days old, or the payout-for-nothing cross-link (value 80 / trust 0).
+  B. 11 STRUCTURAL -- every airdrops_io post lands on airdrops.io's own pages, so the domain facts describe the aggregator (whose
+     age RDAP could not return, because .io has no RDAP at rdap.org), not the project.
+  C. 28 STRUCTURAL -- incrypted_airdrops and criptinho post in Russian; the deadline/eligibility/payout detectors are English-only, so
+     "terms stated" is 0 by construction (0 of 34 Russian items scored any terms). 34 of 58 airdrop-channel items are Russian.
+  D. 6 genuinely unproven -- an established domain, nothing stated, no second source.   E. 2 other.
+So ~75% of the rejections are the facts being BLIND for a source type, not a verdict on the offer. What-ifs, NOT applied (none of the newly
+passing items has a young domain or a penalty): established aggregators (airdrops_io, incrypted) tier 14 -> 24 passes +14; tier 14 -> 22
+for all four channels passes +26; neutral domain-age for aggregator-own landing + unknown (not zero) terms for Russian passes only +1;
+both Safe Browsing and URLhaus clean passes +2. Separately, several incrypted posts are news roundups ("Отжимка по дропам ...") rather
+than offers -- passing the floor does not make them an opportunity; that is the operator's manual call.
+
+**Railway service for the 2-hour cadence (operator creates it):** New service -> GitHub repo natanimxo/crypto-content-bot, name
+`collect-earning`; Start command `python scripts/collect_earning.py`; Cron `30 */2 * * *` (UTC; :30 so it never overlaps the :00 main cycle);
+Restart policy Never; Region sfo, 1 replica; variables as references to the poller's (`${{crypto-content-bot.DATABASE_URL}}`,
+`DEEPSEEK_API_KEY`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_OPERATOR_CHAT_ID`, `TELEGRAM_ALLOWED_USER_IDS`); later, when keys exist,
+`GOOGLE_SAFE_BROWSING_API_KEY` and `URLHAUS_AUTH_KEY`. Matching `.railway/railway.ts` entry once it exists:
+`service("collect-earning", { source: repo, start: "python scripts/collect_earning.py", replicas: { "sfo": 1 }, deploy: { cronSchedule:
+"30 */2 * * *", restartPolicyType: "NEVER" }, env: { DATABASE_URL: preserve(), DEEPSEEK_API_KEY: preserve(), TELEGRAM_BOT_TOKEN: preserve(),
+TELEGRAM_OPERATOR_CHAT_ID: preserve(), TELEGRAM_ALLOWED_USER_IDS: preserve() } })` and add it to `resources`.
+

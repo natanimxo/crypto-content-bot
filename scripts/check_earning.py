@@ -169,6 +169,42 @@ def main():
     check("numbered steps are rejected when none are available", bool(G(post(ok_body, ok_steps, "Needs an account."), no_steps)), True)
     check("'the steps are on the page' is fine when none are available", G(post(ok_body, "The steps are on the offer's page.", "Needs an account."), no_steps), [])
 
+    # ---- Safe Browsing / URLhaus: mocked (no keys yet). The invariant that matters: a check that could not run is never "clean".
+    from collectors import earning_opportunities as RC
+
+    class _Resp:
+        def __init__(self, status, data):
+            self.status_code, self._d = status, data
+
+        def json(self):
+            return self._d
+    real_post, real_env = RC.requests.post, dict(os.environ)
+    try:
+        os.environ.pop("GOOGLE_SAFE_BROWSING_API_KEY", None)
+        os.environ.pop("URLHAUS_AUTH_KEY", None)
+        RC.requests.post = lambda *a, **k: (_ for _ in ()).throw(AssertionError("no key -> no call"))
+        r = RC.reputation_checks(["https://a.example/x"])
+        check("no keys: both unchecked, no network call", r["https://a.example/x"], {"safe_browsing": "unchecked", "urlhaus": "unchecked"})
+        os.environ["GOOGLE_SAFE_BROWSING_API_KEY"], os.environ["URLHAUS_AUTH_KEY"] = "k1", "k2"
+
+        def fake(url, **kw):
+            if "safebrowsing" in url:
+                return _Resp(200, {"matches": [{"threat": {"url": "https://bad.example/x"}}]})
+            host = kw["data"]["host"]
+            return _Resp(200, {"query_status": "ok" if host == "bad.example" else "no_results"})
+        RC.requests.post = fake
+        r = RC.reputation_checks(["https://bad.example/x", "https://good.example/y"])
+        check("flagged by both", r["https://bad.example/x"], {"safe_browsing": "flagged", "urlhaus": "flagged"})
+        check("clean by both", r["https://good.example/y"], {"safe_browsing": "clean", "urlhaus": "clean"})
+        RC.requests.post = lambda *a, **k: _Resp(500, {})
+        check("a 500 is unchecked, never clean", RC.reputation_checks(["https://good.example/y"])["https://good.example/y"], {"safe_browsing": "unchecked", "urlhaus": "unchecked"})
+        RC.requests.post = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("timeout"))
+        check("an exception is unchecked, never clean", RC.reputation_checks(["https://good.example/y"])["https://good.example/y"], {"safe_browsing": "unchecked", "urlhaus": "unchecked"})
+    finally:
+        RC.requests.post = real_post
+        os.environ.clear()
+        os.environ.update(real_env)
+
     # ---- Telegram: the t.me/s/ preview parses (id, time, text, outbound links, views, reaction total)
     from collectors import earning_opportunities as C
     page = ('<div class="tgme_widget_message_wrap js-widget_message_wrap"><div class="tgme_widget_message" data-post="chan/12">'
