@@ -501,6 +501,12 @@ def extract_prereqs(text: str) -> list[str]:
 _RECURRING_FEE_RE = re.compile(r"(?:US\$|\$|€|£)\s?(?P<n>\d[\d,]*(?:\.\d+)?)\s*(?:/|per |a |each )\s*(?P<per>month|mo\b|year|yr\b|annum)", re.IGNORECASE)
 
 
+_CAPITAL_TRAIL_RE = re.compile(
+    r"(?:deposit|fund(?:ed|ing)?|maintain|minimum (?:balance|deposit)|balance of|invest|contribut(?:e|ion)|spend|purchase|buy|"
+    r"депозит\w*|внес\w+|внести|пополни\w*|вложи\w*|dep[oó]sit\w*|invista|aporte)\D{0,25}"
+    r"(?P<n>\d[\d ,.]*\d|\d)\s?(?P<k>[kKкК])?\s?(?:\$|€|£)(?!\w)", re.IGNORECASE)      # "deposit 500$": the sign AFTER the number
+
+
 def extract_capital_usd(text: str, type_: str) -> float | None:
     """Money the reader must put in (and, for a bonus, usually gets back): 0 for a free offer, the largest stated
     deposit/spend otherwise, None when it is not stated and the type usually needs some (a bank bonus)."""
@@ -511,6 +517,11 @@ def extract_capital_usd(text: str, type_: str) -> float | None:
         except ValueError:
             continue
         amounts.append(v)
+    for m in _CAPITAL_TRAIL_RE.finditer(text or ""):
+        try:
+            amounts.append(_to_number(m.group("n")) * (1000 if m.group("k") else 1))
+        except ValueError:
+            continue
     # A recurring fee the offer needs ("requires a $39.99 per month account") is money in, even though it is not a deposit:
     # three months for a monthly fee (the usual minimum), one year's for an annual one.
     for m in _RECURRING_FEE_RE.finditer(text or ""):
@@ -570,7 +581,7 @@ _REFERRAL_CUE = (
     r"\b(?:each|every|per) (?:friend|referral|invitee|person (?:you )?(?:refer|invite))|\bbring(?:ing)? (?:a )?friends?\b|\baffiliate (?:program|commission|link)\b|"
     r"реферал\w*|пригласи\w* (?:друг\w*|знаком\w*|пользовател\w*)|приглаш[её]нн\w+|за приглашени\w+|приглаш\w+ друз\w+|"
     r"\bза (?:каждого )?друг\w*|\bкаждого друга|приведи \w+ друг\w*|"
-    r"\bindica[cç][aã]o\b|\bindique\b|\bindicar\b|\bconvide (?:amigos?|algu[eé]m)\b|\b(?:cada|por) (?:amigo|indicado)\b|\bprograma de afiliad\w+")
+    r"\bindica[cç][aã]o\b|\bindique (?:um|uma|seus?|suas?|amigos?|e ganhe)\b|\bindicar (?:um|uma|amigos?)\b|\bconvide (?:amigos?|algu[eé]m)\b|\b(?:cada|por) (?:amigo|indicado)\b|\bprograma de afiliad\w+")
 _REFERRAL_CUE_RE = re.compile(_REFERRAL_CUE, re.IGNORECASE)
 _REFERRAL_NEG_RE = re.compile(r"(?:\bno|\bwithout|\bnot|\bnon|\bsem|\bбез|\bне)[- ]?(?:\w+ )?$", re.IGNORECASE)
 _AMT_LEAD = r"(?:(?:R\$|[$€£])?\s?\d[\d\s.,]*\s?(?:[$€£]|usd\w*|eur)?\s{0,2}(?:for |per )?)?"      # "... and $25 for each friend": the amount may precede the cue
@@ -592,16 +603,40 @@ def split_referral(text: str) -> tuple[str, list[str]]:
 
 
 def extract_referral(text: str) -> dict:
-    """{'available': bool, 'amount_usd': what one referral pays the reader, or None when no figure is stated (a percentage or no figure)}."""
+    """{'available': bool, 'amount_usd': what one referral pays the reader (None when no figure is stated: a percentage or nothing),
+    'multi_level': multi-level / downline wording present -- recruitment-shaped on its own}."""
     _, ref = split_referral(text)
-    if not ref:
-        return {"available": False, "amount_usd": None}
+    multi = has_multilevel(text)
+    if not ref and not multi:
+        return {"available": False, "amount_usd": None, "multi_level": False}
     amounts = [a for c in ref for a in extract_amounts_usd(c) if a < 1_000_000]
-    return {"available": True, "amount_usd": max(amounts) if amounts else None}
+    return {"available": True, "amount_usd": max(amounts) if amounts else None, "multi_level": multi}
+
+
+# Multi-level wording is the clearest TEXTUAL signal of a pyramid structure (operator, 2026-11-16): recruitment-shaped on its own, whatever
+# the amounts say. Unambiguous terms count anywhere in the text; the bare word "levels" is too common ("complete 3 levels") so it counts only
+# inside a referral clause, or as a counted level / tier of referrals when the text has a referral program.
+_MULTILEVEL_ANY_RE = re.compile(
+    r"\bdownlines?\b|\bupline\b|\bmulti-?level\b|\bmlm\b|\bnetwork marketing\b|\buni-?level\b|\bbinary (?:plan|tree|commission)\b|"
+    r"многоуровнев\w*|даунлайн\w*|\bmultin[ií]vel\b|\bmulti-?n[ií]veis\b", re.IGNORECASE)
+_MULTILEVEL_LEVELS_RE = re.compile(r"\blevels?\b|уров(?:ень|ня|ни|ней|нях|нем)\b|\bn[ií]veis\b|\bn[ií]vel\b", re.IGNORECASE)
+_MULTILEVEL_COUNTED_RE = re.compile(
+    r"(?:\d|two|three|four|five|second|third|[2-9](?:nd|rd|th))[- ](?:levels?|tiers?)\b|\b(?:levels?|tiers?) ?[2-9]\b|\b(?:levels?|tiers?) (?:of|deep)\b|"
+    r"[2-9]\s?(?:уров|n[ií]vei)\w*", re.IGNORECASE)
+
+
+def has_multilevel(text: str) -> bool:
+    t = text or ""
+    if _MULTILEVEL_ANY_RE.search(t):
+        return True
+    _, ref = split_referral(t)
+    if any(_MULTILEVEL_LEVELS_RE.search(c) for c in ref):
+        return True
+    return bool(ref) and bool(_MULTILEVEL_COUNTED_RE.search(t))
 
 
 REFERRAL_VALUE_MAX = 12.0            # points of the 100-point value score a referral program can ever add ("around 10-15%")
-REFERRAL_RECRUITMENT_PENALTY = 30.0  # trust points lost when referral earnings exceed the base payout
+REFERRAL_RECRUITMENT_PENALTY = 30.0  # trust points lost when referral earnings exceed the base payout OR the wording is multi-level (no official-source exemption, operator 2026-11-16)
 
 
 def referral_info(payload: dict) -> dict:
@@ -613,8 +648,9 @@ def referral_info(payload: dict) -> dict:
     in_link = bool(payload.get("referral_link"))
     amount = ref.get("amount_usd")
     base = max([x for x in (payload.get("payout_usd"), payload.get("pool_usd"), payload.get("unclear_usd")) if x] or [0.0])
-    recruitment = bool(in_text and amount and amount > base)      # referral earnings are the larger (or only) stated earnings
-    return {"available": in_text, "link_code": in_link, "amount_usd": amount, "recruitment_shape": recruitment}
+    multi = bool(ref.get("multi_level"))                             # multi-level wording: a pyramid structure by its own description
+    recruitment = bool(in_text and amount and amount > base) or multi   # referral earnings are the larger (or only) stated earnings
+    return {"available": in_text, "link_code": in_link, "amount_usd": amount, "multi_level": multi, "recruitment_shape": recruitment}
 
 
 def referral_component(payload: dict) -> float:

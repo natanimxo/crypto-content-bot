@@ -2062,3 +2062,40 @@ at all (`_AMOUNT_RE`); "ЗАБИРАЕМ" (we take) was not a reward cue. Both a
 link); 10 got a bonus (the 11th is the one below); NO item crossed the value floor because of the bonus (selection unchanged except as
 follows). **One** item is recruitment-shaped: "ЗАБИРАЕМ ДО 15$ ЗА КАЖДОГО ДРУГА ОТ FOLK AI" (up to $15 per friend and nothing else) -- trust 43 -> 13, so it
 no longer clears the floor; passing items 77 -> 76. That is the rule working on the shape it was written for.
+
+### Phase 5 follow-ups, round 6 (2026-11-16, operator rulings on the referral change)
+
+**Both choices confirmed.** (1) Availability comes from the offer's TEXT only; a referral code on the source's own link says the SOURCE has a
+program, not that the offer does, and stating an inference as fact on a card is the discipline held everywhere else. The 18 link-code-only items
+stay "unconfirmed". (2) The recruitment penalty (30 trust points) has NO official-source exemption: an official source running an offer whose
+referral earnings exceed the base payout is still recruitment-shaped and must be flagged -- an exemption would be the system deciding a brand
+name makes a structure acceptable.
+
+**Multi-level wording is recruitment-shaped ON ITS OWN**, independent of the amount comparison (it is the clearest textual signal of a pyramid
+structure). `earning.has_multilevel`: unambiguous terms anywhere in the text (downline, upline, multi-level, MLM, network marketing, unilevel,
+binary plan, многоуровневая, даунлайн, multinível); the bare word "levels" only inside a referral clause (it is too common otherwise: "complete 3
+levels", "level up" are tested as NOT matching), plus counted levels/tiers of referrals ("3 levels", "level 2", "2 уровня") when the text has a
+referral program. It implies availability, gives no value bonus and costs the 30 trust points. A percentage-only referral with no figure stays an
+ordinary program. False positives found and fixed on a real row: French "indique ... tiers" ("indicates ... third parties") matched Portuguese
+"indique" and the bare word "tiers"; Portuguese "indique" now needs its object (um/uma/amigos/e ganhe) and "tiers" is no longer a level word.
+
+**The "50$" fix and everything it touched.** The sign-AFTER-the-number form ("50$", "15$") was invisible to `_AMOUNT_RE`, which feeds payout
+reading, the pool/unclear/max classification, the other-amount guard and the referral amount. The same family: CAPITAL extraction only read
+"$500" after a deposit word, and had no Russian or Portuguese deposit word at all (депозит, внести, пополнить, depósito, ...), so a Russian
+post asking for a deposit was scored capital 0 -- i.e. value OVERSTATED, the opposite direction to the understated payouts. Both fixed
+(`_CAPITAL_TRAIL_RE`). All 342 scored rows (116 live, the rest expired) were re-scored in place from the stored title + description, FILL-ONLY
+(the stored description is cut at 1200 characters, so a value is only filled in or raised, never dropped).
+Measured effect: 2 payouts filled in (1 live), 2 capital figures raised (both live), 3 value scores and 1 trust score changed, and ONE live item
+fell below a floor (the PumpFun "50$" post: capital 0 -> $60 once the deposit was read, value 52 -> 39). Passing items 76 -> 75. The effect was
+small because most posts write "$50", but it is not zero and it ran in both directions.
+**ANY CALIBRATION DATA ON THIS CATEGORY FROM BEFORE 2026-11-16 IS SUSPECT:** the pass/fail counts (19 of 46 airdrop items, 77 passing, the 9
+near misses at trust 34-38, the 7/5/10/4 breakdown), the volume estimate and the payout-penalty counts were measured with a parser that
+could not read "50$" and could not read Russian / Portuguese deposits, and (for value) before the referral bonus existed. Re-measure
+before using them to tune a floor or a weight.
+
+**Found while checking the PumpFun posts -- NOT FIXED, needs a ruling.** The criptinho PumpFun posts tell readers to use a European VPN and
+"preferably fake GPS", and one says the bank statement can be "real or done through Photoshop (better the real one)" to pass KYC. That is
+instructions to defeat identity verification with forged documents. Neither the gate nor the trust score looks for it (trust 43, so it can
+clear the floor). Candidate gate terms: forged / photoshopped documents (фотошоп, "photoshop" near statement / KYC / document), fake GPS /
+spoofed location, "VPN" paired with a residency claim. Proposed as a deterministic gate reason ("instructs how to defeat identity
+verification"); not added unasked.

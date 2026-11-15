@@ -120,7 +120,7 @@ def main():
     check("a referral code on the source's own link is NOT availability (an inference): reported, never scored",
           (E.referral_info(dict(base, referral_link=True))["available"], E.referral_info(dict(base, referral_link=True))["link_code"],
            E.score_earning(dict(base, referral_link=True)) == dict(nr, referral=E.referral_info(dict(base, referral_link=True)))), (False, True, True))
-    check("russian 'за каждого друга' is a referral clause", E.extract_referral("‼ ЗАБИРАЕМ ДО 15$ ЗА КАЖДОГО ДРУГА ОТ FOLK AI ‼"), {"available": True, "amount_usd": 15.0})
+    check("russian 'за каждого друга' is a referral clause", E.extract_referral("‼ ЗАБИРАЕМ ДО 15$ ЗА КАЖДОГО ДРУГА ОТ FOLK AI ‼"), {"available": True, "amount_usd": 15.0, "multi_level": False})
     check("no referral -> no bonus", (nr["referral_bonus"], nr["referral"]["available"]), (0.0, False))
     rec = E.score_earning(dict(base, payout_usd=10.0, referral={"available": True, "amount_usd": 50.0}))
     plain = E.score_earning(dict(base, payout_usd=10.0))
@@ -131,19 +131,38 @@ def main():
           E.score_earning(dict(base, payout_usd=None, payout_kind=None, referral={"available": True, "amount_usd": 20.0}))["referral"]["recruitment_shape"], True)
     # ---- extraction: the referral clause is split from the base text so a referral bonus is never read as the offer's payout
     x = "Sign up and get a $50 bonus. Invite friends and earn $25 for each referral."
-    check("referral amount read from its clause", E.extract_referral(x), {"available": True, "amount_usd": 25.0})
+    check("referral amount read from its clause", E.extract_referral(x), {"available": True, "amount_usd": 25.0, "multi_level": False})
     check("the payout is read from the text without the referral clause", E.extract_reward(E.split_referral(x)[0], "bank_bonus"), (50.0, "stated"))
-    check("same sentence: 'get $50 and refer a friend for $25'", E.extract_referral("Get a $50 bonus and refer a friend for $25"), {"available": True, "amount_usd": 25.0})
+    check("same sentence: 'get $50 and refer a friend for $25'", E.extract_referral("Get a $50 bonus and refer a friend for $25"), {"available": True, "amount_usd": 25.0, "multi_level": False})
     check("same sentence: base kept", E.extract_reward(E.split_referral("Get a $50 bonus and refer a friend for $25")[0], "bank_bonus"), (50.0, "stated"))
-    check("no program in the text", E.extract_referral("Complete 3 quests to qualify for the airdrop"), {"available": False, "amount_usd": None})
+    check("no program in the text", E.extract_referral("Complete 3 quests to qualify for the airdrop"), {"available": False, "amount_usd": None, "multi_level": False})
     check("'no referral needed' is not a program", E.extract_referral("Free to join, no referral needed")["available"], False)
     check("the poster's own code is not a program", E.extract_referral("Use my referral code ABC for a bonus")["available"], False)
-    check("a percentage program: available, no amount", E.extract_referral("Earn 20% of your referrals' rewards"), {"available": True, "amount_usd": None})
-    check("russian", E.extract_referral("Бонус $30. За каждого приглашённого друга +$5"), {"available": True, "amount_usd": 5.0})
+    check("a percentage program: available, no amount", E.extract_referral("Earn 20% of your referrals' rewards"), {"available": True, "amount_usd": None, "multi_level": False})
+    check("russian", E.extract_referral("Бонус $30. За каждого приглашённого друга +$5"), {"available": True, "amount_usd": 5.0, "multi_level": False})
     check("'50$ and 50$ per friend': the sign AFTER the number is read, and the base is kept (equal amounts are not recruitment-shaped)",
           (E.extract_referral("‼ ЗАБИРАЕМ 50$ И 50$ ЗА ДРУГА ОТ PumpFun ‼"), E.extract_reward(E.split_referral("‼ ЗАБИРАЕМ 50$ И 50$ ЗА ДРУГА ОТ PumpFun ‼")[0], "airdrop")),
-          ({"available": True, "amount_usd": 50.0}, (50.0, "stated")))
+          ({"available": True, "amount_usd": 50.0, "multi_level": False}, (50.0, "stated")))
     check("'$25 per friend' after 'and' splits from the base", E.split_referral("Get $50 and $25 per friend you refer"), ("Get $50", ["$25 per friend you refer"]))
+    # ---- multi-level wording: recruitment-shaped ON ITS OWN, whatever the amounts (operator 2026-11-16); no official-source exemption
+    for label, text in (("downline", "Build your downline and earn on every signup"), ("multi-level", "Multi-level rewards program, $5 bonus"),
+                        ("3 levels of referrals", "Earn from 3 levels of referrals"), ("referral levels", "Invite friends: level 1 pays 10%, level 2 pays 5%"),
+                        ("russian", "Многоуровневая реферальная программа"), ("portuguese", "Ganhe com 3 níveis de indicação")):
+        check(f"multi-level wording ({label}) is recruitment-shaped", E.extract_referral(text)["multi_level"], True)
+    for label, text in (("game levels", "Complete 3 levels in the game to qualify for the airdrop"), ("level up", "Level up your account for a $20 bonus"),
+                        ("percentage only", "Earn 20% of your referrals' rewards"), ("plain referral", "Invite friends and earn $5 each")):
+        check(f"not multi-level: {label}", E.extract_referral(text)["multi_level"], False)
+    mlm = dict(base, payout_usd=100.0, referral={"available": True, "amount_usd": None, "multi_level": True})
+    sm = E.score_earning(mlm)
+    check("multi-level wording: recruitment-shaped even with a small referral amount, no bonus, trust cut", (sm["referral"]["recruitment_shape"], sm["referral_bonus"], sm["trust_components"]["referral_recruitment_penalty"]), (True, 0.0, 30.0))
+    check("no official-source exemption for the recruitment penalty", E.score_earning(dict(mlm, source_tier=1))["trust_components"]["referral_recruitment_penalty"], 30.0)
+    check("a percentage-only referral stays ordinary", E.score_earning(dict(base, referral={"available": True, "amount_usd": None, "multi_level": False}))["referral"]["recruitment_shape"], False)
+    check("french 'indique ... tiers' (indicates ... third parties) is not a referral or multi-level",
+          E.extract_referral("la fiche indique qu'aucune donnée n'est partagée avec des tiers"), {"available": False, "amount_usd": None, "multi_level": False})
+    # ---- "50$" (sign after the number) in capital too
+    check("capital: '500$' deposit read", E.extract_capital_usd("Deposit 500$ and get a bonus", "bank_bonus"), 500.0)
+    check("capital: russian deposit word", E.extract_capital_usd("Нужен депозит 100$ для участия", "airdrop"), 100.0)
+    check("capital: airdrop with no figure stays 0", E.extract_capital_usd("Do the quests", "airdrop"), 0.0)
     check("portuguese", E.extract_referral("Ganhe R$ 50 de bônus. Indique um amigo e ganhe R$ 20")["available"], True)
 
     # ---- two scores, never blended
