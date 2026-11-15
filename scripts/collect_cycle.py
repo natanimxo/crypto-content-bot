@@ -20,8 +20,8 @@ from dotenv import load_dotenv  # noqa: E402
 
 from bot import notify  # noqa: E402
 from collectors import (  # noqa: E402
-    defi_yields, exchange_listings, gems_security, hacks_exploits, macro_news, news, startup_jobs, tool_launches,
-    whale_movements,
+    defi_yields, earning_opportunities, exchange_listings, gems_security, hacks_exploits, macro_news, news, startup_jobs,
+    tool_launches, whale_movements,
 )
 from pipeline import llm_usage  # noqa: E402
 from pipeline.alerts import check_and_alert  # noqa: E402
@@ -57,6 +57,10 @@ COLLECTORS = {
     # exchange_listings, added 2026-11-15 (Phase 4) -- four keyless exchange announcement APIs, no GoPlus/rate-limit
     # interaction with anything above; per-exchange isolation lives inside the collector.
     "exchange_listings": exchange_listings.collect,
+    # earning_opportunities, added 2026-11-15 (Phase 5): Telegram t.me/s/ + RSS/API. Its own 2-hour entry point is
+    # scripts/collect_earning.py (a separate Railway cron service, once created); until then it also rides this 4-hour
+    # cycle. Running both is harmless -- rows are keyed by (source, external_id).
+    "earning_opportunities": earning_opportunities.collect,
 }
 
 

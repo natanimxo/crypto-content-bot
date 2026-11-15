@@ -905,6 +905,16 @@ def score_exchange_listings(conn, raw_item_id: int, payload: dict) -> dict:
     }
 
 
+# earning_opportunities (2026-11-15, Phase 5). TWO scores, never blended: `value` and `trust` are both stored in the
+# breakdown; the category's score_weights are {value: 1.0, trust: 0.0}, so scores.score IS the value and the trust
+# number can never leak into a ranking. Selection (pipeline/select_candidates.py) is trust >= 40 AND value >= 40,
+# ordered by value. All of the logic is in pipeline/earning.py (pure functions over the stored payload).
+@register_scorer("earning_opportunities")
+def score_earning_opportunities(conn, raw_item_id: int, payload: dict) -> dict:
+    from pipeline import earning
+    return earning.score_earning(payload)
+
+
 def score_new_items(conn, category: str) -> int:
     """Score every raw_item in this category that doesn't have a score row yet.
     Returns the number scored."""

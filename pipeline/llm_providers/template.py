@@ -165,6 +165,32 @@ def render_exchange_listings(raw_item: dict) -> str:
     return " · ".join(parts)
 
 
+@register_template("earning_opportunities")
+def render_earning_opportunities(raw_item: dict) -> str:
+    """The digest line: what it is, from where, and the checkable facts a reader of the digest needs before opening
+    anything (the two scores are printed by the notifier). Facts only -- the operator does the 'is this real' call."""
+    p = raw_item["payload"]
+    parts = [f"{p.get('type', 'other').replace('_', ' ')}: {(p.get('title') or '')[:90]}", f"{p.get('source_name')} (tier {p.get('source_tier')})"]
+    if p.get("payout_usd") is not None:
+        kind = {"ev": "expected ", "worth": "worth ", "stated": "stated "}.get(p.get("payout_kind"), "")
+        parts.append(f"{kind}${p['payout_usd']:,.0f}")
+    else:
+        parts.append("payout not stated")
+    cap = p.get("capital_usd")
+    parts.append("cost unknown" if cap is None else "no cost" if cap == 0 else f"needs ${cap:,.0f}")
+    if p.get("deadline"):
+        parts.append(f"ends {p['deadline'][:10]}")
+    parts.append({"worldwide": "worldwide", "multi": "several regions", "single": "ONE country"}.get(p.get("geo"), "region not stated"))
+    if p.get("corroborators"):
+        parts.append(f"also in {len(p['corroborators'])} other source(s)")
+    age = p.get("domain_age_days")
+    if age is not None and age < 90:
+        parts.append(f"landing domain only {age}d old")
+    if p.get("prereqs"):
+        parts.append("requires " + "/".join(x.replace("_", " ") for x in p["prereqs"]))
+    return " · ".join(parts)
+
+
 @register_template("startup_jobs")
 def render_startup_jobs(raw_item: dict) -> str:
     p = raw_item["payload"]

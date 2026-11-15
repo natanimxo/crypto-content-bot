@@ -642,3 +642,40 @@ exchange_listings:
     Report the exchange, the token and the timing from the announcement. State, in the title or the first two
     sentences, whether the token was already listed on another tracked exchange. No price, no performance, no
     prediction.
+
+earning_opportunities:
+  # Added 2026-11-15 (Phase 5, operator direction) -- anything a reader can take part in to earn money or get something
+  # of value: giveaways, free games, signup/account bonuses, free credits, hackathon prizes, bounties, airdrops. CoinCraft's
+  # category (a GLOBAL, non-crypto audience: internationally accessible beats single-country). Telegram (t.me/s/) and
+  # RSS/API sources first; Discord later. See pipeline/earning.py for the gate and both scores, and BACKLOG.md.
+  #
+  # TWO scores, never blended: `value` (what it is worth a reader's time) and `trust` (checkable facts about the source and
+  # the offer). The weights below make scores.score equal the VALUE; trust is stored in score_breakdown and enforced as a
+  # floor of 40 in pipeline/select_candidates.py (COMPONENT_FLOORS). Selection = trust >= 40 AND value >= 40, ordered by
+  # value descending -- trust is a gate, not a ranking dimension. Every card shows both numbers.
+  score_weights:
+    value: 1.0
+    trust: 0.0
+
+  review_threshold: 40     # the VALUE floor
+  # topic_key is the offer's landing page (or a significant-words title key for aggregators' own redirects), so the same
+  # offer announced by two sources is one candidate; 72h absorbs a relay arriving late.
+  cooldown_hours: 72
+  soft_daily_cap: 8        # a first guess with no operator history; pacing is 1/12 of it per 2-hour cycle
+                            # (select_candidates.CYCLES_PER_DAY_BY_CATEGORY). Re-set after the first week of real cards.
+
+  triage_model: template
+  write_model: deepseek-v4-flash
+
+  label: "🎁 EARNING OPPORTUNITY"
+
+  emoji: "🎁"
+  display_label: "Earning Opportunities"
+  hashtags:
+    - "#EarnOnline"
+    - "#Rewards"
+
+  voice: how_to
+  # Legacy-path fields only: CoinCraft writes this category through its channel voice profile (config/channel_voices.yaml).
+  prompt_notes: >
+    Practical and instructional: what the reader gets, who can join, exactly how to do it, and the catch. No hype.

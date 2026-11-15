@@ -101,6 +101,17 @@ CYCLE_HOURS = 4.0
 # ceil(), not floor -- a cap of 4 with 6 cycles/day must still allow 1/cycle,
 # not round down to 0.
 CYCLES_PER_DAY = 24.0 / CYCLE_HOURS
+# earning_opportunities runs on its own 2-hour cadence (operator direction, Phase 5, 2026-11-15), so its per-cycle share
+# of the daily cap is 1/12, not 1/6.
+CYCLES_PER_DAY_BY_CATEGORY = {"earning_opportunities": 12.0}
+
+# A minimum on a stored score COMPONENT, in addition to review_threshold on the score itself. earning_opportunities stores
+# TWO scores that are never blended: scores.score is the VALUE (checked against review_threshold = 40), and the TRUST floor
+# lives here. Trust is a gate, not a ranking dimension -- candidates are ordered by value alone.
+COMPONENT_FLOORS = {"earning_opportunities": {"trust": 40.0}}
+# An earning item with no stated deadline stops being a candidate after this many hours from its own timestamp; one WITH a
+# deadline stays eligible until the deadline passes.
+EARNING_UNDATED_MAX_AGE_HOURS = 72.0
 
 # For a category shared between channels, the per-cycle cap is category-wide
 # too (see get_new_candidates), so "already sent THIS cycle" has to be measured
@@ -299,6 +310,18 @@ def _category_notified_recent_count(conn, channel: str, category: str,
         return cur.fetchone()["n"] or 0
 
 
+def _earning_still_valid(payload: dict, now: datetime) -> bool:
+    """Deadline passed -> no. No deadline -> only for EARNING_UNDATED_MAX_AGE_HOURS from its own timestamp."""
+    payload = payload or {}
+    try:
+        if payload.get("deadline"):
+            return datetime.fromisoformat(payload["deadline"]) > now
+        published = datetime.fromisoformat(payload["published_at"])
+    except (KeyError, ValueError, TypeError):
+        return False
+    return (now - published).total_seconds() <= EARNING_UNDATED_MAX_AGE_HOURS * 3600
+
+
 def get_new_candidates(conn, category: str, channel: str) -> list[dict]:
     """Return raw_items (with score + breakdown + collected_at) that are new,
     clear threshold, aren't in cooldown, and still fit under this channel's
@@ -334,6 +357,13 @@ def get_new_candidates(conn, category: str, channel: str) -> list[dict]:
             continue
         topic_key = (row["payload"] or {}).get("topic_key")
         if topic_key and topic_key in cooling_down_topics:
+            continue
+        floors = COMPONENT_FLOORS.get(category)
+        if floors:
+            breakdown = row.get("score_breakdown") or {}
+            if any(float(breakdown.get(comp, 0) or 0) < floor for comp, floor in floors.items()):
+                continue
+        if category == "earning_opportunities" and not _earning_still_valid(row["payload"], now):
             continue
         if max_age_hours is not None:
             published_at = _published_at(category, row["payload"])
@@ -426,7 +456,7 @@ def get_new_candidates(conn, category: str, channel: str) -> list[dict]:
         # CYCLES_PER_DAY) of that remaining headroom, never more -- the 24h
         # count above stays the true ceiling, this only stops one cycle from
         # spending all of it. See CYCLES_PER_DAY's comment above.
-        per_cycle_cap = math.ceil(int(soft_cap) / CYCLES_PER_DAY)
+        per_cycle_cap = math.ceil(int(soft_cap) / CYCLES_PER_DAY_BY_CATEGORY.get(category, CYCLES_PER_DAY))
         if shared:
             # notify() visits channels one after another inside the same run, so
             # whatever an earlier channel was just sent this cycle already counts

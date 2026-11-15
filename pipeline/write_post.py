@@ -21,7 +21,7 @@ from pipeline import channel_voice, llm, post_format
 from pipeline.db import dict_cursor
 from pipeline.http import get_json
 from pipeline.post_facts import (
-    FACT_SPECS, WHALE_READ_CONVENTION, facts_defi_yields, facts_exchange_listings, facts_gems_security, facts_hacks_exploits,
+    FACT_SPECS, WHALE_READ_CONVENTION, facts_defi_yields, facts_earning_opportunities, facts_exchange_listings, facts_gems_security, facts_hacks_exploits,
     facts_job_listing, listing_record_window,
     facts_tool_launches,
     facts_whale_movements, facts_wire_story,
@@ -1036,6 +1036,65 @@ def _find_listing_issues(parsed: dict, payload: dict) -> list[str]:
     return issues
 
 
+# earning_opportunities output guard (Phase 5, 2026-11-15). The CoinCraft post has to be genuinely ACTIONABLE, which is the
+# one place a model's habit of inventing a plausible step is dangerous: a wrong step wastes a reader's time or sends them
+# somewhere they should not go. Checked on the output, not just requested: no invented steps, no amounts the facts do not
+# contain, the deadline stated when there is one, and no referral language (the operator adds referral links by hand).
+_EARN_REFERRAL_RE = re.compile(r"\b(?:referral|refer(?:ral)? (?:code|link)|refer a friend|invite (?:code|link|friends?)|use (?:my|our) (?:link|code)|promo code|affiliate)\b", re.IGNORECASE)
+_EARN_URL_RE = re.compile(r"https?://|www\.", re.IGNORECASE)
+_EARN_STEP_LINE_RE = re.compile(r"^\s*\d+[.)]\s+(.+)$", re.MULTILINE)
+EARNING_CHECKED_CATEGORIES = {"earning_opportunities"}
+
+
+def _earn_words(text: str) -> set[str]:
+    stop = {"the", "and", "you", "your", "for", "with", "that", "this", "then", "into", "from", "will", "are", "can", "any", "all"}
+    return {w for w in re.findall(r"[a-z0-9]{3,}", (text or "").lower()) if w not in stop}
+
+
+def _find_earning_issues(parsed: dict, payload: dict) -> list[str]:
+    from pipeline import earning
+    title = str(parsed.get("title", ""))
+    paragraphs = [str(x) for x in (parsed.get("paragraphs") or [])]
+    text = "\n".join([title] + paragraphs)
+    facts = facts_earning_opportunities(payload)
+    issues = []
+    if _EARN_REFERRAL_RE.search(text):
+        issues.append("it mentions a referral / invite / promo code -- the operator adds referral links by hand; remove it")
+    if _EARN_URL_RE.search(text):
+        issues.append("it contains a URL -- the link is added when the post is forwarded; say 'the link' instead")
+    allowed = set(earning.extract_amounts_usd(facts))
+    for amount in earning.extract_amounts_usd(text):
+        if not any(abs(amount - a) < 0.5 for a in allowed):
+            issues.append(f"the amount ${amount:,.0f} is not in the facts -- use only amounts the facts give")
+            break
+    if re.search(r"\bthe facts\b|\bour (?:data|records|system)\b|\bthe pipeline\b|\bautomatically collected\b", text, re.IGNORECASE):
+        issues.append("it talks about 'the facts' / the system's data -- the reader must never see how the post was built; say 'the page' or 'the link'")
+    if any(len(re.findall(r"(?:^|\s)\d+[.)]\s", line)) > 1 for line in text.split("\n")):
+        issues.append("put each numbered step on its own line (1. on one line, 2. on the next)")
+    steps = (payload.get("enriched") or {}).get("steps") or []
+    step_lines = _EARN_STEP_LINE_RE.findall(text)
+    if step_lines and not steps:
+        issues.append("the facts have NO steps available, but the post lists numbered steps -- write none and say the steps are on the offer's page")
+    elif step_lines:
+        fact_words = _earn_words(" ".join(steps))
+        for line in step_lines:
+            if len(_earn_words(line) & fact_words) < 2:
+                issues.append(f"step \"{line[:60]}\" is not one of the steps in the facts -- use only the facts' steps")
+                break
+        if len(step_lines) > len(steps) + 1:
+            issues.append("it lists more steps than the facts contain -- never add steps")
+    deadline = payload.get("deadline")
+    if deadline:
+        try:
+            d = datetime.fromisoformat(deadline)
+            label = f"{d.strftime('%b')} {d.day}"
+            if label.lower() not in text.lower() and d.strftime("%B").lower() + f" {d.day}" not in text.lower():
+                issues.append(f"the deadline ({label}) is in the facts but not in the post -- state it")
+        except ValueError:
+            pass
+    return issues
+
+
 def _generate_checked_write(conn, category: str, prompt: str, *, model_override: str | None = None,
                              source_excerpt: str | None = None, check_neutrality: bool = False,
                              check_no_speculation: bool = False) -> str:
@@ -1245,6 +1304,36 @@ def compute_exchange_listings_elements(conn, raw_item: dict, history: list) -> d
     p = raw_item["payload"]
     return {"history_line": None, "context_line": None, "risk_line": None,
             "source_name": f"{p.get('exchange')} announcement"}
+
+
+@register_prompt_builder("earning_opportunities")
+def build_earning_opportunities_prompt(cfg: dict, region_profile: str, raw_item: dict, history: list) -> str:
+    """Legacy-shape fallback. CoinCraft writes this category through its channel voice profile; this exists so the
+    category never raises NotImplementedError. The rules it carries are the FactSpec's."""
+    p = raw_item["payload"]
+    spec = FACT_SPECS["earning_opportunities"]
+    return f"""You are writing a short, practical post for a global audience. Voice: {cfg.get('voice', 'how_to')}.
+{cfg.get('prompt_notes', '')}
+
+{facts_earning_opportunities(p)}
+
+WHAT THE POST MUST COVER: {spec.content_brief}
+
+{spec.guardrails}
+
+Return ONLY a JSON object (no markdown fence, no commentary) with exactly these three string fields:
+{{
+  "title": "what the reader gets and the action, concrete. No emoji.",
+  "narrative": "2-3 sentences: what it is, who can take part, the deadline.",
+  "why_it_matters": "EXACTLY one sentence on the catch: what it costs or requires."
+}}
+"""
+
+
+@register_post_computer("earning_opportunities")
+def compute_earning_opportunities_elements(conn, raw_item: dict, history: list) -> dict:
+    """No history / context / risk line: the catch is a paragraph of the post, written from the facts."""
+    return {"history_line": None, "context_line": None, "risk_line": None, "source_name": raw_item["payload"].get("source_name")}
 
 
 @register_prompt_builder("news")
@@ -1781,6 +1870,11 @@ def generate_post_with_report(conn, category: str, channel: str, raw_item: dict,
     (the compare script passes profiles straight from the YAML so a voice can be
     reviewed before it is seeded into production)."""
     spec = FACT_SPECS[category]
+    if category == "earning_opportunities":
+        # The how-to needs the offer's REAL steps: read from the landing page (or the source's own instructions) before
+        # the prompt is built, stored on the item, and treated as the only source of steps.
+        from pipeline import enrich_landing
+        enrich_landing.enrich_item(conn, raw_item)
     cfg = load_category_config(conn, category)
     profile = profile or channel_voice.load_profile(conn, channel)
     if profile is None:
@@ -1829,6 +1923,8 @@ def generate_post_with_report(conn, category: str, channel: str, raw_item: dict,
             hits += _find_reader_advice(parsed)
         if category in LISTING_CHECKED_CATEGORIES:
             hits += _find_listing_issues(parsed, raw_item["payload"])
+        if category in EARNING_CHECKED_CATEGORIES:
+            hits += _find_earning_issues(parsed, raw_item["payload"])
         chars = channel_voice.measure(assemble(str(parsed.get("title", "")), parsed["paragraphs"], final=False))
         return hits + channel_voice.find_voice_issues(profile, parsed, chars, facts_have_figures)
 

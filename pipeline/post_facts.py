@@ -227,6 +227,47 @@ def facts_exchange_listings(p: dict) -> str:
 - Background for you, NOT for the post: the record goes back to {record}, so a listing before those dates would not appear in it."""
 
 
+def facts_earning_opportunities(p: dict) -> str:
+    import datetime as _dt
+
+    def day(iso: str | None) -> str | None:
+        try:
+            d = _dt.datetime.fromisoformat(iso)
+            return f"{d.strftime('%b')} {d.day}"
+        except (TypeError, ValueError):
+            return None
+
+    enriched = p.get("enriched") or {}
+    steps = enriched.get("steps") or []
+    reward = enriched.get("reward")
+    if not reward and p.get("payout_kind") == "ev" and p.get("pool_usd"):
+        reward = (f"a prize pool of ${p['pool_usd']:,.0f} shared among the winners only -- most participants win nothing "
+                  f"(average per participant: about ${p['payout_usd']:,.0f})")
+    elif not reward and p.get("payout_usd") is not None:
+        kind = {"worth": "worth", "stated": "stated as"}.get(p.get("payout_kind"), "stated as")
+        reward = f"{kind} ${p['payout_usd']:,.0f}"
+    cap = p.get("capital_usd")
+    cost = enriched.get("cost") or ("nothing is stated as required up front" if cap == 0 else
+                                    (f"about ${cap:,.0f} of your own money is needed" if cap else "not stated"))
+    deadline = enriched.get("deadline") or day(p.get("deadline")) or "not stated"
+    geo = {"worldwide": "open worldwide", "multi": "open in several regions (check the page for which)", "single": "open in ONE country only"}.get(p.get("geo"), "countries not stated")
+    where = enriched.get("eligibility") or geo
+    reqs = ", ".join(x.replace("_", " ") for x in (p.get("prereqs") or [])) or "none stated"
+    steps_block = ("\n".join(f"  {i}. {s}" for i, s in enumerate(steps, 1)) if steps else
+                   "  NOT AVAILABLE -- the offer's own page could not be read. Write NO steps; tell the reader the steps are on the offer's page.")
+    return f"""Facts about this opportunity (collected automatically; the reader's own checks still apply):
+- What: {p.get('title')}
+- Kind: {(p.get('type') or 'other').replace('_', ' ')}
+- Posted by: {p.get('source_name')}
+- Reward: {reward or 'not stated'}
+- What it costs or requires: {cost}
+- Deadline: {deadline}
+- Who can take part: {where}
+- Other requirements: {reqs}
+- Participation steps ({'from the offer itself' if steps else 'none available'}):
+{steps_block}"""
+
+
 @dataclass(frozen=True)
 class FactSpec:
     audience: str | None          # who the CATEGORY's content is about, when not the channel's default crypto readership
@@ -440,6 +481,25 @@ FACT_SPECS: dict[str, FactSpec] = {
             "exchange (name each one and when it announced) or that no earlier listing appears among the tracked "
             "exchanges; then when trading opens, only if the facts give it."
         )},
+        title_figures=False,
+    ),
+    "earning_opportunities": FactSpec(
+        audience=("a global, geographically diverse audience of everyday people looking to earn or get something of value -- "
+                  "not a crypto audience, not US-only"),
+        facts=facts_earning_opportunities,
+        content_brief=(
+            "Say what the reader gets and who can take part (countries, requirements, deadline) exactly as the facts give them. "
+            "Then the steps: ONLY the steps in the facts, numbered, one action each -- if the facts say no steps are available, "
+            "write none and say the steps are on the offer's page. Then the catch: what it costs or requires and any limit the "
+            "facts state. Where a fact is missing, say plainly that it is not stated."
+        ),
+        guardrails=(
+            "HARD RULES, no exceptions: use only what the facts state -- never invent a step, amount, deadline, country or "
+            "requirement. Never promise an outcome ('you will earn', 'guaranteed', 'free money'); say 'up to', 'if selected' or "
+            "'eligible' as the facts do, and treat a giveaway as a chance, not a payment. No hype, no urgency, no 'don't miss'. "
+            "Never include a URL, a referral link or an invite code (the link is added when the post is forwarded); refer to "
+            "'the link'. Never say whether the offer is safe or legitimate -- say what the facts state. " + _NO_SCORES
+        ),
         title_figures=False,
     ),
     "gems_security": FactSpec(

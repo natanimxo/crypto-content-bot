@@ -13,10 +13,7 @@
 # applies a profile only to a channel that has a row, and says so for the rest, so it
 # takes effect the moment the row is created.
 #
-# coincraft has NO profile deliberately (operator direction 2026-11-14): it becomes a
-# non-crypto earning-opportunities channel in Phase 5 and a profile written now would be
-# guesswork against content that doesn't exist. Until then it keeps the old category
-# voice (category_config.voice / prompt_notes) via the legacy path in write_post.py.
+# coincraft got its profile 2026-11-15 (Phase 5) -- see the entry at the bottom. Before that it kept the old category voice.
 #
 # `length` counts the whole post EXCEPT the Source line and hashtags -- emoji, title,
 # paragraphs, any history / "Also in our own tracking" blockquote and any risk flag.
@@ -152,3 +149,47 @@ hustle_to_million:
   person: second
   hashtags: true
   keep_context_lines: true
+
+coincraft:
+  # Added 2026-11-15 (Phase 5): CoinCraft is no longer a crypto channel -- it carries earning_opportunities for a global,
+  # geographically diverse audience. Operator direction: practical and instructional, shorter than Notebook, no hype,
+  # clear steps; the one channel where a post has to be genuinely ACTIONABLE rather than informative. The steps in a post
+  # come only from the offer itself (pipeline/enrich_landing.py) and are checked against it in code.
+  name: how_to
+  summary: >-
+    A short, practical how-to for readers anywhere in the world: what you can get,
+    whether you can take part, and exactly how to do it.
+  tone: >-
+    Practical and direct, in the second person. Plain words a reader who is not a native
+    English speaker can follow; short sentences. No hype, no urgency, no promises. Say what
+    it costs or requires as plainly as what it pays. Steps are imperative, one action each.
+  title_style: >-
+    What you get plus the action, concrete -- for example "Get 3 free games on Epic until
+    Nov 21" or "Earn a $250 bonus when you open a 529 account". Not clickbait.
+  title_check: null
+  paragraphs:
+    - "What it is and what you get: the reward, who can take part (countries, requirements) and the deadline, exactly as the facts give them."
+    - >-
+      How to do it: the steps from the facts as a numbered list (1. 2. 3.), one action each --
+      or, if the facts say no steps are available, one sentence saying the steps are on the
+      offer's page.
+    - >-
+      The catch: what it costs or requires (money up front, documents or ID checks, time), any
+      limits the facts state, and anything that is not stated -- plain, never alarmist.
+  length: {min: 400, max: 650}
+  person: second
+  hashtags: true
+  keep_context_lines: true
+  banned_words:
+    - free money
+    - guaranteed
+    - risk-free
+    - easy money
+    - passive income
+    - get rich
+    - hurry
+    - act now
+    - don't miss
+    - once in a lifetime
+    - amazing
+    - incredible

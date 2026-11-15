@@ -33,7 +33,7 @@
 #   alpha_edge_crypto:  news (shared), defi_yields (whole -- NOT split)
 #   crypto_notebook:    gems_security, hacks_exploits
 #   hustle_to_million:  tool_launches, startup_jobs, macro_news
-#   coincraft:          (none until Phase 5)
+#   coincraft:          earning_opportunities (Phase 5, 2026-11-15)
 #
 # chat_ids below were given explicitly by the operator (not inferred from any
 # ordering) — confirmed correct as of the mapping they provided.
@@ -113,10 +113,11 @@ crypto_notebook:
 
 coincraft:
   display_name: "CoinCraft"
-  categories: []    # DELIBERATELY EMPTY from 2026-11-15 (Phase 3): becomes the non-crypto earning-
-                     # opportunities channel in Phase 5. Keep the row -- see the Phase 3 note at the top.
+  categories:
+    - earning_opportunities   # Phase 5, 2026-11-15: the non-crypto earning-opportunities channel (global audience).
+                               # Telegram (t.me/s/) + RSS/API sources; Discord hub to follow.
   region_profile: default
-  soft_daily_cap: 12   # unchanged; meaningless while it has no categories
+  soft_daily_cap: 8    # = the category's own cap; real volume will tell
   chat_id: "-1002704031424"
 
 hustle_to_million:

@@ -1,0 +1,515 @@
+"""earning_opportunities -- the deterministic core (Phase 5, 2026-11-15).
+
+Anything a reader can take part in to earn money or get something of value: giveaways, free games, signup and
+account bonuses, free credits, hackathon prizes, bounties, airdrops. CoinCraft's category (a global, non-crypto
+audience), written to by Telegram channels (t.me/s/) and RSS/API sources; Discord comes later.
+
+Everything here is a PURE function of text and stored facts -- no network, no database -- so the gate and both
+scores can be tested on real candidates and re-run without side effects. The collectors do the fetching
+(RDAP domain age, Safe Browsing, URLhaus, GoPlus) and store the results in the item's payload; the scorer only reads
+the payload.
+
+THE RULES (operator-approved 2026-11-15):
+  1. A deterministic GATE runs first and excludes outright: seed-phrase / private-key requests, connect-wallet-to-claim,
+     and any upfront payment to take part (a fee, "gas to claim", "send X to receive Y"). Capital you deposit and keep
+     (a bank-bonus deposit) is not a fee: it is the VALUE score's `capital` component.
+  2. TRUST and VALUE are two separate numbers and are NEVER blended. trust = checkable facts about the source and the
+     offer; value = what it is worth a reader's time. Selection is trust >= 40 AND value >= 40, ordered by value
+     (trust is a gate, not a ranking dimension). `scores.score` is set to the VALUE only; trust lives in
+     score_breakdown, and every card shows both.
+  3. Trust is facts, not judgment: source tier, independent corroboration, whether terms are stated (deadline /
+     eligibility / payout), domain age (RDAP), Safe Browsing, URLhaus, GoPlus for a token contract. The "is this
+     real" call is the operator's, by hand. (Two checks that need a search API -- "does the official domain confirm
+     it" and "scam reports found" -- were dropped on purpose; see BACKLOG.)
+  4. Cross-link: an absurd payout-for-nothing ratio PENALISES TRUST, it does not just look attractive -- the same
+     lesson as the 462% APY pools.
+  5. Whether a referral program exists is NEVER an input. Referral parameters are stripped from every link and no
+     function here reads a referral field except to report that a link had one (`referral_link`, display only).
+     check_earning.py asserts the scorer's output does not change when it is toggled.
+"""
+
+import math
+import re
+from datetime import datetime, timedelta, timezone
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
+
+TRUST_FLOOR = 40.0
+VALUE_FLOOR = 40.0
+
+# ----------------------------------------------------------------------------- sources
+
+# tier 1 = the offer's own platform announcing it (an official API); tier 2 = a curated or structured aggregator
+# with editorial or data discipline; tier 3 = an open aggregator / Telegram channel anyone can post to.
+SOURCES = {
+    "epic_free_games": {"name": "Epic Games Store (official)", "tier": 1, "kind": "api", "default_type": "free_game"},
+    "gamerpower": {"name": "GamerPower", "tier": 2, "kind": "api", "default_type": "free_game"},
+    "devpost": {"name": "Devpost", "tier": 2, "kind": "api", "default_type": "hackathon"},
+    "doctorofcredit": {"name": "Doctor of Credit", "tier": 2, "kind": "rss", "default_type": "bank_bonus"},
+    "ozbargain": {"name": "OzBargain", "tier": 3, "kind": "rss", "default_type": "freebie"},
+    "mydealz": {"name": "MyDealz", "tier": 3, "kind": "rss", "default_type": "freebie"},
+    "dealabs": {"name": "Dealabs", "tier": 3, "kind": "rss", "default_type": "freebie"},
+    "tg:airdropfind": {"name": "Airdrop Finder (Telegram)", "tier": 3, "kind": "telegram", "default_type": "airdrop"},
+    "tg:airdrops_io": {"name": "AIRDROPS.IO (Telegram)", "tier": 3, "kind": "telegram", "default_type": "airdrop"},
+    "tg:incrypted_airdrops": {"name": "Incrypted Airdrops (Telegram)", "tier": 3, "kind": "telegram", "default_type": "airdrop"},
+    "tg:criptinho": {"name": "Criptinho (Telegram)", "tier": 3, "kind": "telegram", "default_type": "airdrop"},
+    "tg:EpicSteamGames": {"name": "Free PC Games (Telegram)", "tier": 3, "kind": "telegram", "default_type": "free_game"},
+    "tg:FreeGamesNews": {"name": "Free Games and Giveaways (Telegram)", "tier": 3, "kind": "telegram", "default_type": "free_game"},
+    "tg:r_FreeGamesOnSteam": {"name": "r/FreeGamesOnSteam (Telegram)", "tier": 3, "kind": "telegram", "default_type": "free_game"},
+}
+
+# Used only to CORROBORATE (a campaign they also announce raises trust) and never as a source of opportunities: they
+# overlap exchange_listings and Crypto Wall Street, and the same event must not reach two channels by two paths.
+CORROBORATION_ONLY_TELEGRAM = ["OKXAnnouncements", "Bybit_Announcements", "CoinMarketCapAnnouncements"]
+
+TELEGRAM_HANDLES = [k[3:] for k, v in SOURCES.items() if v["kind"] == "telegram"]
+
+# ----------------------------------------------------------------------------- links
+
+_TRACKING = {"fbclid", "gclid", "msclkid", "mc_cid", "mc_eid", "igshid", "yclid", "_ga", "ref_src"}
+_REFERRAL = {"ref", "referral", "referrer", "ref_code", "refcode", "referral_code", "r", "rid", "aff", "affiliate", "aff_id",
+             "invite", "invite_code", "invitecode", "inviter", "via", "rcode", "sponsor", "partner", "tag", "subid", "irclickid", "clickid"}
+_REFERRAL_PATH_RE = re.compile(r"/(?:r|ref|refer|referral|invite|invites|join)/[^/?#]+", re.IGNORECASE)
+_SOCIAL_AGGREGATOR_HOSTS = ("t.me", "telegram.me", "telegram.org", "twitter.com", "x.com", "facebook.com", "instagram.com",
+                            "youtube.com", "youtu.be", "reddit.com", "discord.gg", "discord.com", "bit.ly", "t.co")
+_URL_RE = re.compile(r"https?://[^\s<>\"')\]]+", re.IGNORECASE)
+
+
+def is_referral_link(url: str) -> bool:
+    """Display-only: did the link carry a referral parameter or path? Never an input to any score."""
+    if not url:
+        return False
+    p = urlparse(url)
+    if _REFERRAL_PATH_RE.search(p.path or ""):
+        return True
+    return any(k.lower() in _REFERRAL for k, _ in parse_qsl(p.query, keep_blank_values=True))
+
+
+def normalize_url(url: str) -> str:
+    """Host lower-cased without www., tracking and REFERRAL parameters dropped, fragment dropped, no trailing slash."""
+    p = urlparse((url or "").strip())
+    host = (p.netloc or "").lower()
+    host = host[4:] if host.startswith("www.") else host
+    keep = [(k, v) for k, v in parse_qsl(p.query, keep_blank_values=True)
+            if not k.lower().startswith("utm_") and k.lower() not in _TRACKING and k.lower() not in _REFERRAL]
+    path = _REFERRAL_PATH_RE.sub("", p.path or "").rstrip("/")
+    return urlunparse((p.scheme or "https", host, path, "", urlencode(keep), ""))
+
+
+def domain_of(url: str) -> str | None:
+    host = (urlparse(url or "").netloc or "").lower().split(":")[0]
+    host = host[4:] if host.startswith("www.") else host
+    return host or None
+
+
+def registrable_domain(host: str | None) -> str | None:
+    """Last two labels (three for common two-part public suffixes) -- good enough for an RDAP lookup key."""
+    if not host:
+        return None
+    parts = host.split(".")
+    if len(parts) >= 3 and parts[-2] in {"co", "com", "org", "net", "gov", "ac"} and len(parts[-1]) == 2:
+        return ".".join(parts[-3:])
+    return ".".join(parts[-2:]) if len(parts) >= 2 else host
+
+
+def pick_landing_url(links: list[str]) -> str | None:
+    """The first link that is not social or a link-shortener; the landing page a reader would actually act on."""
+    for link in links:
+        host = domain_of(link) or ""
+        if not any(host == h or host.endswith("." + h) for h in _SOCIAL_AGGREGATOR_HOSTS):
+            return link
+    return None
+
+
+def find_urls(text: str) -> list[str]:
+    return [u.rstrip(".,;:!?") for u in _URL_RE.findall(text or "")]
+
+
+# ----------------------------------------------------------------------------- the gate
+
+_SEED_RE = re.compile(r"seed ?phrase|recovery ?phrase|secret recovery|mnemonic|\b(?:12|24)[- ]word|private ?key|keystore|import (?:your )?wallet", re.IGNORECASE)
+_WALLET_CLAIM_RE = re.compile(
+    r"connect (?:your |a |the )?(?:crypto |web3 )?wallet|wallet ?connect|link (?:your )?wallet (?:to|and) claim|"
+    r"claim (?:your |the )?(?:airdrop|tokens?|reward|drop)s?[^.\n]{0,40}(?:connect|wallet)|(?:connect|wallet)[^.\n]{0,40}claim", re.IGNORECASE)
+_FEE_RE = re.compile(
+    r"(?:pay|send|deposit|transfer)\s+(?:a\s+|the\s+|some\s+)?(?:small\s+|tiny\s+|minimal\s+)?(?:gas|network|activation|registration|processing|"
+    r"unlock|verification|withdrawal|entry|admin|release|insurance|tax|customs|shipping and handling)\s+(?:fees?|charges?|costs?)|"
+    r"(?:gas|activation|registration|processing|unlock|verification|withdrawal|entry|participation|claim|release)\s+fee\s+(?:is |are )?(?:required|needed|to (?:claim|receive|withdraw|participate|unlock))|"
+    r"(?:entry|registration|participation|activation|claiming) fee\b|"
+    r"\bsend\s+(?:\d[\d.,]*\s*)?(?:eth|btc|usdt|usdc|bnb|sol|tokens?|coins?)\b[^.\n]{0,50}\b(?:to receive|to get|to claim|and (?:receive|get)|back)\b|"
+    r"\b(?:double|2x|10x|triple) your (?:crypto|eth|btc|usdt|bnb|sol|coins?|deposit|money)\b|"
+    r"\bpay\s+(?:\$|€|£)?\d[\d.,]*\s*(?:usd|usdt|eur|gbp)?\s+(?:to (?:claim|receive|unlock|participate|enter|join|withdraw)|and (?:you|get|receive|win))", re.IGNORECASE)
+
+
+def gate(text: str) -> list[str]:
+    """Reasons this item is excluded before any scoring; [] means it passes. Deterministic and boring on purpose."""
+    reasons = []
+    if _SEED_RE.search(text or ""):
+        reasons.append("asks for a seed phrase / private key / wallet import")
+    if _WALLET_CLAIM_RE.search(text or ""):
+        reasons.append("connect-wallet-to-claim")
+    if _FEE_RE.search(text or ""):
+        reasons.append("upfront payment to take part")
+    return reasons
+
+
+# ----------------------------------------------------------------------------- extraction
+
+_FX = {"$": 1.0, "usd": 1.0, "us$": 1.0, "€": 1.08, "eur": 1.08, "£": 1.27, "gbp": 1.27, "aud": 0.65, "a$": 0.65, "cad": 0.73,
+       "c$": 0.73, "inr": 0.012, "₹": 0.012, "rs": 0.012}
+_AMOUNT_RE = re.compile(
+    r"(?P<up>up to |worth |over |\+ ?)?(?:(?P<cur1>US\$|A\$|C\$|\$|€|£|₹|USD |EUR |GBP |AUD |CAD |INR |Rs\.? ?)(?P<n1>\d[\d,]*(?:\.\d+)?)(?P<k1>[kKmM])?"
+    r"|(?P<n2>\d[\d,]*(?:\.\d+)?)(?P<k2>[kKmM])? ?(?P<cur2>USD|EUR|GBP|AUD|CAD|INR|USDT|USDC))", re.IGNORECASE)
+
+
+def extract_amounts_usd(text: str) -> list[float]:
+    out = []
+    for m in _AMOUNT_RE.finditer(text or ""):
+        cur = (m.group("cur1") or m.group("cur2") or "$").strip().lower().rstrip(".")
+        n = m.group("n1") or m.group("n2")
+        k = (m.group("k1") or m.group("k2") or "").lower()
+        try:
+            v = float(n.replace(",", ""))
+        except ValueError:
+            continue
+        v *= {"k": 1e3, "m": 1e6}.get(k, 1)
+        rate = _FX.get(cur, 1.0 if cur in ("usdt", "usdc") else None)
+        if rate is None:
+            continue
+        out.append(round(v * rate, 2))
+    return out
+
+
+_REWARD_BEFORE_RE = re.compile(r"(?:win|won|prize|prizes|reward|rewards|bonus|earn|earning|get|receive|receiving|credit|credits|gift ?card|voucher|cash ?back|worth|valued? at|up to|free|claim|giveaway|pool of|total of)\W{0,3}[^\w$€£]{0,25}$", re.IGNORECASE)
+_REWARD_AFTER_RE = re.compile(r"^\s{0,2}(?:/\w+ )?(?:bonus|credits?|reward|rewards|prize|prizes|gift ?card|voucher|cash ?back|in (?:prizes|rewards|credits|tokens|bonuses)|worth|value|giveaway|airdrop|free)", re.IGNORECASE)
+_NOT_REWARD_RE = re.compile(r"raise[ds]?|funding|valuation|tvl|market ?cap|\bfdv\b|\bround\b|series [a-d]\b|volume|investors?|\bprice[ds]?\b|\bcosts?\b|msrp|\brrp\b|\bwas \W|\bonly \W|\bjust \W|\bsave\b|saving|\boff\b|per month|/mo\b|a month|subscription|deposit|minimum|balance|spend|purchase|\bbuy\b|\bfrom \W|\bnow \W|\bfor \W|instead of", re.IGNORECASE)
+
+
+def extract_reward_usd(text: str, type_: str = "other") -> float | None:
+    """The amount a reader RECEIVES, not any dollar figure in the text. An amount counts only with a reward cue next
+    to it (win / prize / bonus / get / credit / worth / up to ...) and no cost, price or funding cue (raised, TVL, price,
+    deposit, spend ...). Without this an airdrop news post mentioning "$20M raised" scored a $20 million payout.
+    Figures of $1M or more are not a per-person reward outside a hackathon (they are pools): ignored, i.e. unknown."""
+    t = text or ""
+    best = None
+    for m in _AMOUNT_RE.finditer(t):
+        before, after = t[max(0, m.start() - 30):m.start()], t[m.end():m.end() + 24]
+        around = t[max(0, m.start() - 30):m.end() + 24]
+        if _NOT_REWARD_RE.search(before) or _NOT_REWARD_RE.search(after[:16]):
+            continue
+        if not (_REWARD_BEFORE_RE.search(before) or _REWARD_AFTER_RE.search(after)):
+            continue
+        vals = extract_amounts_usd(m.group(0))
+        if not vals:
+            continue
+        v = vals[0]
+        if v >= 1_000_000 and type_ != "hackathon":
+            continue
+        best = v if best is None else max(best, v)
+    return best
+
+
+_MONTHS = {m: i for i, m in enumerate(["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"], 1)}
+_DEADLINE_CUE = r"(?:until|till|ends?|ending|expires?|expiring|deadline|valid (?:until|through)|through|by|before|only)"
+_DATE_TEXT_RE = re.compile(
+    rf"{_DEADLINE_CUE}[^0-9a-z]{{0,6}}(?:on )?(?P<d1>\d{{1,2}})(?:st|nd|rd|th)? (?P<m1>jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*(?:,? (?P<y1>20\d\d))?|"
+    rf"{_DEADLINE_CUE}[^0-9a-z]{{0,6}}(?:on )?(?P<m2>jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.? (?P<d2>\d{{1,2}})(?:st|nd|rd|th)?(?:,? (?P<y2>20\d\d))?|"
+    rf"{_DEADLINE_CUE}[^0-9a-z]{{0,6}}(?P<iso>20\d\d-\d\d-\d\d)|"
+    rf"{_DEADLINE_CUE}[^0-9a-z]{{0,6}}(?P<m3>\d{{1,2}})/(?P<d3>\d{{1,2}})(?:/(?P<y3>20\d\d|\d\d))?", re.IGNORECASE)
+_RANGE_END_RE = re.compile(r"(?P<m>jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.? \d{1,2}\s*[-–]\s*(?P<d>\d{1,2})(?:,? (?P<y>20\d\d))?", re.IGNORECASE)
+# "Oct 30 - Dec 04, 2026": the END of a two-month range
+_RANGE2_RE = re.compile(r"(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.? \d{1,2}\s*[-–]\s*(?P<m>jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.? (?P<d>\d{1,2})(?:,? (?P<y>20\d\d))?", re.IGNORECASE)
+# "(11/14 Only)": the cue comes AFTER the date
+_ONLY_RE = re.compile(r"(?P<m>\d{1,2})/(?P<d>\d{1,2})\s*only", re.IGNORECASE)
+
+
+def extract_deadline(text: str, now: datetime) -> datetime | None:
+    """The stated deadline as an end-of-day UTC datetime, or None. A date without a year is taken as the next
+    occurrence, never a past one more than a week old."""
+    text = text or ""
+    m = _DATE_TEXT_RE.search(text)
+    y = mo = d = None
+    if m:
+        if m.group("iso"):
+            y, mo, d = (int(x) for x in m.group("iso").split("-"))
+        elif m.group("m1"):
+            mo, d, y = _MONTHS[m.group("m1").lower()[:3]], int(m.group("d1")), int(m.group("y1")) if m.group("y1") else None
+        elif m.group("m2"):
+            mo, d, y = _MONTHS[m.group("m2").lower()[:3]], int(m.group("d2")), int(m.group("y2")) if m.group("y2") else None
+        elif m.group("m3"):
+            mo, d = int(m.group("m3")), int(m.group("d3"))
+            y = int(m.group("y3")) if m.group("y3") else None
+            if y is not None and y < 100:
+                y += 2000
+            if mo > 12 and d <= 12:          # day/month order
+                mo, d = d, mo
+    else:
+        r = _RANGE2_RE.search(text) or _RANGE_END_RE.search(text)
+        o = _ONLY_RE.search(text)
+        if r:
+            mo, d, y = _MONTHS[r.group("m").lower()[:3]], int(r.group("d")), int(r.group("y")) if r.group("y") else None
+        elif o:
+            mo, d = int(o.group("m")), int(o.group("d"))
+    if not (mo and d and 1 <= mo <= 12 and 1 <= d <= 31):
+        return None
+    try:
+        if y is None:
+            y = now.year
+            cand = datetime(y, mo, d, 23, 59, tzinfo=timezone.utc)
+            if cand < now - timedelta(days=7):
+                cand = datetime(y + 1, mo, d, 23, 59, tzinfo=timezone.utc)
+            return cand
+        return datetime(y, mo, d, 23, 59, tzinfo=timezone.utc)
+    except ValueError:
+        return None
+
+
+_TYPE_RULES = [
+    ("bank_bonus", r"\b(?:checking|savings|brokerage|bank|account|credit card|card|invest(?:ing|ment)?|ira|529) (?:bonus|offer|promo)|\bbonus\b.*\b(?:direct deposit|checking|account)\b|sign[- ]?up bonus"),
+    ("hackathon", r"hackathon|buildathon|competition|contest|challenge|prize pool|devpost"),
+    ("bounty", r"bug ?bounty|bounty|immunefi|hackerone|vulnerabilit"),
+    ("airdrop", r"airdrop|retrodrop|points? program|testnet|token (?:launch|claim)|claim (?:your )?(?:tokens?|drop)"),
+    ("free_game", r"free (?:game|games|to keep|dlc|pc game|steam|epic|gog|key)|\b100% off\b|giveaway.*(?:steam|epic|gog|key)|loot|free on (?:steam|epic|gog|prime)"),
+    ("credits", r"free credits?|\bcredits?\b.*\b(?:free|bonus|\$)|api credits|free tier|trial credits|startup credits"),
+    ("cashback", r"cash ?back|rebate|% back"),
+    ("giveaway", r"giveaway|sweepstakes?|raffle|win (?:a|an|\$|up)|enter to win"),
+    ("freebie", r"\bfree\b|gratis|gratuit|kostenlos|freebie|sample"),
+]
+
+
+def classify_type(text: str, default: str | None = None) -> str:
+    """Strong keyword rules first. 'freebie' (the bare word "free") is weak: it never overrides a source's own default
+    type (an airdrop channel's post that says "free" is still an airdrop)."""
+    t = (text or "").lower()
+    for name, pat in _TYPE_RULES:
+        if re.search(pat, t):
+            if name == "freebie" and default and default != "freebie":
+                return default
+            return name
+    return default or "other"
+
+
+_TITLE_NOISE = {"the", "a", "an", "is", "are", "free", "giveaway", "key", "keys", "steam", "epic", "games", "game", "store", "gog", "on", "for", "to",
+                "get", "your", "claim", "now", "bundle", "pack", "dlc", "and", "of", "in", "with", "itch", "io", "indiegala", "stove", "prime", "gaming",
+                "limited", "time", "offer", "airdrop", "new"}
+
+
+def title_key(title: str, type_: str) -> str:
+    """Stable key for 'the same offer announced twice' -- Epic announcing a game and GamerPower relaying it, two channels
+    posting the same campaign. Significant words only, order-free."""
+    words = sorted({w for w in re.findall(r"[a-z0-9]{3,}", (title or "").lower()) if w not in _TITLE_NOISE})[:5]
+    return f"{type_}:{'-'.join(words)}"
+
+
+_WORLDWIDE_RE = re.compile(r"worldwide|world[- ]wide|global(?:ly)?|all countries|international(?:ly)?|anywhere in the world|open to (?:all|everyone)|no (?:geo|region)[- ]?(?:restriction|limit)", re.IGNORECASE)
+_SINGLE_COUNTRY_RE = re.compile(
+    r"\b(?:(?:us|u\.s\.|usa|uk|u\.k\.|canada|canadian|australia|australian|germany|german|france|french|india|indian|nigeria|brazil|italy|spain|ireland|japan)[ -](?:only|residents?|customers?|citizens?)|"
+    r"(?:only )?(?:available|open|valid|eligible) (?:to|for|in) (?:the )?(?:us|u\.s\.|usa|uk|u\.k\.|canada|australia|germany|france|india|residents of [a-z ]+)|"
+    r"residents? of (?:the )?[a-z ]{2,20} only|(?:us|uk|au|ca|eu) only)\b", re.IGNORECASE)
+_MULTI_RE = re.compile(r"\b(?:eu|europe|european union|asia|latam|latin america|africa|nordics?|(?:\w+, ){2,}\w+ (?:and|&) \w+ (?:residents|only|countries))\b", re.IGNORECASE)
+
+
+def geo_breadth(text: str, source_default: str | None = None) -> str:
+    """'worldwide' | 'multi' | 'single' | 'unknown' -- worldwide beats single-country however large the single country."""
+    t = text or ""
+    if _SINGLE_COUNTRY_RE.search(t):
+        return "single"
+    if _WORLDWIDE_RE.search(t):
+        return "worldwide"
+    if _MULTI_RE.search(t):
+        return "multi"
+    return source_default or "unknown"
+
+
+_KYC_RE = re.compile(r"\bkyc\b|identity verification|verify your identity|government id|passport|selfie|ssn|social security", re.IGNORECASE)
+_HARD_PULL_RE = re.compile(r"hard (?:credit )?(?:pull|inquiry)", re.IGNORECASE)
+_SOFT_PULL_RE = re.compile(r"soft (?:credit )?(?:pull|inquiry)|soft check", re.IGNORECASE)
+_DIRECT_DEPOSIT_RE = re.compile(r"direct deposit(?! not required)", re.IGNORECASE)
+_NO_DD_RE = re.compile(r"direct deposit not required|no direct deposit", re.IGNORECASE)
+_CAPITAL_RE = re.compile(
+    r"(?:deposit|fund(?:ed|ing)?|maintain|minimum (?:balance|deposit)|balance of|invest|contribut(?:e|ion)|spend|purchase|buy)\D{0,25}"
+    r"(?P<cur>US\$|\$|€|£)\s?(?P<n>\d[\d,]*(?:\.\d+)?)(?P<k>[kK])?", re.IGNORECASE)
+_FREE_RE = re.compile(r"\b(?:free|no (?:purchase|deposit|payment|cost) (?:necessary|required)|100% off|\$0|0\.00)\b", re.IGNORECASE)
+_STEP_WORDS_RE = re.compile(r"\b(?:follow|retweet|repost|join (?:our|the)|like|comment|tag|invite|share|subscribe|complete (?:the )?tasks?|quests?)\b", re.IGNORECASE)
+
+
+def extract_prereqs(text: str) -> list[str]:
+    t = text or ""
+    out = []
+    if _KYC_RE.search(t):
+        out.append("kyc")
+    if _HARD_PULL_RE.search(t):
+        out.append("hard_credit_pull")
+    elif _SOFT_PULL_RE.search(t):
+        out.append("soft_credit_pull")
+    if _DIRECT_DEPOSIT_RE.search(t) and not _NO_DD_RE.search(t):
+        out.append("direct_deposit")
+    return out
+
+
+_RECURRING_FEE_RE = re.compile(r"(?:US\$|\$|€|£)\s?(?P<n>\d[\d,]*(?:\.\d+)?)\s*(?:/|per |a |each )\s*(?P<per>month|mo|year|yr|annum)", re.IGNORECASE)
+
+
+def extract_capital_usd(text: str, type_: str) -> float | None:
+    """Money the reader must put in (and, for a bonus, usually gets back): 0 for a free offer, the largest stated
+    deposit/spend otherwise, None when it is not stated and the type usually needs some (a bank bonus)."""
+    amounts = []
+    for m in _CAPITAL_RE.finditer(text or ""):
+        try:
+            v = float(m.group("n").replace(",", "")) * (1000 if m.group("k") else 1)
+        except ValueError:
+            continue
+        amounts.append(v)
+    # A recurring fee the offer needs ("requires a $39.99 per month account") is money in, even though it is not a deposit:
+    # three months for a monthly fee (the usual minimum), one year's for an annual one.
+    for m in _RECURRING_FEE_RE.finditer(text or ""):
+        try:
+            v = float(m.group("n").replace(",", ""))
+        except ValueError:
+            continue
+        amounts.append(v * (3 if m.group("per").lower().startswith(("month", "mo")) else 1))
+    if amounts:
+        return max(amounts)
+    if type_ in ("free_game", "giveaway", "airdrop", "freebie", "credits", "bounty", "hackathon"):
+        return 0.0
+    if _FREE_RE.search(text or ""):
+        return 0.0
+    return None
+
+
+_EFFORT_DEFAULT_MIN = {"free_game": 3, "freebie": 5, "giveaway": 6, "credits": 10, "cashback": 10, "airdrop": 30, "bank_bonus": 90,
+                        "hackathon": 600, "bounty": 600, "other": 20}
+
+
+def estimate_effort_minutes(text: str, type_: str, prereqs: list[str]) -> int:
+    minutes = _EFFORT_DEFAULT_MIN.get(type_, 20)
+    steps = len(_STEP_WORDS_RE.findall(text or ""))
+    minutes += 2 * min(steps, 8)
+    if "kyc" in prereqs:
+        minutes += 15
+    if "direct_deposit" in prereqs:
+        minutes += 30
+    return minutes
+
+
+def payout_probability(type_: str, payload: dict) -> float:
+    """Chance an eligible participant actually receives the payout. PRIORS, by type -- stated as such."""
+    if type_ in ("free_game", "freebie", "credits"):
+        return 1.0
+    if type_ in ("bank_bonus", "cashback"):
+        return 0.8
+    if type_ == "airdrop":
+        return 0.3
+    if type_ == "bounty":
+        return 0.1
+    if type_ == "giveaway":
+        w, e = payload.get("winners"), payload.get("entrants")
+        return min(1.0, max(0.001, w / e)) if w and e else 0.02
+    return 0.1
+
+
+# ----------------------------------------------------------------------------- scoring
+
+def _log_scale(x: float, lo: float = 1.0, hi: float = 1000.0) -> float:
+    if x is None or x <= lo:
+        return 0.0
+    return min(100.0, 100.0 * math.log10(x / lo) / math.log10(hi / lo))
+
+
+def expected_payout_usd(payload: dict) -> float | None:
+    """Probability-adjusted payout. None when no payout is stated -- unknown is never coded as high."""
+    nominal = payload.get("payout_usd")
+    if nominal is None:
+        return None
+    if payload.get("payout_kind") == "ev":          # already an expected value (hackathon: pool / registrants)
+        return nominal
+    return nominal * payout_probability(payload.get("type") or "other", payload)
+
+
+def value_components(payload: dict) -> dict:
+    t = payload.get("type") or "other"
+    ev = expected_payout_usd(payload)
+    if ev is None:
+        payout = 20.0 if t in ("airdrop", "giveaway") else 25.0   # unknown payout: capped low, never coded as high
+    else:
+        payout = _log_scale(ev)
+    cap = payload.get("capital_usd")
+    if cap is None:
+        capital = 50.0                                           # not stated and normally needed: neutral, not clear
+    elif cap <= 0:
+        capital = 100.0
+    elif cap <= 10:
+        capital = 70.0
+    elif cap <= 50:
+        capital = 45.0
+    elif cap <= 250:
+        capital = 20.0
+    else:
+        capital = 5.0
+    minutes = payload.get("effort_minutes") or _EFFORT_DEFAULT_MIN.get(t, 20)
+    effort = 100.0 if minutes <= 2 else 80.0 if minutes <= 10 else 55.0 if minutes <= 30 else 30.0 if minutes <= 120 else 10.0
+    prereq = 100.0
+    for p in payload.get("prereqs") or []:
+        prereq -= {"kyc": 25, "hard_credit_pull": 35, "soft_credit_pull": 10, "direct_deposit": 20}.get(p, 10)
+    prereq = max(0.0, prereq)
+    geo = {"worldwide": 100.0, "multi": 70.0, "single": 35.0}.get(payload.get("geo"), 55.0)
+    return {"payout": round(payout, 1), "capital": capital, "effort": effort, "prereq": prereq, "geo": geo}
+
+
+VALUE_WEIGHTS = {"payout": 0.35, "capital": 0.25, "effort": 0.15, "prereq": 0.10, "geo": 0.15}
+_TIER_POINTS = {1: 40.0, 2: 28.0, 3: 14.0}
+
+
+def payout_for_nothing_penalty(payload: dict) -> float:
+    """The cross-link. A big nominal payout for next to no capital or effort from a source nobody vets is the shape of a
+    scam, so it costs TRUST. Official (tier 1) sources are exempt. Ratio = nominal payout / (capital + 1 + 0.25/min)."""
+    nominal = payload.get("payout_usd")
+    if not nominal or payload.get("payout_kind") == "ev" or payload.get("source_tier") == 1:
+        return 0.0
+    minutes = payload.get("effort_minutes") or _EFFORT_DEFAULT_MIN.get(payload.get("type") or "other", 20)
+    ratio = nominal / ((payload.get("capital_usd") or 0.0) + 1.0 + 0.25 * minutes)
+    if nominal >= 1000 and ratio > 300:
+        return 50.0
+    if nominal >= 100 and ratio > 100 and payload.get("source_tier") == 3:
+        return 30.0
+    return 0.0
+
+
+def trust_components(payload: dict) -> dict:
+    tier = _TIER_POINTS.get(payload.get("source_tier"), 14.0)
+    corro = min(20.0, 10.0 * len(payload.get("corroborators") or []))
+    terms = payload.get("terms") or {}
+    stated = 5.0 * sum(1 for k in ("deadline", "eligibility", "payout") if terms.get(k))
+    age = payload.get("domain_age_days")
+    if age is None:
+        domain = 6.0                            # unknown is neither old nor new
+    elif age >= 365:
+        domain = 15.0
+    elif age >= 90:
+        domain = 10.0
+    elif age >= 30:
+        domain = 4.0
+    else:
+        domain = 0.0
+    rep = payload.get("reputation") or {}
+    clean = sum(1 for k in ("safe_browsing", "urlhaus") if rep.get(k) == "clean")
+    reputation = {2: 10.0, 1: 6.0, 0: 4.0}[clean]
+    gp = (payload.get("goplus") or {}).get("status")
+    if gp == "unchecked":
+        reputation -= 10.0                      # a token contract we could not check: unknown is never coded as clear
+    penalty = payout_for_nothing_penalty(payload)
+    return {"source_tier": tier, "corroboration": corro, "terms_stated": stated, "domain_age": domain,
+            "reputation": reputation, "payout_for_nothing_penalty": penalty}
+
+
+def score_earning(payload: dict) -> dict:
+    """Breakdown stored in scores.score_breakdown. `value` and `trust` are separate and never combined; the
+    component dicts exist so a card can show WHY. pipeline/score.py sets scores.score = value (weights value 1, trust 0)."""
+    vc = value_components(payload)
+    value = round(sum(VALUE_WEIGHTS[k] * vc[k] for k in VALUE_WEIGHTS), 1)
+    tc = trust_components(payload)
+    trust = round(max(0.0, min(100.0, sum(v for k, v in tc.items() if k != "payout_for_nothing_penalty") - tc["payout_for_nothing_penalty"])), 1)
+    return {"value": value, "trust": trust, "value_components": vc, "trust_components": tc}
+
+
+def passes_floors(breakdown: dict) -> bool:
+    return breakdown.get("trust", 0) >= TRUST_FLOOR and breakdown.get("value", 0) >= VALUE_FLOOR

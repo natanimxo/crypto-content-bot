@@ -95,6 +95,19 @@ def _order_channels_for_shared_caps(conn, channels: list[dict]) -> list[dict]:
     return sorted(channels, key=key)
 
 
+# Categories that carry TWO scores, shown side by side and never combined (operator direction, Phase 5): the card says
+# "value 72 · trust 57", not a single number. For these, scores.score is the value (see pipeline/score.py).
+DUAL_SCORE_CATEGORIES = {"earning_opportunities"}
+
+
+def _score_text(category: str, row: dict) -> str:
+    if category in DUAL_SCORE_CATEGORIES:
+        b = row.get("score_breakdown") or {}
+        if "value" in b and "trust" in b:
+            return f"value {float(b['value']):.0f} · trust {float(b['trust']):.0f}"
+    return f"score {row['score']}/100"
+
+
 def notify_channel(conn, channel: str, categories: list[str], soft_daily_cap: int | None = None) -> int | None:
     all_candidates = []  # list of (category, row)
     for category in categories:
@@ -157,7 +170,7 @@ def notify_channel(conn, channel: str, categories: list[str], soft_daily_cap: in
 
         label = cfg.get("label") or category
         lines.append(
-            f"<b>{html.escape(label)}</b> — score {row['score']}/100\n{html.escape(triage_line)}\n"
+            f"<b>{html.escape(label)}</b> — {_score_text(category, row)}\n{html.escape(triage_line)}\n"
         )
         keyboard_rows.append([
             {"text": "✅ Approve", "callback_data": f"approve:{row['raw_item_id']}"},
@@ -194,21 +207,26 @@ def notify_channel(conn, channel: str, categories: list[str], soft_daily_cap: in
     return notification_id
 
 
-def run() -> None:
+def run(only_channels: list[str] | None = None, job_name: str = "notify") -> None:
+    """`only_channels` scopes a run to some channels (the 2-hour earning_opportunities service notifies CoinCraft only --
+    running the full notify at 2 hours would double every other channel's per-cycle pacing); `job_name` keeps that run's
+    run_logs row and its 3-consecutive-failures alert separate from the main cycle's."""
     load_dotenv()  # no-op in CI (no .env there); picks up local .env when run directly
     conn = get_conn()
     try:
-        with run_log(conn, "notify") as state:
+        with run_log(conn, job_name) as state:
             channels = _order_channels_for_shared_caps(conn, _get_channels(conn))
+            if only_channels is not None:
+                channels = [c for c in channels if c["channel"] in only_channels]
             sent = 0
             for ch in channels:
                 nid = notify_channel(conn, ch["channel"], ch["categories"], ch.get("soft_daily_cap"))
                 if nid:
                     sent += 1
             state["details"]["notifications_sent"] = sent
-        check_and_alert(conn, "notify")
+        check_and_alert(conn, job_name)
     except Exception:
-        check_and_alert(conn, "notify")
+        check_and_alert(conn, job_name)
         raise
     finally:
         conn.close()

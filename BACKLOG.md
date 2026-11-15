@@ -1803,3 +1803,71 @@ received. **Not yet verified from Railway:** whether the Bybit alternates are re
 global feed there -- check `collect_exchange_listings.details.{exchange_errors,newest_announcement}` on the next cycle.
 If Bybit stays blocked, the record is Binance/OKX/KuCoin only and the "four tracked exchanges" wording is wrong.
 
+## Phase 5: earning_opportunities -> CoinCraft (2026-11-15)
+
+CoinCraft is no longer a crypto channel. The category is anything a reader can take part in to earn money or get something of
+value -- giveaways, free games, signup and account bonuses, free credits, hackathon prizes, bounties, airdrops -- for a GLOBAL
+audience (internationally accessible beats single-country, however large). Cadence 2 hours, not 4.
+
+**Built (Telegram + RSS/API first; Discord later, once the operator has set up the hub server and bot):**
+`pipeline/earning.py` (the gate, extraction, both scores -- pure functions), `collectors/earning_opportunities.py`,
+`pipeline/enrich_landing.py` (DeepSeek `deepseek_read_url` on the specific landing page, at write time, never as search),
+the CoinCraft `how_to` voice, an output guard, the digest line, `scripts/collect_earning.py` (the 2-hour entry point), and
+`scripts/check_earning.py` (no-DB regression table: gate, extraction, scores, guard, Telegram parsing, staleness).
+
+**Sources, verified 2026-11-15 from the dev machine -- NOT yet from Railway** (the exchange_listings lesson: a source is not
+verified until it has run there; the first Railway cycle's `collect_earning_opportunities.details.sources` is the check).
+Working: Epic free-games API (official, tier 1), GamerPower API (tier 2, carries the steps), Devpost API (tier 2, now answers
+keyless although an earlier note recorded 403), Doctor of Credit bank-bonus RSS (tier 2), OzBargain / MyDealz / Dealabs
+(tier 3, single-country deals; ~0 pass the floors, by design), Telegram via t.me/s/: airdropfind, airdrops_io,
+incrypted_airdrops, criptinho, EpicSteamGames, FreeGamesNews, r_FreeGamesOnSteam. Not built: GG.deals (API key), GiveawayBase
+(403), Betalist / Startup Perks Directory (404), MaalFreeKaa (DNS fails), Product Hunt GraphQL (token), AirdropAlert (an
+article blog, not opportunities). The three exchange channels (OKXAnnouncements, Bybit_Announcements,
+CoinMarketCapAnnouncements) are CORROBORATION ONLY: they never produce candidates, so an event cannot reach two channels by two
+paths. The six dead/absent handles are not configured (WWGiveaways 92d silent, freestuff_hub last post 2021, FREE_UDEMY_COURSES1
+2024, bugbountyplzen 2022, officialairdropalert 2024, cryptosale_tg and 2top_airdrop do not exist). t.me/s/ exposes views and
+reaction counts per message, so the reaction-count spam filter needs no MTProto (a post under 0.2x the channel's median views is
+dropped, as are posts marked as ads).
+
+**Staleness, as asked:** every configured source is checked each run -- a Telegram channel silent for 30 days, GamerPower/OzBargain/
+MyDealz/Dealabs for 7, Doctor of Credit/Devpost for 14 -- recorded in the run log and alerted once a week per source
+(`earning_source_stale`). Demonstrated on real dormant channels: WWGiveaways (92 days) and freestuff_hub (2,059 days) flag,
+airdropfind (today) does not.
+
+**Rulings (operator, 2026-11-15):** trust floor 40 AND value floor 40, both must pass; order by VALUE descending among survivors
+(trust is a gate, not a ranking dimension); both numbers on every card; the two scores are never blended (`scores.score` IS the
+value, trust is a floor in `select_candidates.COMPONENT_FLOORS`). Trust is deterministic facts only: source tier, independent
+corroboration, terms stated, domain age (RDAP), Safe Browsing, URLhaus, GoPlus. **Dropped on purpose, possible later addition:**
+(1) "does the official domain confirm it" (a `site:` search) and (2) "scam reports found" -- both need a search API, which the
+operator does not want as a paid dependency and does not want to reintroduce search-as-discovery through the back door. The
+operator does the "is this real" judgment by hand. Referral programs are never an input (stripped from links, asserted by a test).
+Safe Browsing and URLhaus are wired but report "unchecked" until keys are supplied (GOOGLE_SAFE_BROWSING_API_KEY, a URLhaus
+auth key) -- unchecked is never coded as clean. CoinCraft now carries a Phase-5 voice profile (`config/channel_voices.yaml`).
+
+**Real-candidate run (362 fetched from 14 sources, dev machine):** 338 stored + 2 held by the gate (both "connect-wallet-to-claim") ->
+178 pass both floors. By type (stored -> eligible): free_game 127 -> 99, hackathon 48 -> 41, giveaway 33 -> 21, bank_bonus 16 -> 12,
+**airdrop 50 -> 4**, freebie 60 -> 0, bounty 3 -> 0. **The trust floor of 40 removes nearly every Telegram airdrop**: tier-3
+channels average trust 25-33, and a post only reaches 40 with an old landing domain plus stated terms plus corroboration. 58
+airdrop/giveaway/credits items had value >= 40 and trust < 40 -- the "worth it but unproven" quadrant, listed by
+`python scripts/earning_report.py --unproven`. The cross-link fired where designed: "Another free $1000 credit for your AI Agent"
+(Telegram, a 4-day-old domain) scores value 80 / trust 0. 63 of 338 landing domains had no RDAP age. Domain age, corroboration and
+terms are the only levers an airdrop has, so if airdrops matter to CoinCraft the operator will want to see those 58 and decide the
+floor or the corroboration rule -- it was not retuned.
+**Dedup:** the same offer arrives from several sources (Epic's official API, GamerPower, EpicSteamGames). `topic_key` is the landing
+page, or a significant-words title key when the link is an aggregator's own redirect, with a 72h cooldown, so it is one candidate.
+
+**Write path:** the post is a how-to; its steps come ONLY from the offer itself (GamerPower's instructions, Epic's fixed steps, or
+a DeepSeek read of the landing page) and are checked in code: no numbered steps when none are available, every step grounded in
+the facts, no amounts the facts do not contain, the deadline stated, no URL / referral / promo code, no "the facts" leaking, one step
+per line. Real generations: Epic, GamerPower, Doctor of Credit and Devpost items all pass (1-2 attempts). **The URL reader worked on
+1 of 3 landing pages tried** (Doctor of Credit); Epic's store and Devpost were not fetched (the service declined or the page is
+script-rendered), so those posts say the steps are on the offer's page rather than inventing them. Cost of a read: ~3,200 prompt
+tokens (~$0.0005); pricing for the tool itself is not in the docs page I could read.
+
+**Cadence / infrastructure -- NEEDS THE OPERATOR:** a separate 2-hour service must be created in Railway (`collect-earning`, start
+`python scripts/collect_earning.py`, cron `0 */2 * * *`, restart NEVER, the same variables as the poller via references). Creating a
+service and its variables is an account/secrets action, so it was not done. Until it exists the category rides the 4-hour cycle
+(`scripts/collect_cycle.py`); both are idempotent. `.railway/railway.ts` needs the matching `service("collect-earning", ...)` entry
+when the service is created. The 2-hour job notifies CoinCraft ONLY (`notify.run(only_channels=["coincraft"], job_name="notify_earning")`),
+because the full notify at 2 hours would double every other channel's per-cycle pacing.
+

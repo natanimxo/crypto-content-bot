@@ -319,3 +319,11 @@ ALTER TABLE channel_config ADD COLUMN IF NOT EXISTS voice_profile JSONB;
 -- scripts/calibration_report.py -- the same observation as before the cleanup. Other reasons stay
 -- excluded: 'channel_retired' (never judged), 'write_failed_stale' (the operator DID approve it).
 ALTER TABLE approvals ADD COLUMN IF NOT EXISTS expired_reason TEXT;
+
+-- 2026-11-15 (Phase 5, earning_opportunities): RDAP domain-age cache. created_on NULL = looked up, no registration
+-- date available (unsupported TLD / privacy). Re-checked after 30 days.
+CREATE TABLE IF NOT EXISTS domain_checks (
+    domain TEXT PRIMARY KEY,
+    created_on DATE,
+    checked_at TIMESTAMPTZ NOT NULL
+);
