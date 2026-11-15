@@ -1725,3 +1725,26 @@ the over-length one. (d) The daily LLM spend alert (threshold $0.10) fired from 
 $0.101 today, production share $0.0007) and said "across 6 calls ... something may be looping" -- it now reports
 production and tagged calls separately and says so when almost all of it is test traffic.
 
+### LLM cost estimator verified against DeepSeek's live balance (2026-11-15)
+
+Prompted by the daily spend alert ("$0.100 across 6 calls"). **The calls were never large and the estimator is right:**
+- *The alert's wording was the bug, not the arithmetic.* `$0.100` was the day's TOTAL spend (701 calls: 695 tagged
+  `voice_compare` test calls = $0.1155, 6 untagged production calls = $0.0007); "6 calls" was only the untagged count.
+  Average call $0.00017, largest $0.00035 (2,167 prompt tokens); nothing near $0.017. The 6 untagged calls are real:
+  operator approvals at 04:56-04:57 and 09:36 UTC (tool_launches, defi_yields, 2x whale_movements). Nothing untagged
+  needed retro-tagging. The alert now splits production from tagged calls and only says "something may be looping"
+  when production spend is at least half the threshold.
+- *Rates match DeepSeek's published pricing* (api-docs.deepseek.com/quick_start/pricing, read 2026-11-15, deepseek-flash):
+  cache hit $0.003 / miss $0.15 / output $0.60 per 1M off-peak, double at peak (01-04 and 06-10 UTC, Mon-Fri, excluding
+  Chinese public holidays -- the estimator has no holiday table, so on those days it over-counts, the safe direction).
+  The model id we send, `deepseek-chat`, is a legacy alias not on that page; the balance test below shows it bills at
+  the Flash rates.
+- *Live balance check* (production provider code path, tagged `cost_calibration`, 184 calls, 608k prompt tokens, all
+  cache misses): estimate $0.0981; balance $1.92 -> $1.83 = $0.09 (true range $0.08-$0.10 given cent rounding of
+  both readings). Agreement within rounding, if anything the estimate is at the conservative end. **The balance lags
+  the calls by minutes**: read 20 seconds after the first burst it showed only $0.05 of the $0.09 and looked like a 2x
+  over-estimate; read minutes later it had settled. Compare balances only after waiting, and only over spends of
+  ~$0.05 or more (it reports whole cents).
+- *Consequence for the guard:* the $0.10 daily threshold is real dollars to within ~20%. Tagged dev/test calls still count
+  toward it (real money), so a heavy build day (like 2026-11-15, 695 test calls) will trip it once; the message now says so.
+
