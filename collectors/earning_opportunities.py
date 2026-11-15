@@ -271,9 +271,12 @@ def build_payload(raw: dict, now: datetime) -> dict:
         src["default_type"] if raw["source"] != "gamerpower" else ("free_game" if extra.get("gp_type") in ("Game", "Loot", "Beta") else earning.classify_type(text, "giveaway")))
     payout = extra.get("payout_usd")
     payout_kind = extra.get("payout_kind")
+    pool_usd = extra.get("pool_usd")
     if payout is None and type_ != "hackathon":
-        stated = earning.extract_reward_usd(text, type_)
-        if stated is not None:
+        stated, kind = earning.extract_reward(text, type_)
+        if stated is not None and kind == "pool":
+            pool_usd = stated          # a total shared among participants: stated, but not what one reader receives
+        elif stated is not None:
             payout, payout_kind = stated, "stated"
     deadline = None
     if extra.get("deadline"):
@@ -287,15 +290,15 @@ def build_payload(raw: dict, now: datetime) -> dict:
     capital = earning.extract_capital_usd(text, type_)
     effort = earning.estimate_effort_minutes(text, type_, prereqs)
     geo = extra.get("geo") or earning.geo_breadth(text, SOURCE_GEO_DEFAULT.get(raw["source"]))
-    eligibility = geo != "unknown" or bool(re.search(r"\b(?:eligib|resident|age|18\+|21\+|must be|requires?)\b", text, re.IGNORECASE))
+    eligibility = earning.has_eligibility(text, geo)
     return {
         "title": raw["title"] or text[:100], "description": text[:1200], "source": raw["source"], "source_name": src["name"],
         "source_tier": src["tier"], "kind": src["kind"], "published_at": raw["published_at"], "url": raw["url"],
         "landing_url": landing_norm, "landing_domain": earning.registrable_domain(host), "referral_link": earning.is_referral_link(landing_raw or ""),
-        "type": type_, "payout_usd": payout, "payout_kind": payout_kind, "pool_usd": extra.get("pool_usd"),
+        "type": type_, "payout_usd": payout, "payout_kind": payout_kind, "pool_usd": pool_usd,
         "deadline": _iso(deadline) if deadline else None, "capital_usd": capital, "effort_minutes": effort, "prereqs": prereqs, "geo": geo,
         "steps_text": extra.get("steps_text") or "",
-        "terms": {"deadline": deadline is not None, "eligibility": eligibility, "payout": payout is not None},
+        "terms": {"deadline": deadline is not None, "eligibility": eligibility, "payout": payout is not None or pool_usd is not None or earning.payout_stated(text)},
         "engagement": {k: extra.get(k) for k in ("views", "reactions", "channel_median_views", "engagement_ratio") if k in extra} or None,
         "topic_key": (landing_norm if landing_norm and earning.domain_of(landing_raw) not in AGGREGATOR_LANDINGS
                       else earning.title_key(raw["title"] or text[:80], type_)),
@@ -311,6 +314,43 @@ _RDAP_URL = "https://rdap.org/domain/{}"
 _EVM_RE = re.compile(r"0x[a-fA-F0-9]{40}")
 
 
+_WHOIS_SERVERS = {"io": "whois.nic.io", "me": "whois.nic.me"}      # ccTLDs with no RDAP server in IANA's bootstrap (checked 2026-11-15)
+_WHOIS_CREATED_RE = re.compile(r"^\s*(?:Creation Date|Created On|Registered On)\s*:\s*(\d{4}-\d{2}-\d{2})", re.IGNORECASE | re.MULTILINE)
+
+
+def parse_whois_created(text: str):
+    """The registration date (a date) from a WHOIS reply, or None."""
+    m = _WHOIS_CREATED_RE.search(text or "")
+    if not m:
+        return None
+    try:
+        return datetime.strptime(m.group(1), "%Y-%m-%d").date()
+    except ValueError:
+        return None
+
+
+def whois_created(domain: str):
+    """WHOIS (TCP 43) registration date for the few TLDs RDAP does not cover. None on any failure -- the age is then UNKNOWN,
+    never guessed. (Outbound port 43 may be blocked on the host; unknown is the safe outcome.)"""
+    import socket
+    server = _WHOIS_SERVERS.get(domain.rsplit(".", 1)[-1])
+    if not server:
+        return None
+    try:
+        with socket.create_connection((server, 43), timeout=15) as s:
+            s.sendall((domain + "\r\n").encode())
+            chunks = []
+            while True:
+                b = s.recv(4096)
+                if not b:
+                    break
+                chunks.append(b)
+        return parse_whois_created(b"".join(chunks).decode("utf-8", "replace"))
+    except Exception as exc:
+        logger.warning("earning: WHOIS lookup failed for %s: %s", domain, exc)
+        return None
+
+
 def domain_age_days(conn, domain: str | None, now: datetime) -> int | None:
     """Days since registration (RDAP), cached 30 days in domain_checks. None = could not be determined."""
     if not domain:
@@ -318,7 +358,10 @@ def domain_age_days(conn, domain: str | None, now: datetime) -> int | None:
     with dict_cursor(conn) as cur:
         cur.execute("SELECT created_on, checked_at FROM domain_checks WHERE domain = %s", (domain,))
         row = cur.fetchone()
-    if row and row["checked_at"] and (now - row["checked_at"]) < timedelta(days=30):
+    # A cached "no date" is trusted only when no fallback exists for the TLD: .io/.me answered nothing to RDAP before the WHOIS
+    # fallback was added, and that cached nothing must not shadow it.
+    retry_via_whois = bool(row and row["created_on"] is None and domain.rsplit(".", 1)[-1] in _WHOIS_SERVERS)
+    if row and row["checked_at"] and (now - row["checked_at"]) < timedelta(days=30) and not retry_via_whois:
         return (now.date() - row["created_on"]).days if row["created_on"] else None
     created = None
     try:
@@ -331,6 +374,8 @@ def domain_age_days(conn, domain: str | None, now: datetime) -> int | None:
     except Exception as exc:
         logger.warning("earning: RDAP lookup failed for %s: %s", domain, exc)
         return None
+    if created is None:
+        created = whois_created(domain)        # .io / .me have no RDAP server
     with dict_cursor(conn) as cur:
         cur.execute("""INSERT INTO domain_checks (domain, created_on, checked_at) VALUES (%s, %s, %s)
                        ON CONFLICT (domain) DO UPDATE SET created_on = EXCLUDED.created_on, checked_at = EXCLUDED.checked_at""", (domain, created, now))
@@ -420,6 +465,32 @@ def resolve_redirect(url: str) -> str | None:
         return r.url
     except Exception:
         return None
+
+
+_AIRDROPS_IO_WEBSITE_RE = re.compile(r'Website:\s*<a href="(/visit/[^"]+)"', re.IGNORECASE)
+
+
+def resolve_project_site(url: str) -> str | None:
+    """Where an aggregator's OWN page for an offer points: the project's real website. Operator ruling 2026-11-15: when an
+    airdrops.io post links to airdrops.io's page, scoring the aggregator's domain age "tells us nothing about the offer" --
+    follow the page to the project's site so RDAP is run on THAT. airdrops.io lists it as "Website: <a href=/visit/ID/>", a
+    redirect; the redirect is followed with a HEAD request and the final host must not be airdrops.io itself. None when the
+    page, the link or the redirect cannot be resolved (the caller then leaves the domain facts UNKNOWN, never the
+    aggregator's)."""
+    host = earning.domain_of(url) or ""
+    if host != "airdrops.io":
+        return None
+    try:
+        page = requests.get(url, headers=HEADERS, timeout=25)
+        m = _AIRDROPS_IO_WEBSITE_RE.search(page.text) if page.status_code == 200 else None
+        if not m:
+            return None
+        final = requests.head("https://airdrops.io" + m.group(1), headers=HEADERS, allow_redirects=True, timeout=20).url
+        time.sleep(0.3)
+    except Exception as exc:
+        logger.warning("earning: could not resolve the project site behind %s: %s", url, exc)
+        return None
+    return final if earning.domain_of(final) not in AGGREGATOR_LANDINGS else None
 
 
 def attach_corroboration(items: list[dict], known: list[dict], reference: list[dict]) -> None:
@@ -539,6 +610,22 @@ def collect() -> int:
                     if final and earning.domain_of(final) not in AGGREGATOR_LANDINGS:
                         p["landing_url"], p["landing_domain"] = earning.normalize_url(final), earning.registrable_domain(earning.domain_of(final))
                         p["topic_key"] = earning.title_key(p["title"], p["type"])
+
+            # An aggregator's own page is not the offer: follow it to the project's real site so the domain facts (RDAP age) and
+            # corroboration describe the PROJECT. If it cannot be resolved the domain is left unknown, never the aggregator's.
+            project_sites: dict[str, str | None] = {}
+            for it in items:
+                p = it["payload"]
+                if p.get("landing_domain") == "airdrops.io" and p.get("landing_url"):
+                    if p["landing_url"] not in project_sites and len(project_sites) < 40:
+                        project_sites[p["landing_url"]] = resolve_project_site(p["landing_url"])
+                    site = project_sites.get(p["landing_url"])
+                    p["aggregator_page"] = p["landing_url"]
+                    if site:
+                        p["landing_url"], p["landing_domain"] = earning.normalize_url(site), earning.registrable_domain(earning.domain_of(site))
+                        p["topic_key"] = p["landing_url"]
+                    else:
+                        p["landing_url"], p["landing_domain"] = None, None
 
             # checkable trust facts, only for what survived the gate
             for it in items:

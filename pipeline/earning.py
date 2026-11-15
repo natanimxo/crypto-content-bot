@@ -157,8 +157,8 @@ def gate(text: str) -> list[str]:
 _FX = {"$": 1.0, "usd": 1.0, "us$": 1.0, "€": 1.08, "eur": 1.08, "£": 1.27, "gbp": 1.27, "aud": 0.65, "a$": 0.65, "cad": 0.73,
        "c$": 0.73, "inr": 0.012, "₹": 0.012, "rs": 0.012}
 _AMOUNT_RE = re.compile(
-    r"(?P<up>up to |worth |over |\+ ?)?(?:(?P<cur1>US\$|A\$|C\$|\$|€|£|₹|USD |EUR |GBP |AUD |CAD |INR |Rs\.? ?)(?P<n1>\d[\d,]*(?:\.\d+)?)(?P<k1>[kKmM])?"
-    r"|(?P<n2>\d[\d,]*(?:\.\d+)?)(?P<k2>[kKmM])? ?(?P<cur2>USD|EUR|GBP|AUD|CAD|INR|USDT|USDC))", re.IGNORECASE)
+    r"(?P<up>up to |worth |over |\+ ?)?(?:(?P<cur1>US\$|A\$|C\$|\$|€|£|₹|USD |EUR |GBP |AUD |CAD |INR |Rs\.? ?)(?P<n1>(?:\d{1,3}(?:[ \u00a0]\d{3})+|\d[\d,]*)(?:\.\d+)?)(?P<k1>[kKmM])?"
+    r"|(?P<n2>(?:\d{1,3}(?:[ \u00a0]\d{3})+|\d[\d,]*)(?:\.\d+)?)(?P<k2>[kKmM])? ?(?P<cur2>USD|EUR|GBP|AUD|CAD|INR|USDT|USDC))", re.IGNORECASE)
 
 
 def extract_amounts_usd(text: str) -> list[float]:
@@ -168,7 +168,7 @@ def extract_amounts_usd(text: str) -> list[float]:
         n = m.group("n1") or m.group("n2")
         k = (m.group("k1") or m.group("k2") or "").lower()
         try:
-            v = float(n.replace(",", ""))
+            v = float(re.sub(r"[,\s\u00a0]", "", n))
         except ValueError:
             continue
         v *= {"k": 1e3, "m": 1e6}.get(k, 1)
@@ -179,9 +179,9 @@ def extract_amounts_usd(text: str) -> list[float]:
     return out
 
 
-_REWARD_BEFORE_RE = re.compile(r"(?:win|won|prize|prizes|reward|rewards|bonus|earn|earning|get|receive|receiving|credit|credits|gift ?card|voucher|cash ?back|worth|valued? at|up to|free|claim|giveaway|pool of|total of)\W{0,3}[^\w$€£]{0,25}$", re.IGNORECASE)
-_REWARD_AFTER_RE = re.compile(r"^\s{0,2}(?:/\w+ )?(?:bonus|credits?|reward|rewards|prize|prizes|gift ?card|voucher|cash ?back|in (?:prizes|rewards|credits|tokens|bonuses)|worth|value|giveaway|airdrop|free)", re.IGNORECASE)
-_NOT_REWARD_RE = re.compile(r"raise[ds]?|funding|valuation|tvl|market ?cap|\bfdv\b|\bround\b|series [a-d]\b|volume|investors?|\bprice[ds]?\b|\bcosts?\b|msrp|\brrp\b|\bwas \W|\bonly \W|\bjust \W|\bsave\b|saving|\boff\b|per month|/mo\b|a month|subscription|deposit|minimum|balance|spend|purchase|\bbuy\b|\bfrom \W|\bnow \W|\bfor \W|instead of", re.IGNORECASE)
+_REWARD_BEFORE_RE = re.compile(r"(?:win|won|prize|prizes|reward|rewards|bonus|earn|earning|get|receive|receiving|credit|credits|gift ?card|voucher|cash ?back|worth|valued? at|up to|free|claim|giveaway|pool of|total of|приз\w*|наград\w*|бонус\w*|получ\w*|выигра\w*|раздел\w*|пул\w*|pr[eê]mio\w*|recompensa\w*|b[oô]nus|ganhe|ganhar|receba|receber)(?:\W+\w{1,4}){0,2}\W{0,3}[^\w$€£]{0,25}$", re.IGNORECASE)
+_REWARD_AFTER_RE = re.compile(r"^\s{0,2}(?:/\w+ )?(?:bonus|credits?|reward|rewards|prize|prizes|gift ?card|voucher|cash ?back|in (?:prizes|rewards|credits|tokens|bonuses)|worth|value|giveaway|airdrop|free)|бонус\w*|наград\w*|приз\w*|в токен\w+|pr[eê]mio\w*|b[oô]nus|recompensa\w*|em pr[eê]mios", re.IGNORECASE)
+_NOT_REWARD_RE = re.compile(r"raise[ds]?|привлек\w*|раунд\w*|инвестиц\w*|оценк\w*|капитализац\w*|объ[её]м\w*|стоимост\w*|levantou|rodada|avalia[cç][aã]o|pre[cç]o|funding|valuation|tvl|market ?cap|\bfdv\b|\bround\b|series [a-d]\b|volume|investors?|\bprice[ds]?\b|\bcosts?\b|msrp|\brrp\b|\bwas \W|\bonly \W|\bjust \W|\bsave\b|saving|\boff\b|per month|/mo\b|a month|subscription|deposit|minimum|balance|spend|purchase|\bbuy\b|\bfrom \W|\bnow \W|\bfor \W|instead of", re.IGNORECASE)
 
 
 def extract_reward_usd(text: str, type_: str = "other") -> float | None:
@@ -208,6 +208,31 @@ def extract_reward_usd(text: str, type_: str = "other") -> float | None:
     return best
 
 
+_POOL_RE = re.compile(
+    r"\bpool\b|\bpool of\b|\bshare[ds]? (?:among|between|by)\b|\bsplit\b|\bdistribut\w+|\bprize pool\b|"
+    r"\bпул\b|раздел\w+|поровну|между участник\w+|между всеми|"
+    r"sorteio|dividid\w+|\bdividir\b|distribu[ií]\w+", re.IGNORECASE)
+
+
+def extract_reward(text: str, type_: str = "other") -> tuple[float | None, str | None]:
+    """(amount, kind): kind is 'pool' when the amount is a total SHARED among participants ("разделяем $70 000", "a $50,000 prize
+    pool") -- not what one reader receives, so it must never be treated as a per-person payout (it would trip the
+    payout-for-nothing penalty and inflate value) -- else 'stated'. Found by re-running the airdrop channels after the multilingual fix:
+    the Russian reward cues started detecting "Разделяем $70 000 ..." and four items collapsed to trust 0."""
+    amount = extract_reward_usd(text, type_)
+    if amount is None:
+        return None, None
+    t = text or ""
+    for m in _AMOUNT_RE.finditer(t):
+        vals = extract_amounts_usd(m.group(0))
+        if vals and abs(vals[0] - amount) < 0.5:
+            around = t[max(0, m.start() - 45):m.end() + 45]
+            if _POOL_RE.search(around):
+                return amount, "pool"
+            break
+    return amount, "stated"
+
+
 _MONTHS = {m: i for i, m in enumerate(["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"], 1)}
 _DEADLINE_CUE = r"(?:until|till|ends?|ending|expires?|expiring|deadline|valid (?:until|through)|through|by|before|only)"
 _DATE_TEXT_RE = re.compile(
@@ -220,6 +245,66 @@ _RANGE_END_RE = re.compile(r"(?P<m>jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|d
 _RANGE2_RE = re.compile(r"(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.? \d{1,2}\s*[-–]\s*(?P<m>jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.? (?P<d>\d{1,2})(?:,? (?P<y>20\d\d))?", re.IGNORECASE)
 # "(11/14 Only)": the cue comes AFTER the date
 _ONLY_RE = re.compile(r"(?P<m>\d{1,2})/(?P<d>\d{1,2})\s*only", re.IGNORECASE)
+
+
+# ---- Multilingual term detection (operator ruling 2026-11-15: "0 of 34 Russian items scored any 'terms stated' -- that is a
+# detector gap, not an absence of terms"). Russian and Portuguese patterns for the three things "terms stated" asks: a
+# deadline, who can take part, and what is paid. Deterministic on purpose; if recall on real items stays poor, a narrow cheap
+# LLM extraction (structured output, Python decides what it means) is the sanctioned fallback.
+_RU_MONTHS = {"янв": 1, "фев": 2, "мар": 3, "апр": 4, "мая": 5, "май": 5, "июн": 6, "июл": 7, "авг": 8, "сен": 9, "окт": 10, "ноя": 11, "дек": 12}
+_PT_MONTHS = {"jan": 1, "fev": 2, "mar": 3, "abr": 4, "mai": 5, "jun": 6, "jul": 7, "ago": 8, "set": 9, "out": 10, "nov": 11, "dez": 12}
+_RU_MONTH_RE = r"(?:январ[яь]|феврал[яь]|марта?|апрел[яь]|ма[яй]|июн[яь]|июл[яь]|август[а]?|сентябр[яь]|октябр[яь]|ноябр[яь]|декабр[яь])"
+_PT_MONTH_RE = r"(?:janeiro|fevereiro|mar[cç]o|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro)"
+_RU_DEADLINE_RE = re.compile(
+    r"(?:до|по|дедлайн|заканчива\w+|законч\w+|завершит\w+|окончани\w+|срок\w*|успе\w+)\W{0,10}(?:до\W{0,3})?(?P<d>\d{1,2})\s+(?P<m>" + _RU_MONTH_RE + r")(?:\s+(?P<y>20\d\d))?|"
+    r"(?:до|по|дедлайн|срок\w*)\W{0,6}(?P<d2>\d{1,2})\.(?P<m2>\d{1,2})(?:\.(?P<y2>20\d\d|\d\d))?", re.IGNORECASE)
+_PT_DEADLINE_RE = re.compile(
+    r"(?:at[eé]|prazo|termina|encerra\w*|v[aá]lido at[eé]|acaba)\W{0,12}(?:dia\s+)?(?P<d>\d{1,2})(?:\s+de\s+|\s+)(?P<m>" + _PT_MONTH_RE + r")(?:\s+de\s+(?P<y>20\d\d))?|"
+    r"(?:at[eé]|prazo|termina|encerra\w*)\W{0,8}(?:dia\s+)?(?P<d2>\d{1,2})/(?P<m2>\d{1,2})(?:/(?P<y2>20\d\d|\d\d))?", re.IGNORECASE)
+
+
+def _deadline_multilingual(text: str) -> tuple[int, int, int | None] | None:
+    """(month, day, year-or-None) from a Russian or Portuguese deadline phrase, or None."""
+    for rx, months in ((_RU_DEADLINE_RE, _RU_MONTHS), (_PT_DEADLINE_RE, _PT_MONTHS)):
+        m = rx.search(text or "")
+        if not m:
+            continue
+        if m.group("m"):
+            mo = months.get(m.group("m").lower()[:3].replace("ç", "c"))
+            return (mo, int(m.group("d")), int(m.group("y")) if m.group("y") else None) if mo else None
+        mo, d = int(m.group("m2")), int(m.group("d2"))
+        y = int(m.group("y2")) if m.group("y2") else None
+        if y is not None and y < 100:
+            y += 2000
+        if 1 <= mo <= 12:
+            return (mo, d, y)
+    return None
+
+
+_ELIGIBILITY_RE = re.compile(
+    r"\b(?:eligib|resident|18\+|21\+|must be|requires?|required)|"
+    r"только для|жител|резидент|необходим|требует|нужно|для пользовател|доступн\w+ (?:в|для)|участв\w+ могут|верификаци|\bкус\b|"
+    r"apenas para|somente para|residentes|requisito|necess[aá]rio|precisa|[eé] preciso|dispon[ií]vel (?:para|em)|maiores de 18|verifica[cç][aã]o", re.IGNORECASE)
+_PAYOUT_UNIT_RE = re.compile(
+    r"\d[\d\s.,]*\s*(?:tokens?|токен\w*|points?|поинт\w*|очк\w*|\bxp\b|usdt|usdc|usd|bnb|eth|sol)(?!\w)|"
+    r"\d[\d\s.,]*\s*(?:\$|€|£|%)|"
+    r"(?:\$|€|£)\s?\d[\d\s.,]*", re.IGNORECASE)
+_PAYOUT_CUE_RE = re.compile(
+    r"reward|prize|bonus|airdrop|pool|earn|win\b|giveaway|credit|"
+    r"награ\w+|приз\w*|бонус\w*|пул\b|раздел\w+|разыгр\w+|получ\w+|дроп\w*|аирдроп\w*|"
+    r"pr[eê]mio|recompensa|b[oô]nus|ganhe|ganhar|receba|sorteio|distribui\w+", re.IGNORECASE)
+
+
+def has_eligibility(text: str, geo: str | None = None) -> bool:
+    """Does the text say who can take part (or does it state a geography)?"""
+    return (geo not in (None, "unknown")) or bool(_ELIGIBILITY_RE.search(text or ""))
+
+
+def payout_stated(text: str) -> bool:
+    """Does the text state WHAT is paid, in a currency or a token/point quantity, next to a reward word -- in any of the
+    three languages? (The USD value may be unknowable for a token amount; the fact that a payout is stated still counts.)"""
+    t = text or ""
+    return bool(_PAYOUT_UNIT_RE.search(t) and _PAYOUT_CUE_RE.search(t))
 
 
 def extract_deadline(text: str, now: datetime) -> datetime | None:
@@ -249,6 +334,10 @@ def extract_deadline(text: str, now: datetime) -> datetime | None:
             mo, d, y = _MONTHS[r.group("m").lower()[:3]], int(r.group("d")), int(r.group("y")) if r.group("y") else None
         elif o:
             mo, d = int(o.group("m")), int(o.group("d"))
+    if not (mo and d):
+        ml = _deadline_multilingual(text)
+        if ml:
+            mo, d, y = ml
     if not (mo and d and 1 <= mo <= 12 and 1 <= d <= 31):
         return None
     try:
@@ -346,7 +435,7 @@ def extract_prereqs(text: str) -> list[str]:
     return out
 
 
-_RECURRING_FEE_RE = re.compile(r"(?:US\$|\$|€|£)\s?(?P<n>\d[\d,]*(?:\.\d+)?)\s*(?:/|per |a |each )\s*(?P<per>month|mo|year|yr|annum)", re.IGNORECASE)
+_RECURRING_FEE_RE = re.compile(r"(?:US\$|\$|€|£)\s?(?P<n>\d[\d,]*(?:\.\d+)?)\s*(?:/|per |a |each )\s*(?P<per>month|mo\b|year|yr\b|annum)", re.IGNORECASE)
 
 
 def extract_capital_usd(text: str, type_: str) -> float | None:

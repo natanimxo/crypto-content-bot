@@ -174,6 +174,8 @@ def render_earning_opportunities(raw_item: dict) -> str:
     if p.get("payout_usd") is not None:
         kind = {"ev": "expected ", "worth": "worth ", "stated": "stated "}.get(p.get("payout_kind"), "")
         parts.append(f"{kind}${p['payout_usd']:,.0f}")
+    elif p.get("pool_usd"):
+        parts.append(f"shared pool ${p['pool_usd']:,.0f}")
     else:
         parts.append("payout not stated")
     cap = p.get("capital_usd")

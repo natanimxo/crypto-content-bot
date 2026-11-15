@@ -169,6 +169,70 @@ def main():
     check("numbered steps are rejected when none are available", bool(G(post(ok_body, ok_steps, "Needs an account."), no_steps)), True)
     check("'the steps are on the page' is fine when none are available", G(post(ok_body, "The steps are on the offer's page.", "Needs an account."), no_steps), [])
 
+    # ---- multilingual terms (Russian / Portuguese): a detector gap, not an absence of terms (0 of 34 Russian items scored any)
+    for text, want in [
+        ("Раздача завершится до 21 ноября, успейте", (2026, 11, 21)),
+        ("Дедлайн: 30.11.2026", (2026, 11, 30)),
+        ("Регистрация открыта по 5 декабря", (2026, 12, 5)),
+        ("Prazo: até 21 de novembro de 2026", (2026, 11, 21)),
+        ("A campanha termina dia 3 de dezembro", (2026, 12, 3)),
+        ("Válido até 15/12", (2026, 12, 15)),
+        ("Просто новости о проекте без дат", None),
+    ]:
+        got = E.extract_deadline(text, NOW)
+        check(f"deadline (ru/pt) {text[:40]!r}", (got.year, got.month, got.day) if got else None, want)
+    for text, want in [
+        ("Доступно только для жителей ЕС, нужна верификация", True),
+        ("Необходимо пройти KYC", True),
+        ("Disponível para residentes do Brasil", True),
+        ("Requisito: conta verificada", True),
+        ("Jumper запустили агрегатор перпов", False),
+    ]:
+        check(f"eligibility (ru/pt) {text[:40]!r}", E.has_eligibility(text), want)
+    for text, want in [
+        ("Разделяем 1 000 000 токенов KNTQ между участниками", True),
+        ("Забираем приветственные бонусы до $15 000", True),
+        ("Ganhe 50 USDT de prêmio no sorteio", True),
+        ("Пул 100000 $ на всех", True),
+        ("Новости рынка за неделю", False),
+    ]:
+        check(f"payout stated (ru/pt) {text[:40]!r}", E.payout_stated(text), want)
+    check("a Russian reward amount is read", E.extract_reward_usd("Разделяем награду в $4 000 за качественный контент", "airdrop"), 4000.0)
+    check("a Russian funding round is not a reward", E.extract_reward_usd("Проект привлек $20M в раунде", "airdrop"), None)
+
+    # ---- a pool shared among participants is NOT a per-person payout (it must not trip the payout-for-nothing penalty)
+    check("a Russian shared pool is a pool", E.extract_reward("Разделяем $70 000 на TrueNorth и торгуем", "airdrop"), (70000.0, "pool"))
+    check("an English prize pool is a pool", E.extract_reward("A $50,000 prize pool shared among all traders", "airdrop"), (50000.0, "pool"))
+    check("a gift card is what one reader gets", E.extract_reward("Win a $500 gift card", "giveaway"), (500.0, "stated"))
+    check("a bonus is what one reader gets", E.extract_reward("Get a $250 bonus", "bank_bonus"), (250.0, "stated"))
+    check("no reward cue, no amount", E.extract_reward("Proekt raised $20M", "airdrop"), (None, None))
+
+    # ---- WHOIS fallback for the ccTLDs RDAP does not cover (.io / .me): parse only here, the lookup is covered live
+    from collectors import earning_opportunities as W
+    check("whois creation date parses", str(W.parse_whois_created("Domain Name: ARC.IO\nCreation Date: 2013-02-28T00:00:00Z\nRegistry Expiry Date: 2027-02-28")), "2013-02-28")
+    check("whois without a creation date is unknown", W.parse_whois_created("No match for domain"), None)
+
+    # ---- aggregator landing: follow airdrops.io's page to the PROJECT's site, never score the aggregator's own domain
+    from collectors import earning_opportunities as AG
+
+    class _Page:
+        def __init__(self, status, text="", url=""):
+            self.status_code, self.text, self.url = status, text, url
+    real_get, real_head = AG.requests.get, AG.requests.head
+    try:
+        AG.requests.get = lambda *a, **k: _Page(200, 'x<li>Website: <a href="/visit/abc123/" target="_blank">go</a></li>')
+        AG.requests.head = lambda *a, **k: _Page(200, "", "https://elysium.kinetiq.xyz/")
+        check("airdrops.io page resolves to the project site", AG.resolve_project_site("https://airdrops.io/elysium"), "https://elysium.kinetiq.xyz/")
+        AG.requests.head = lambda *a, **k: _Page(200, "", "https://airdrops.io/somewhere/")
+        check("a redirect that stays on airdrops.io is NOT accepted", AG.resolve_project_site("https://airdrops.io/elysium"), None)
+        AG.requests.get = lambda *a, **k: _Page(200, "<html>no website list here</html>")
+        check("no Website link -> unknown, not the aggregator", AG.resolve_project_site("https://airdrops.io/elysium"), None)
+        AG.requests.get = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("down"))
+        check("a fetch failure -> unknown", AG.resolve_project_site("https://airdrops.io/elysium"), None)
+        check("a non-aggregator link is not touched", AG.resolve_project_site("https://example.com/claim"), None)
+    finally:
+        AG.requests.get, AG.requests.head = real_get, real_head
+
     # ---- Safe Browsing / URLhaus: mocked (no keys yet). The invariant that matters: a check that could not run is never "clean".
     from collectors import earning_opportunities as RC
 

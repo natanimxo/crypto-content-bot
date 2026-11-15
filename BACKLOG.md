@@ -1910,3 +1910,43 @@ Restart policy Never; Region sfo, 1 replica; variables as references to the poll
 "30 */2 * * *", restartPolicyType: "NEVER" }, env: { DATABASE_URL: preserve(), DEEPSEEK_API_KEY: preserve(), TELEGRAM_BOT_TOKEN: preserve(),
 TELEGRAM_OPERATOR_CHAT_ID: preserve(), TELEGRAM_ALLOWED_USER_IDS: preserve() } })` and add it to `resources`.
 
+### Phase 5 follow-ups, round 2 (2026-11-15, operator rulings)
+
+**Safe Browsing and URLhaus: SKIPPED -- blocked on LICENSING, not on effort.** Operator ruling: Safe Browsing v4 is non-commercial only
+("not for sale or revenue generating purposes") and the channels sell ads -- a clear no; URLhaus' community tier has the same commercial
+ambiguity and its lookup request format could not be confirmed. "Unchecked, never clean" stays the honest default. The code
+(`reputation_checks`) is dormant without keys and has a mocked test; nothing calls either service. Revisit only if a
+commercially-licensed source is chosen (Google Web Risk, abuse.ch's paid tier) -- that is a licensing/cost decision, the engineering is done.
+
+**Fix the blind spots, do NOT raise a tier (operator ruling).** Raising airdrops_io / incrypted from tier 14 to 24 would have passed 14 more
+items "without the system knowing anything more about them" and would mask the same blindness on every future item from those sources.
+Two fixes instead:
+1. *Multilingual term detection* (`pipeline/earning.py`): Russian and Portuguese patterns for a deadline ("до 21 ноября", "Дедлайн:
+   30.11.2026", "até 21 de novembro", "termina dia 3 de dezembro"), who can take part, and what is paid (a currency or a token/point
+   quantity next to a reward word, e.g. "Разделяем 1 000 000 токенов", "Ganhe 50 USDT de prêmio"); space-separated thousands ("$4 000")
+   now parse; reward cues and funding-round words exist in all three languages. Deterministic; if recall on real items stays poor, a
+   narrow cheap LLM extraction call on items that already cleared the gate is the sanctioned fallback (small volume, structured
+   output, Python decides what the answer means).
+2. *Resolve the real project domain on aggregator posts*: an airdrops.io post's landing page is airdrops.io's own page, whose "Website:" link
+   is a redirect to the project (`/visit/<id>/` -> e.g. elysium.kinetiq.xyz). The collector follows it so RDAP and corroboration describe the
+   PROJECT; if it cannot be resolved the domain is left UNKNOWN, never the aggregator's. Verified live on 4 pages (elysium, arc, duelbet,
+   extended -> their real sites). Side effect: several channels mentioning the same project now share a landing URL, which is what
+   independent corroboration needs.
+Also fixed: a latent regex bug (a backspace character where `` was meant) in the recurring-fee capital pattern.
+
+**Result of the two fixes (airdrop channels, real candidates, 58 items; before -> after):** pass both floors **5 -> 25**; fail with value >= 40
+**52 -> 32**. The 32: 9 correctly rejected (a domain 2-31 days old, or the payout-for-nothing penalty), 5 genuinely unproven (nothing
+stated, no second source), 13 with partial evidence still under 40 (e.g. an established domain with one stated term and no second source;
+9 of them sit at 38-34 -- one fact short), and only **5 still blind** (4 Russian posts with no detectable term, 1 airdrops.io roundup
+with no single project). So ~84% of the remaining failures are real reasons, ~16% blind spots -- the floor is doing its job. Russian
+term recall: 27 of 34 items now score at least one term (was 0 of 34). airdrops.io: 12 of 13 resolve to a project domain, 11 with a
+known age. Found and fixed while measuring: (1) the Russian reward cues made "Разделяем $70 000 ..." (a pool shared among traders) read as a
+per-person payout and tripped the payout-for-nothing penalty (four items to trust 0) -- pools are now recorded as pools (`extract_reward`)
+and exempt; (2) `.io` / `.me` have NO RDAP server (IANA bootstrap), so 15 items had unknown domain age -- a WHOIS (TCP 43) fallback was added
+and verified locally (arc.io 2013, zkverify.io 2024, airdrops.io 2017); **port 43 may be blocked on Railway** -- then the age stays unknown, never
+guessed; a cached "no date" for .io/.me no longer shadows it.
+**Open, flagged for the operator, not changed:** (a) roundup / digest posts (10 of the 58; 6 pass) are scored as one offer and take the
+FIRST linked project's domain facts -- a multi-project post is not a single opportunity; (b) "up to $15,000 welcome bonus" is read as a
+nominal payout and trips the penalty for tier-3 sources (WEEX/OKX exchange sign-up bonuses score trust 0) -- defensible, but it is a
+judgement call; (c) near misses: 9 items at trust 34-38.
+
