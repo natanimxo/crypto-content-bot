@@ -61,9 +61,27 @@ def main():
         finally:
             conn.close()
 
+    def probe():
+        """Once a day, probe the candidate income sources FROM HERE (Railway) and record what they returned: a source is not verified
+        until it has run on Railway -- OKX served a different feed from there and Bybit refused it. Read-only; see pipeline/source_probe.py."""
+        from pipeline import source_probe
+        conn = get_conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT 1 FROM run_logs WHERE job_name = 'source_probe' AND started_at > now() - interval '20 hours' LIMIT 1")
+                if cur.fetchone():
+                    return
+            results = source_probe.probe_all()
+            keep = ("id", "dir", "status", "kind", "items", "newest", "bytes", "secs", "auth_or_blocked", "login_wall", "error", "sample", "html_title", "snippet")
+            with run_log(conn, "source_probe") as state:
+                state["details"]["results"] = [{k: r[k] for k in keep if k in r} for r in results]
+        finally:
+            conn.close()
+
     guarded("collect_earning_opportunities", collect)
     guarded("score_earning_opportunities", score)
     guarded("notify_earning", lambda: notify.run(only_channels=CHANNELS, job_name="notify_earning"))
+    guarded("source_probe", probe)         # after notify: a slow probe must never delay a card
     conn = get_conn()
     try:
         llm_usage.run_checks(conn)
