@@ -96,9 +96,10 @@ last one left off.
 
 ## Section 3 — Channels
 
-Four channels are fed by this pipeline (a fifth, Crypto Notebook, was
-removed 2026-09-20 -- the operator writes its content by hand, so it has no
-row in `channel_config` and nothing routes to it; see below). Only the categories with a working collector are
+Five channels are in `channel_config` (Crypto Notebook was removed 2026-09-20 and **restored 2026-11-15** in the
+Phase 3 channel remap; **CoinCraft has no categories** until Phase 5, when it becomes the non-crypto
+earning-opportunities channel -- its row is kept on purpose, and a channel with zero categories is safe: `bot/notify.py`
+visits it, finds no candidates and sends nothing). Only the categories with a working collector are
 actually seeded into `channel_config.categories` (see `config/channel_config.yaml`);
 the rest are listed there for record-keeping but skipped by `bot/notify.py`
 via `category_config_exists()` until built.
@@ -107,7 +108,8 @@ via `category_config_exists()` until built.
 |---|---|---|---|
 | `crypto_wall_street` | Crypto Wall Street | `whale_movements`, `news` (shared via alternation) | `default` |
 | `alpha_edge_crypto` | Alpha Edge Crypto | `defi_yields`, `news` (shared via alternation) | `us` |
-| `coincraft` | CoinCraft | `gems_security`, `hacks_exploits` | `default` |
+| `crypto_notebook` | Crypto Notebook | `gems_security`, `hacks_exploits` (moved from CoinCraft 2026-11-15) | `default` |
+| `coincraft` | CoinCraft | *(none -- earning opportunities arrive in Phase 5)* | `default` |
 
 **`web3_jobs` retired 2026-11-14** (operator direction, Phase 2): the RemoteOK feed had been dry for two
 months (3 notified cards in 60 days). Removed from both channels and from the collect cycle; the collector,
@@ -310,7 +312,9 @@ voice, the category supplies only facts.** Before this, voice lived in
 and on Alpha Edge through the same prompt and read identically. A profile holds
 `name`, `summary`, `tone`, `title_style`, `title_check`, `paragraphs` (the body
 structure, a role per paragraph), `length: {min, max}`, `person`, `hashtags`,
-`keep_context_lines`, `banned_words` (see `pipeline/channel_voice.py`). A channel
+`keep_context_lines`, `banned_words`, and `length_excludes_risk_line` (default false; true only for
+Crypto Notebook, whose 600-900 explainer cannot hold a gems risk line of 91-417 characters) (see
+`pipeline/channel_voice.py`). A channel
 with no profile (CoinCraft until its Phase 5 profile) keeps the legacy category
 voice. What a category contributes now lives in `pipeline/post_facts.py` and is
 deliberately in code, not config: its **facts**, a voice-neutral **content

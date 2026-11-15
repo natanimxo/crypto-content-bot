@@ -142,6 +142,21 @@ def facts_gems_security(p: dict) -> str:
 {chr(10).join(f'  - {flag}' for flag in red_flags)}{unchecked_note}"""
 
 
+def facts_hacks_exploits(p: dict) -> str:
+    tvl = p.get("protocol_tvl_usd")
+    tvl_note = f"${tvl:,.0f}" if tvl is not None else "not tracked by DefiLlama"
+    returned = p.get("returned_funds")
+    recovery_note = f"${returned:,.0f} recovered" if returned else "no funds recovered as of this report"
+    return f"""Facts about this incident (confirmed by DefiLlama's own incident tracker, not your judgment):
+- Protocol/platform: {p.get('protocol_name')}
+- Amount lost: ${p.get('amount_usd', 0):,.0f}
+- Chain: {p.get('chain') or 'not specified'}
+- DefiLlama's own classification: {p.get('classification') or 'unclassified'}
+- Technique (DefiLlama's own categorization): {p.get('technique') or 'not specified'}
+- This protocol's current tracked TVL: {tvl_note}
+- Recovery status: {recovery_note}"""
+
+
 @dataclass(frozen=True)
 class FactSpec:
     audience: str | None          # who the CATEGORY's content is about, when not the channel's default crypto readership
@@ -290,6 +305,32 @@ FACT_SPECS: dict[str, FactSpec] = {
             "do with their own money. No crypto framing, no financial-advice language. "
             "Summarize in your own words; never copy the excerpt's sentences or structure. "
             + _NO_SCORES
+        ),
+    ),
+    "hacks_exploits": FactSpec(
+        audience=None,
+        facts=facts_hacks_exploits,
+        content_brief=(
+            "State what happened on this specific incident using ONLY the facts above, giving the "
+            "classification and technique as DefiLlama's own finding. Then explain the GENERAL "
+            "mechanism behind that kind of failure -- what the weakness is and why it can be "
+            "exploited -- so a reader understands the pattern, not just this one loss."
+        ),
+        # A channel whose last paragraph says "how to spot it yourself ... on any pool or token" would
+        # be asking for token/pool checks on an incident that has neither. The category restates the
+        # role for incidents; the channel's tone, length and person still apply.
+        role_overrides={3: (
+            "How to spot it yourself: what a reader can look at on ANY protocol to see whether it has "
+            "this kind of exposure (public audit reports, admin and key controls, oracle sources, "
+            "upgrade permissions) -- where to look and what to look for. Never a verdict on any named "
+            "protocol, and never an instruction about what to do with money."
+        )},
+        guardrails=(
+            "HARD RULES, no exceptions: report only what the facts confirm. Never speculate on who "
+            "caused this or why -- no attacker identity or motive, nothing about an inside job. Never "
+            "use hedge-words that smuggle in an unconfirmed claim ('allegedly', 'apparently', "
+            "'suspected to be'). Never say a recovery is likely or unlikely beyond the recovery status "
+            "given. Never tell the reader what to do with their own money. " + _NO_SCORES
         ),
     ),
     "gems_security": FactSpec(

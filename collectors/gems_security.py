@@ -1,5 +1,5 @@
-"""gems/security screening collector (Phase 2/3, 2026-09-11) -- CoinCraft
-(originally Crypto Notebook; rerouted 2026-09-20).
+"""gems/security screening collector (Phase 2/3, 2026-09-11) -- Crypto Notebook
+(originally Crypto Notebook, then CoinCraft 2026-09-20, back to Crypto Notebook 2026-11-15).
 
 Discovery source (operator-approved plan): reuses the SAME DefiLlama /pools
 feed defi_yields already collects, rather than a separate "new token" feed --
@@ -191,14 +191,12 @@ MAX_GOPLUS_CALLS_PER_RUN = 60
 # entire reason every collector held unconditionally. Existing held rows
 # are untouched by this; only new candidates from here on are affected.
 #
-# RE-FLIPPED to True 2026-11-14 (operator direction): gems_security is being
-# moved from CoinCraft to Crypto Notebook, and CoinCraft becomes a non-crypto
-# earning-opportunities channel. Until that remap lands, every new gems row is
-# inserted HELD so nothing drains into CoinCraft. Flip back to False when the
-# category's channel routing is changed. Rows already held (the 2026-11-14
-# backlog, 173 at the time) stay held until released with
-# scripts/hold_candidates.py.
-HOLD_ALL_CANDIDATES = True
+# RE-FLIPPED to True 2026-11-14 (operator direction) while gems_security was being moved from CoinCraft
+# to Crypto Notebook, so nothing drained into a channel that was changing purpose; flipped BACK to False
+# 2026-11-15 in the Phase 3 remap, AFTER routing (channel_config) pointed at crypto_notebook and the 143
+# held backlog rows were released with scripts/hold_candidates.py. (All 143 scored below the review
+# threshold of 50 -- releasing them produced no candidates; see BACKLOG.md, Phase 3.)
+HOLD_ALL_CANDIDATES = False
 
 
 def fetch_pools() -> list[dict]:

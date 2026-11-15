@@ -23,6 +23,11 @@ voice_profile JSONB):
                                          own tracking" blockquotes (dropped on a
                                          terse wire-service channel)
     banned_words                         words the post must not contain
+    length_excludes_risk_line            bool (default false) -- do not count the code-built
+                                         evidence/risk line toward `length`. Only for a channel
+                                         whose range cannot hold it (Crypto Notebook, 2026-11-15:
+                                         a gems risk line is 91-417 characters, median 290, in a
+                                         600-900 range meant for the explainer itself)
 
 Everything checkable is checked in code on the generated output (find_voice_
 issues), not just requested in the prompt -- same "prompts get ignored, a
@@ -54,7 +59,10 @@ VOICES_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__fil
 _TAG_RE = re.compile(r"<[^>]+>")
 _WS_RE = re.compile(r"\s+")
 _SECOND_PERSON_RE = re.compile(r"\b(you|your|yours|yourself|you're|you'll|you've|you'd)\b", re.IGNORECASE)
-_FIRST_OR_SECOND_RE = re.compile(r"\b(you|your|yours|yourself|we|our|ours|us|let's)\b", re.IGNORECASE)
+# "us" is matched case-SENSITIVELY (the pronoun, lower case): case-insensitively it also matched "US" the
+# country, so every Wall Street story about US ETFs / the US Treasury failed the third-person check on every
+# retry (found 2026-11-15: "Bitcoin Hits Four-Month Low as ETF Outflows Persist", 6 of 6 drafts rejected).
+_FIRST_OR_SECOND_RE = re.compile(r"\b(?:(?i:you|your|yours|yourself|we|our|ours|let's)|us)\b")
 _NUMBER_RE = re.compile(r"\d")
 _QUESTION_OPENERS = {
     "why", "how", "what", "when", "where", "who", "which", "is", "are", "can", "does",
@@ -81,6 +89,7 @@ class VoiceProfile:
     keep_context_lines: bool = True
     title_check: str | None = None
     banned_words: list[str] = field(default_factory=list)
+    length_excludes_risk_line: bool = False
 
 
 def parse_profile(channel: str, d: dict) -> VoiceProfile:
@@ -96,6 +105,7 @@ def parse_profile(channel: str, d: dict) -> VoiceProfile:
             person=d.get("person"), hashtags=bool(d.get("hashtags", True)),
             keep_context_lines=bool(d.get("keep_context_lines", True)),
             title_check=d.get("title_check"), banned_words=list(d.get("banned_words") or []),
+            length_excludes_risk_line=bool(d.get("length_excludes_risk_line", False)),
         )
     except (KeyError, TypeError) as exc:
         raise VoiceProfileError(f"voice profile for '{channel}' is missing/invalid: {exc!r}") from exc
@@ -187,7 +197,7 @@ Title: {profile.title_style}{rules_block}
 STRUCTURE -- the body is exactly {n} paragraph{'s' if n != 1 else ''}, in this order:
 {roles}
 
-LENGTH -- the finished post must be {profile.length_min}-{profile.length_max} characters, enforced by code. A fixed {overhead_chars} characters are added around your prose (the leading emoji and any context lines), so the title plus all paragraphs together must total between {prose_min} and {prose_max} characters. AIM FOR ABOUT {prose_aim}: drafts that aim for the limit overshoot it. Count your characters before answering.
+LENGTH -- the finished post must be {profile.length_min}-{profile.length_max} characters, enforced by code. A fixed {overhead_chars} characters are added around your prose (the leading emoji and any context lines), so the title plus all paragraphs together must total between {prose_min} and {prose_max} characters. AIM FOR ABOUT {prose_aim} (roughly {prose_aim // 6} words in all, about {max(1, (prose_aim - 40) // (6 * n))} words per paragraph): drafts that aim for the limit overshoot it. Count your characters before answering.
 
 {facts}
 
@@ -232,7 +242,22 @@ def find_voice_issues(profile: VoiceProfile, parsed: dict, post_chars: int | Non
     if post_chars is not None and not (profile.length_min <= post_chars <= profile.length_max):
         mid = (profile.length_min + profile.length_max) // 2
         if post_chars > profile.length_max:
-            fix = f"cut about {post_chars - mid} characters (aim for roughly {mid} in total)"
+            # Asked for 15% more than the arithmetic needs: observed 2026-11-15 (Crypto Notebook), a
+            # rewrite told to "cut 413" cut ~160, then ~100, then ~30 -- the model under-corrects
+            # every time, so asking for the exact amount converges in four rounds instead of two.
+            cut = int((post_chars - mid) * 1.15)
+            # Per-paragraph targets: "cut 287 characters" over a three-paragraph draft left the model
+            # trimming a clause here and there (1180 -> 1069 -> 975 -> 949); a target for EACH paragraph
+            # is something it can actually hit.
+            lens = [len(p.strip()) for p in paragraphs]
+            total = len(title) + sum(lens)
+            shrink = max(0.2, (total - cut) / total) if total else 1.0
+            targets = [max(40, int(n * shrink)) for n in lens]
+            per_para = "; ".join(f"paragraph {i} is {n} characters, make it about {t}"
+                                 for i, (n, t) in enumerate(zip(lens, targets), 1))
+            fix = (f"cut about {cut} characters, roughly {max(1, cut // 6)} words, by deleting whole clauses "
+                   f"-- not just adjectives. {per_para}; keep the title about {len(title)} characters "
+                   f"(aim for roughly {mid} in total)")
         else:
             fix = f"add about {mid - post_chars} characters (aim for roughly {mid} in total)"
         issues.append(f"the finished post is {post_chars} characters but must be {profile.length_min}-"
@@ -248,8 +273,11 @@ def find_voice_issues(profile: VoiceProfile, parsed: dict, post_chars: int | Non
 
     if profile.person == "second" and not _SECOND_PERSON_RE.search(prose):
         issues.append("write in the second person -- address the reader as \"you\"/\"your\"")
-    if profile.person == "third" and _FIRST_OR_SECOND_RE.search(prose):
-        issues.append("write in the third person only -- remove \"you\", \"your\", \"we\", \"our\"")
+    if profile.person == "third":
+        hit = _FIRST_OR_SECOND_RE.search(prose)
+        if hit:
+            issues.append(f"write in the third person only -- remove \"{hit.group(0)}\" (and any other "
+                          f"\"you\", \"your\", \"we\", \"our\")")
 
     for word in profile.banned_words:
         if re.search(rf"\b{re.escape(word)}\b", prose, re.IGNORECASE):

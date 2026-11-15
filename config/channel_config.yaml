@@ -11,7 +11,8 @@
 # "🌾 DEFI YIELDS → CoinCraft"), since the operator needs to know at a
 # glance which channel a post is for when copying it themselves.
 #
-# Channel -> category mapping, rebalanced 2026-09-20 (operator direction):
+# Channel -> category mapping, rebalanced 2026-09-20 (operator direction; crypto_notebook was
+# brought back 2026-11-15 -- see the PHASE 3 REMAP note below):
 # crypto_notebook was REMOVED entirely -- the operator writes its content by
 # hand now, so nothing in this pipeline feeds it and it has no row here or in
 # the DB (scripts/seed_config.py prunes DB rows that aren't in this file, so
@@ -21,6 +22,18 @@
 # distinct identity (they're priced separately for ads); web3_jobs stays
 # shared across both via pipeline/channel_router.py's alternation.
 # bot/notify.py skips any category that doesn't have a category_config row yet.
+#
+# PHASE 3 REMAP, 2026-11-15 (operator direction): crypto_notebook is BACK, as the educational
+# channel -- gems_security + hacks_exploits move to it from CoinCraft (voice: config/channel_voices.yaml).
+# CoinCraft is left with NO categories on purpose: it becomes the non-crypto earning-opportunities
+# channel in Phase 5, and the row has to survive until then. A channel with `categories: []` is
+# safe everywhere it is read (bot/notify.py visits it, finds no candidates, sends nothing). The
+# category -> channel table is now:
+#   crypto_wall_street: news (shared), whale_movements
+#   alpha_edge_crypto:  news (shared), defi_yields (whole -- NOT split)
+#   crypto_notebook:    gems_security, hacks_exploits
+#   hustle_to_million:  tool_launches, startup_jobs, macro_news
+#   coincraft:          (none until Phase 5)
 #
 # chat_ids below were given explicitly by the operator (not inferred from any
 # ordering) — confirmed correct as of the mapping they provided.
@@ -84,20 +97,25 @@ alpha_edge_crypto:
   soft_daily_cap: 16   # raised from 12 -- see 2026-09-30 note above
   chat_id: "-1001992993907"
 
+crypto_notebook:
+  display_name: "Crypto Notebook"
+  categories:
+    - gems_security   # moved here from coincraft 2026-11-15 (Phase 3). Rare by design: category
+                       # soft_daily_cap 4, and only 15 gems rows have ever scored >= the review
+                       # threshold (50) since 2026-09-11, 9 of them notified.
+    - hacks_exploits  # moved here from coincraft 2026-11-15 (Phase 3): confirmed incidents are the
+                       # same "learn to spot it" material as the security findings.
+  region_profile: default
+  soft_daily_cap: 8    # = the two category caps (4 + 4), as for the other channels; combined demand is
+                        # realistically ~1-2/day, so this is a backstop, not a bottleneck
+  chat_id: "-1002905948541"   # the channel's original chat_id, from before it was removed 2026-09-20; unused (see top)
+
 coincraft:
   display_name: "CoinCraft"
-  categories:
-    # airdrops paused — see alpha_edge_crypto's note above, same reasoning.
-    - gems_security   # moved here from crypto_notebook 2026-09-20. Rare by design
-                       # (category soft_daily_cap: 4, ~0-1 real candidates/day) -- a
-                       # deliberate low-volume feed, kept off the volume-sensitive channel.
-    - hacks_exploits  # added 2026-09-30 (operator direction) -- confirmed post-hack
-                       # incidents (DefiLlama), complements gems_security's pre-hack risk
-                       # screening without splitting defi_yields away from alpha_edge_crypto.
-                       # See category_config.yaml for threshold/scoring reasoning.
+  categories: []    # DELIBERATELY EMPTY from 2026-11-15 (Phase 3): becomes the non-crypto earning-
+                     # opportunities channel in Phase 5. Keep the row -- see the Phase 3 note at the top.
   region_profile: default
-  soft_daily_cap: 12   # unchanged -- combined demand here stays well under 12
-                        # (gems_security ~0-1/day, hacks_exploits ~1-3/week, web3_jobs dry)
+  soft_daily_cap: 12   # unchanged; meaningless while it has no categories
   chat_id: "-1002704031424"
 
 hustle_to_million:

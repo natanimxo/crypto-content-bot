@@ -21,7 +21,8 @@ from pipeline import channel_voice, llm, post_format
 from pipeline.db import dict_cursor
 from pipeline.http import get_json
 from pipeline.post_facts import (
-    FACT_SPECS, WHALE_READ_CONVENTION, facts_defi_yields, facts_gems_security, facts_job_listing, facts_tool_launches,
+    FACT_SPECS, WHALE_READ_CONVENTION, facts_defi_yields, facts_gems_security, facts_hacks_exploits, facts_job_listing,
+    facts_tool_launches,
     facts_whale_movements, facts_wire_story,
 )
 from pipeline.score import load_category_config
@@ -1082,22 +1083,11 @@ def build_hacks_exploits_prompt(cfg: dict, region_profile: str, raw_item: dict, 
     _generate_checked_write) is the code-level enforcement; this prompt is
     the first layer, not the only one."""
     p = raw_item["payload"]
-    tvl = p.get("protocol_tvl_usd")
-    tvl_note = f"${tvl:,.0f}" if tvl is not None else "not tracked by DefiLlama"
-    returned = p.get("returned_funds")
-    recovery_note = f"${returned:,.0f} recovered" if returned else "no funds recovered as of this report"
 
     return f"""You are writing prose for a crypto security/education channel. Voice: {cfg.get('voice', 'educational')}.
 {cfg.get('prompt_notes', '')}
 
-Facts about this incident (confirmed by DefiLlama's own incident tracker, not your judgment):
-- Protocol/platform: {p.get('protocol_name')}
-- Amount lost: ${p.get('amount_usd', 0):,.0f}
-- Chain: {p.get('chain') or 'not specified'}
-- DefiLlama's own classification: {p.get('classification') or 'unclassified'}
-- Technique (DefiLlama's own categorization): {p.get('technique') or 'not specified'}
-- This protocol's current tracked TVL: {tvl_note}
-- Recovery status: {recovery_note}
+{facts_hacks_exploits(p)}
 
 Return ONLY a JSON object (no markdown fence, no commentary) with exactly these
 three string fields:
@@ -1621,7 +1611,7 @@ NEUTRALITY_CHECKED_CATEGORIES = {"macro_news"}
 SPECULATION_CHECKED_CATEGORIES = {"hacks_exploits"}
 
 
-VOICE_MAX_RETRIES = 3  # after the first draft; each retry carries the specific issues found (2 left ~1 in 12 writes failing on a length miss by a few characters)
+VOICE_MAX_RETRIES = 5  # after the first draft; each retry shows the rejected draft + the specific issues. 2 left ~1 in 12 short writes failing by a few characters; 3 left 3 of 15 Crypto Notebook gems writes (the longest, 600-900) 1-50 characters over, 2026-11-15
 
 
 def _get_display_name(conn, channel: str) -> str:
@@ -1655,8 +1645,13 @@ def _generate_voiced_write(conn, category: str, prompt: str, check, *, model_ove
             return parsed, attempt, history
         history.append(issues)
         logger.warning("write_post: voice/guard issues for category=%s attempt=%d: %s", category, attempt, issues)
+        # The rejected draft itself is shown (2026-11-15, found by the Crypto Notebook batch: 18 of 21
+        # writes failed). Before, the retry carried only the issue list -- "cut about 725 characters" about
+        # a draft the model could not see -- so each retry was a fresh draw with the same tendency to
+        # overshoot (1475, 1454, 1536, 1382 chars against 600-900). Editing a visible draft converges.
         current = prompt + (
-            "\n\nYOUR PREVIOUS DRAFT WAS REJECTED. Fix every one of these and keep the guardrails:\n"
+            "\n\nYOUR PREVIOUS DRAFT WAS REJECTED:\n" + str(raw).strip()
+            + "\n\nRewrite it, fixing every one of these, and keep the guardrails:\n"
             + "\n".join(f"- {i}" for i in issues)
         )
     raise RuntimeError(
@@ -1688,9 +1683,12 @@ def generate_post_with_report(conn, category: str, channel: str, raw_item: dict,
     emoji = cfg.get("emoji") or ""
 
     def assemble(title: str, paragraphs: list[str], *, final: bool) -> str:
+        # `final=False` is the LENGTH measurement. A profile that excludes the evidence/risk line from its
+        # range (Crypto Notebook) measures without it; the posted text always has it.
+        measured_risk_line = None if (not final and profile.length_excludes_risk_line) else risk_line
         return post_format.assemble_post(
             emoji=emoji, title=title, narrative="", why_it_matters=None, paragraphs=paragraphs,
-            history_line=history_line, risk_line=risk_line,
+            history_line=history_line, risk_line=measured_risk_line,
             source_name=elements.get("source_name") if final else None,
             hashtags=(cfg.get("hashtags") or []) if (final and profile.hashtags) else [],
             context_line=context_line,

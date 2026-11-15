@@ -123,6 +123,11 @@ crypto_notebook:
       How to spot it yourself: concrete steps a reader can take to check the same
       thing on any pool or token -- where to look and what to look for.
   length: {min: 600, max: 900}
+  # The evidence/risk line (gems: every GoPlus finding, verbatim; hacks: the DefiLlama facts) is built by
+  # code and shown under the post, so it is NOT counted toward the explainer's 600-900. Measured
+  # 2026-11-15 over every gems row that ever cleared threshold: the line is 91-417 characters (median
+  # 290), which left the three-paragraph explainer 183-510 characters and failed 14 of 15 writes.
+  length_excludes_risk_line: true
   person: null
   hashtags: true
   keep_context_lines: true
