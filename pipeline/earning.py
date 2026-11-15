@@ -23,9 +23,13 @@ THE RULES (operator-approved 2026-11-15):
      it" and "scam reports found" -- were dropped on purpose; see BACKLOG.)
   4. Cross-link: an absurd payout-for-nothing ratio PENALISES TRUST, it does not just look attractive -- the same
      lesson as the 462% APY pools.
-  5. Whether a referral program exists is NEVER an input. Referral parameters are stripped from every link and no
-     function here reads a referral field except to report that a link had one (`referral_link`, display only).
-     check_earning.py asserts the scorer's output does not change when it is toggled.
+  5. Referral (CHANGED 2026-11-16 -- operator override; see BACKLOG). The original rule was "a referral program is never an input";
+     that was the assistant's recommendation, not the operator's decision, and the operator overrode it. Now: a referral program the
+     reader can earn from adds up to REFERRAL_VALUE_MAX (12) points to VALUE -- a real factor that cannot override payout, capital and
+     effort. Availability is also a plain fact on the card, separate from both scores. UNCHANGED: referral parameters are still stripped
+     from every stored link (the operator adds his own at forward time; nobody else's code goes out under his name).
+     THE ONE CASE WHERE A REFERRAL IS A WARNING: when the referral earnings exceed the base payout the offer is shaped like a recruitment
+     scheme (MLM / pyramid). Then the referral adds NO value and costs TRUST (referral_recruitment_penalty).
 """
 
 import math
@@ -162,7 +166,8 @@ _FX = {"$": 1.0, "usd": 1.0, "us$": 1.0, "€": 1.08, "eur": 1.08, "£": 1.27, "
        "c$": 0.73, "r$": 0.18, "brl": 0.18, "inr": 0.012, "₹": 0.012, "rs": 0.012}
 _AMOUNT_RE = re.compile(
     r"(?P<up>up to |worth |over |\+ ?)?(?:(?P<cur1>R\$|US\$|A\$|C\$|\$|€|£|₹|USD |EUR |GBP |AUD |CAD |INR |Rs\.? ?)(?P<n1>(?:\d{1,3}(?:[ \u00a0]\d{3})+|\d[\d,]*)(?:\.\d+)?)(?P<k1>[kKmM])?"
-    r"|(?P<n2>(?:\d{1,3}(?:[ \u00a0]\d{3})+|\d[\d,]*)(?:\.\d+)?)(?P<k2>[kKmM])? ?(?P<cur2>USD|EUR|GBP|AUD|CAD|INR|BRL|USDT|USDC))", re.IGNORECASE)
+    r"|(?P<n2>(?:\d{1,3}(?:[ \u00a0]\d{3})+|\d[\d,]*)(?:\.\d+)?)(?P<k2>[kKmM])? ?(?P<cur2>USD|EUR|GBP|AUD|CAD|INR|BRL|USDT|USDC)"
+    r"|(?P<n3>(?:\d{1,3}(?:[  ]\d{3})+|\d[\d,]*)(?:\.\d+)?)(?P<k3>[kKmM])?\s?(?P<cur3>[$€£])(?!\w))", re.IGNORECASE)   # "50$" (Russian / Portuguese style: the sign AFTER the number)
 
 
 def _to_number(n: str) -> float:
@@ -180,9 +185,9 @@ def _to_number(n: str) -> float:
 def extract_amounts_usd(text: str) -> list[float]:
     out = []
     for m in _AMOUNT_RE.finditer(text or ""):
-        cur = (m.group("cur1") or m.group("cur2") or "$").strip().lower().rstrip(".")
-        n = m.group("n1") or m.group("n2")
-        k = (m.group("k1") or m.group("k2") or "").lower()
+        cur = (m.group("cur1") or m.group("cur2") or m.group("cur3") or "$").strip().lower().rstrip(".")
+        n = m.group("n1") or m.group("n2") or m.group("n3")
+        k = (m.group("k1") or m.group("k2") or m.group("k3") or "").lower()
         try:
             v = _to_number(n)
         except ValueError:
@@ -195,7 +200,7 @@ def extract_amounts_usd(text: str) -> list[float]:
     return out
 
 
-_REWARD_BEFORE_RE = re.compile(r"(?:win|won|prize|prizes|reward|rewards|bonus|earn|earning|get|receive|receiving|credit|credits|gift ?card|voucher|cash ?back|worth|valued? at|up to|free|claim|giveaway|pool of|total of|приз\w*|наград\w*|бонус\w*|получ\w*|выигра\w*|раздел\w*|пул\w*|pr[eê]mio\w*|recompensa\w*|b[oô]nus|ganhe|ganhar|receba|receber|giving away|give away|разыгрыва\w*|сумму|pr[eê]mio total|pool de|sorteio de|каждому\w*|каждого|cada)(?:\W+\w{1,9}){0,2}\W{0,3}[^\w$€£]{0,25}$", re.IGNORECASE)
+_REWARD_BEFORE_RE = re.compile(r"(?:win|won|prize|prizes|reward|rewards|bonus|earn|earning|get|receive|receiving|credit|credits|gift ?card|voucher|cash ?back|worth|valued? at|up to|free|claim|giveaway|pool of|total of|приз\w*|наград\w*|бонус\w*|получ\w*|выигра\w*|раздел\w*|пул\w*|pr[eê]mio\w*|recompensa\w*|b[oô]nus|ganhe|ganhar|receba|receber|giving away|give away|разыгрыва\w*|забира\w*|заб[её]рем|сумму|pr[eê]mio total|pool de|sorteio de|каждому\w*|каждого|cada)(?:\W+\w{1,9}){0,2}\W{0,3}[^\w$€£]{0,25}$", re.IGNORECASE)
 _REWARD_AFTER_RE = re.compile(r"^\s{0,2}(?:/\w+ )?(?:bonus|credits?|reward|rewards|prize|prizes|gift ?card|voucher|cash ?back|in (?:prizes|rewards|credits|tokens|bonuses)|worth|value|giveaway|airdrop|free)|бонус\w*|наград\w*|приз\w*|в токен\w+|pr[eê]mio\w*|b[oô]nus|recompensa\w*|em pr[eê]mios|shared|distributed|up for grabs|split|pool|each|per (?:person|winner|user)|разыгрываем|за каждого|cada|por pessoa", re.IGNORECASE)
 _NOT_REWARD_RE = re.compile(r"raise[ds]?|привлек\w*|раунд\w*|инвестиц\w*|оценк\w*|капитализац\w*|объ[её]м\w*|стоимост\w*|levantou|rodada|avalia[cç][aã]o|pre[cç]o|funding|valuation|tvl|market ?cap|\bfdv\b|\bround\b|series [a-d]\b|volume|investors?|\bprice[ds]?\b|\bcosts?\b|msrp|\brrp\b|\bwas \W|\bonly \W|\bjust \W|\bsave\b|saving|\boff\b|per month|/mo\b|a month|subscription|deposit|minimum|balance|spend|purchase|\bbuy\b|\bfrom \W|\bnow \W|\bfor \W|instead of", re.IGNORECASE)
 
@@ -554,6 +559,73 @@ def payout_probability(type_: str, payload: dict) -> float:
     return 0.1
 
 
+# ----------------------------------------------------------------------------- referral program (operator override 2026-11-16)
+
+# "Can the reader invite others and earn from it?" -- detected in the OFFER'S TEXT, clause by clause, in en / ru / pt. Deliberately not
+# matched: the poster's own code ("use my referral code": that is a promo for the poster, not something the reader earns from), negations
+# ("no referral needed"), and generic "we invite you".
+_REFERRAL_CUE = (
+    r"\breferrals\b|\breferral\b(?! (?:code|link|id)\b)|\brefer(?:s|ring)? (?:a |your |any )?(?:friends?|others?|someone|people|users?)\b|\brefer[- ]?a[- ]?friend\b|"
+    r"\binvit(?:e|es|ing) (?:a |your |any )?(?:friends?|others?|someone|people|new users?|users?)\b|\binvite (?:&|and) earn\b|"
+    r"\b(?:each|every|per) (?:friend|referral|invitee|person (?:you )?(?:refer|invite))|\bbring(?:ing)? (?:a )?friends?\b|\baffiliate (?:program|commission|link)\b|"
+    r"реферал\w*|пригласи\w* (?:друг\w*|знаком\w*|пользовател\w*)|приглаш[её]нн\w+|за приглашени\w+|приглаш\w+ друз\w+|"
+    r"\bза (?:каждого )?друг\w*|\bкаждого друга|приведи \w+ друг\w*|"
+    r"\bindica[cç][aã]o\b|\bindique\b|\bindicar\b|\bconvide (?:amigos?|algu[eé]m)\b|\b(?:cada|por) (?:amigo|indicado)\b|\bprograma de afiliad\w+")
+_REFERRAL_CUE_RE = re.compile(_REFERRAL_CUE, re.IGNORECASE)
+_REFERRAL_NEG_RE = re.compile(r"(?:\bno|\bwithout|\bnot|\bnon|\bsem|\bбез|\bне)[- ]?(?:\w+ )?$", re.IGNORECASE)
+_AMT_LEAD = r"(?:(?:R\$|[$€£])?\s?\d[\d\s.,]*\s?(?:[$€£]|usd\w*|eur)?\s{0,2}(?:for |per )?)?"      # "... and $25 for each friend": the amount may precede the cue
+_CLAUSE_SPLIT_RE = re.compile(r"[\n;•·]+|(?<=[.!?])\s+|(?:,\s*|\s+)(?:and|plus|&|\+|и|e|y)\s+(?=" + _AMT_LEAD + r"(?:" + _REFERRAL_CUE + r"))|,\s+(?=(?:" + _REFERRAL_CUE + r"))", re.IGNORECASE)
+
+
+def _is_referral_clause(clause: str) -> bool:
+    m = _REFERRAL_CUE_RE.search(clause)
+    return bool(m) and not _REFERRAL_NEG_RE.search(clause[max(0, m.start() - 14):m.start()])
+
+
+def split_referral(text: str) -> tuple[str, list[str]]:
+    """(the text WITHOUT its referral clauses, the referral clauses). The base text is what the payout is read from: a referral
+    bonus must never be mistaken for the offer's own payout, or 'referral earnings exceed the base payout' could never be told."""
+    clauses = [c for c in _CLAUSE_SPLIT_RE.split(text or "") if c and c.strip()]
+    ref = [c for c in clauses if _is_referral_clause(c)]
+    base = " ".join(c for c in clauses if not _is_referral_clause(c))
+    return base, ref
+
+
+def extract_referral(text: str) -> dict:
+    """{'available': bool, 'amount_usd': what one referral pays the reader, or None when no figure is stated (a percentage or no figure)}."""
+    _, ref = split_referral(text)
+    if not ref:
+        return {"available": False, "amount_usd": None}
+    amounts = [a for c in ref for a in extract_amounts_usd(c) if a < 1_000_000]
+    return {"available": True, "amount_usd": max(amounts) if amounts else None}
+
+
+REFERRAL_VALUE_MAX = 12.0            # points of the 100-point value score a referral program can ever add ("around 10-15%")
+REFERRAL_RECRUITMENT_PENALTY = 30.0  # trust points lost when referral earnings exceed the base payout
+
+
+def referral_info(payload: dict) -> dict:
+    """Availability, the stated per-referral amount, and whether the offer is recruitment-shaped. `available` means the TEXT describes a
+    program the reader can earn from. A referral code on the source's own link (`link_code`) is only an inference -- the poster has a code,
+    so a program probably exists -- and a fact on a card must not be an inference, so it is reported separately and never scored."""
+    ref = payload.get("referral") or {}
+    in_text = bool(ref.get("available"))
+    in_link = bool(payload.get("referral_link"))
+    amount = ref.get("amount_usd")
+    base = max([x for x in (payload.get("payout_usd"), payload.get("pool_usd"), payload.get("unclear_usd")) if x] or [0.0])
+    recruitment = bool(in_text and amount and amount > base)      # referral earnings are the larger (or only) stated earnings
+    return {"available": in_text, "link_code": in_link, "amount_usd": amount, "recruitment_shape": recruitment}
+
+
+def referral_component(payload: dict) -> float:
+    """0-100: how much a referral program is worth to the reader. Nothing for no program, nothing for a recruitment-shaped one (a
+    warning, not a feature), a modest 50 for a program with no stated figure, up to 100 for a large stated per-referral payout."""
+    info = referral_info(payload)
+    if not info["available"] or info["recruitment_shape"]:
+        return 0.0
+    return max(50.0, _log_scale(info["amount_usd"])) if info["amount_usd"] else 50.0
+
+
 # ----------------------------------------------------------------------------- scoring
 
 def _log_scale(x: float, lo: float = 1.0, hi: float = 1000.0) -> float:
@@ -651,18 +723,22 @@ def trust_components(payload: dict) -> dict:
     if gp == "unchecked":
         reputation -= 10.0                      # a token contract we could not check: unknown is never coded as clear
     penalty = payout_for_nothing_penalty(payload)
+    recruit = REFERRAL_RECRUITMENT_PENALTY if referral_info(payload)["recruitment_shape"] else 0.0
     return {"source_tier": tier, "corroboration": corro, "terms_stated": stated, "domain_age": domain,
-            "reputation": reputation, "payout_for_nothing_penalty": penalty}
+            "reputation": reputation, "payout_for_nothing_penalty": penalty, "referral_recruitment_penalty": recruit}
 
 
 def score_earning(payload: dict) -> dict:
     """Breakdown stored in scores.score_breakdown. `value` and `trust` are separate and never combined; the
     component dicts exist so a card can show WHY. pipeline/score.py sets scores.score = value (weights value 1, trust 0)."""
     vc = value_components(payload)
-    value = round(sum(VALUE_WEIGHTS[k] * vc[k] for k in VALUE_WEIGHTS), 1)
+    base = round(sum(VALUE_WEIGHTS[k] * vc[k] for k in VALUE_WEIGHTS), 1)
+    bonus = round(REFERRAL_VALUE_MAX / 100.0 * referral_component(payload), 1)      # 0 .. REFERRAL_VALUE_MAX points, added on top
+    value = round(min(100.0, base + bonus), 1)
     tc = trust_components(payload)
-    trust = round(max(0.0, min(100.0, sum(v for k, v in tc.items() if k != "payout_for_nothing_penalty") - tc["payout_for_nothing_penalty"])), 1)
-    return {"value": value, "trust": trust, "value_components": vc, "trust_components": tc}
+    trust = round(max(0.0, min(100.0, sum(v for k, v in tc.items() if not k.endswith("penalty")) - sum(v for k, v in tc.items() if k.endswith("penalty")))), 1)
+    return {"value": value, "trust": trust, "value_base": base, "referral_bonus": bonus, "referral": referral_info(payload),
+            "value_components": vc, "trust_components": tc}
 
 
 def passes_floors(breakdown: dict) -> bool:

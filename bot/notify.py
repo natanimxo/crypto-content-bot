@@ -104,7 +104,12 @@ def _score_text(category: str, row: dict) -> str:
     if category in DUAL_SCORE_CATEGORIES:
         b = row.get("score_breakdown") or {}
         if "value" in b and "trust" in b:
-            return f"value {float(b['value']):.0f} · trust {float(b['trust']):.0f}"
+            text = f"value {float(b['value']):.0f} · trust {float(b['trust']):.0f}"
+            ref = b.get("referral")
+            if ref is not None:        # a fact beside the two scores, not part of either: can the reader invite others and earn
+                text += " · referral " + ("yes ⚠ recruitment-shaped" if ref.get("recruitment_shape") else "yes" if ref.get("available")
+                                          else "unconfirmed (source link carried a code)" if ref.get("link_code") else "no")
+            return text
     return f"score {row['score']}/100"
 
 

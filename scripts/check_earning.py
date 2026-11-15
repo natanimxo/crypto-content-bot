@@ -107,8 +107,44 @@ def main():
     base = {"source": "tg:criptinho", "source_tier": 3, "type": "airdrop", "payout_usd": 100.0, "payout_kind": "stated", "capital_usd": 0.0,
             "effort_minutes": 30, "geo": "worldwide", "domain_age_days": 800, "landing_domain": "x.io",
             "terms": {"deadline": True, "eligibility": True, "payout": True}, "corroborators": [], "reputation": {"safe_browsing": "unchecked", "urlhaus": "unchecked"}}
-    with_ref, without_ref = dict(base, referral_link=True), dict(base, referral_link=False)
-    check("a referral program changes neither score", E.score_earning(with_ref), E.score_earning(without_ref))
+    # ---- referral counts in VALUE (operator override 2026-11-16): capped, never overrides the rest, and a recruitment shape is a WARNING
+    nr = E.score_earning(base)
+    wr = E.score_earning(dict(base, referral={"available": True, "amount_usd": None}))
+    wbig = E.score_earning(dict(base, referral={"available": True, "amount_usd": 50.0}))
+    check("a referral program raises value (not trust)", (wr["value"] > nr["value"], wr["trust"] == nr["trust"]), (True, True))
+    check("a stated per-referral amount is worth at least as much as an unstated one", wbig["value"] >= wr["value"], True)
+    check("the referral bonus is capped at 12 points", max(E.score_earning(dict(base, referral={"available": True, "amount_usd": 90.0}))["referral_bonus"], wr["referral_bonus"]) <= E.REFERRAL_VALUE_MAX, True)
+    weak = dict(base, payout_usd=5.0, capital_usd=300.0, effort_minutes=200, geo="single", referral={"available": True, "amount_usd": None})
+    check("a mediocre offer WITH a referral program does not outrank a strong one without",
+          E.score_earning(weak)["value"] < E.score_earning(base)["value"], True)
+    check("a referral code on the source's own link is NOT availability (an inference): reported, never scored",
+          (E.referral_info(dict(base, referral_link=True))["available"], E.referral_info(dict(base, referral_link=True))["link_code"],
+           E.score_earning(dict(base, referral_link=True)) == dict(nr, referral=E.referral_info(dict(base, referral_link=True)))), (False, True, True))
+    check("russian 'за каждого друга' is a referral clause", E.extract_referral("‼ ЗАБИРАЕМ ДО 15$ ЗА КАЖДОГО ДРУГА ОТ FOLK AI ‼"), {"available": True, "amount_usd": 15.0})
+    check("no referral -> no bonus", (nr["referral_bonus"], nr["referral"]["available"]), (0.0, False))
+    rec = E.score_earning(dict(base, payout_usd=10.0, referral={"available": True, "amount_usd": 50.0}))
+    plain = E.score_earning(dict(base, payout_usd=10.0))
+    check("referral earnings above the base payout: no value bonus, trust cut by the recruitment penalty",
+          (rec["referral_bonus"], rec["trust_components"]["referral_recruitment_penalty"], rec["trust"] < plain["trust"], rec["referral"]["recruitment_shape"]), (0.0, 30.0, True, True))
+    check("referral earnings BELOW the base payout are not recruitment-shaped", E.score_earning(dict(base, payout_usd=100.0, referral={"available": True, "amount_usd": 10.0}))["referral"]["recruitment_shape"], False)
+    check("a referral-only offer (no base payout, a stated referral amount) is recruitment-shaped",
+          E.score_earning(dict(base, payout_usd=None, payout_kind=None, referral={"available": True, "amount_usd": 20.0}))["referral"]["recruitment_shape"], True)
+    # ---- extraction: the referral clause is split from the base text so a referral bonus is never read as the offer's payout
+    x = "Sign up and get a $50 bonus. Invite friends and earn $25 for each referral."
+    check("referral amount read from its clause", E.extract_referral(x), {"available": True, "amount_usd": 25.0})
+    check("the payout is read from the text without the referral clause", E.extract_reward(E.split_referral(x)[0], "bank_bonus"), (50.0, "stated"))
+    check("same sentence: 'get $50 and refer a friend for $25'", E.extract_referral("Get a $50 bonus and refer a friend for $25"), {"available": True, "amount_usd": 25.0})
+    check("same sentence: base kept", E.extract_reward(E.split_referral("Get a $50 bonus and refer a friend for $25")[0], "bank_bonus"), (50.0, "stated"))
+    check("no program in the text", E.extract_referral("Complete 3 quests to qualify for the airdrop"), {"available": False, "amount_usd": None})
+    check("'no referral needed' is not a program", E.extract_referral("Free to join, no referral needed")["available"], False)
+    check("the poster's own code is not a program", E.extract_referral("Use my referral code ABC for a bonus")["available"], False)
+    check("a percentage program: available, no amount", E.extract_referral("Earn 20% of your referrals' rewards"), {"available": True, "amount_usd": None})
+    check("russian", E.extract_referral("Бонус $30. За каждого приглашённого друга +$5"), {"available": True, "amount_usd": 5.0})
+    check("'50$ and 50$ per friend': the sign AFTER the number is read, and the base is kept (equal amounts are not recruitment-shaped)",
+          (E.extract_referral("‼ ЗАБИРАЕМ 50$ И 50$ ЗА ДРУГА ОТ PumpFun ‼"), E.extract_reward(E.split_referral("‼ ЗАБИРАЕМ 50$ И 50$ ЗА ДРУГА ОТ PumpFun ‼")[0], "airdrop")),
+          ({"available": True, "amount_usd": 50.0}, (50.0, "stated")))
+    check("'$25 per friend' after 'and' splits from the base", E.split_referral("Get $50 and $25 per friend you refer"), ("Get $50", ["$25 per friend you refer"]))
+    check("portuguese", E.extract_referral("Ganhe R$ 50 de bônus. Indique um amigo e ganhe R$ 20")["available"], True)
 
     # ---- two scores, never blended
     a = E.score_earning(base)

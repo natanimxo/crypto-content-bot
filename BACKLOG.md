@@ -1840,7 +1840,7 @@ value, trust is a floor in `select_candidates.COMPONENT_FLOORS`). Trust is deter
 corroboration, terms stated, domain age (RDAP), Safe Browsing, URLhaus, GoPlus. **Dropped on purpose, possible later addition:**
 (1) "does the official domain confirm it" (a `site:` search) and (2) "scam reports found" -- both need a search API, which the
 operator does not want as a paid dependency and does not want to reintroduce search-as-discovery through the back door. The
-operator does the "is this real" judgment by hand. Referral programs are never an input (stripped from links, asserted by a test).
+operator does the "is this real" judgment by hand. Referral programs were never an input (SUPERSEDED 2026-11-16: operator override, see "Phase 5 follow-ups, round 5" -- they now count in value, capped).
 Safe Browsing and URLhaus are wired but report "unchecked" until keys are supplied (GOOGLE_SAFE_BROWSING_API_KEY, a URLhaus
 auth key) -- unchecked is never coded as clean. CoinCraft now carries a Phase-5 voice profile (`config/channel_voices.yaml`).
 
@@ -2017,3 +2017,48 @@ CoinCraft and 1 per 2-hour cycle by the pacing rule, so the cap is not the bindi
 **Research cycle: Railway-side probe.** `pipeline/source_probe.py` holds a probe list of candidate income sources; `scripts/collect_earning.py`
 runs it at most once per 20h, AFTER notify, and stores the compact result in run_logs `source_probe`. A source is not verified until it has run
 from Railway (OKX served a different feed from there, Bybit returned 403).
+
+### Phase 5 follow-ups, round 5 (2026-11-16, operator override: referral now counts in value)
+
+**The original rule, and whose it was.** Phase 5 shipped with "whether a referral program exists is NEVER an input to any score": referral
+parameters stripped from links, no function reading a referral field, and a test (`a referral program changes neither score`) asserting
+the scorer's output was identical with the flag toggled. That rule was **the assistant's recommendation, not the operator's decision** -- the
+operator did not agree to it. On 2026-11-16 the operator **overrode it deliberately.** Do not "restore" it.
+
+**What changed.**
+1. A referral program the reader can earn from adds to VALUE, capped at `REFERRAL_VALUE_MAX = 12` points of 100 (the operator asked for about
+   10-15%). It is ADDED ON TOP of the unchanged payout/capital/effort/prereq/geo score (`value = min(100, value_base + referral_bonus)`), so an
+   offer with no referral program scores exactly what it did before and the floors did not move. A program with no stated figure is worth 50
+   of 100 on the component (6 points); a stated per-referral amount scales on the same log scale as payouts, never below 50. A mediocre offer
+   with a referral program does not outrank a strong one without (tested). The breakdown stores `value_base`, `referral_bonus` and `referral`.
+2. Availability is a plain fact on the CARD beside both scores: `value 72 · trust 57 · referral yes` (or `no`, or `yes ⚠ recruitment-shaped`).
+   It is not part of either number.
+3. The assertion test was removed and replaced by tests of the new behaviour (bonus, cap, no-bonus, recruitment shape, extraction in en/ru/pt).
+
+**Unchanged:** referral parameters are still stripped from every stored link (`normalize_url`), and the post guard still rejects referral /
+invite / promo-code language. The operator adds his own referral links at forward time; no one else's code goes out under his name.
+
+**The recruitment-shape warning (the one case where a referral is a warning, not a feature).** Referral-heavy offers correlate with MLM and
+pyramid schemes. If the stated per-referral earnings EXCEED the base payout (the larger of payout / pool / unclear amount; with no base
+payout at all, a stated referral amount is itself the whole offer), the referral adds NO value and costs TRUST
+(`referral_recruitment_penalty`, 30 points -- the same size as the lighter payout-for-nothing penalty). It has no tier-1 exemption. The card
+says "recruitment-shaped". Not covered (deliberately, not asked): multi-level wording ("levels", "downline"), and a referral with only a
+percentage and no dollar figure -- both count as an ordinary program.
+
+**How availability is decided (and a deliberate narrowing).** From the offer's TEXT, clause by clause (`earning.split_referral` /
+`extract_referral`): "referral", "refer a friend", "invite friends and earn", "each/per friend", "affiliate program", Russian реферал /
+"за каждого друга" / "за приглашённого", Portuguese indicação / "indique" / "cada amigo". Not a program: the poster's own code ("use my
+referral code"), negations ("no referral needed"). A referral code on the SOURCE'S OWN LINK (`referral_link`) is only an inference (the poster
+has a code, so a program probably exists); a fact on a card must not be an inference, so it is NOT counted and the card says "referral
+unconfirmed (source link carried a code)". Counting it would have added the same +6 to 18 more airdrop posts. If the operator wants it counted, it is a one-line change in
+`earning.referral_info`.
+The referral clause is also removed from the text the PAYOUT is read from, otherwise "$25 for each friend you invite" would be read as the
+offer's own payout and "referral exceeds base payout" could never be told.
+
+**Two blind spots found on the way and fixed:** amounts with the sign AFTER the number ("50$", "15$", Russian / Portuguese style) were not read
+at all (`_AMOUNT_RE`); "ЗАБИРАЕМ" (we take) was not a reward cue. Both affect payout reading on every source.
+
+**Effect on the 116 live scored rows (re-scored in place):** 11 describe a referral program in their text (18 more only carried a code on the
+link); 10 got a bonus (the 11th is the one below); NO item crossed the value floor because of the bonus (selection unchanged except as
+follows). **One** item is recruitment-shaped: "ЗАБИРАЕМ ДО 15$ ЗА КАЖДОГО ДРУГА ОТ FOLK AI" (up to $15 per friend and nothing else) -- trust 43 -> 13, so it
+no longer clears the floor; passing items 77 -> 76. That is the rule working on the shape it was written for.

@@ -219,8 +219,11 @@ def build_payload(raw: dict, now: datetime) -> dict:
     payout = extra.get("payout_usd")
     payout_kind = extra.get("payout_kind")
     pool_usd, unclear_usd = extra.get("pool_usd"), None
+    # The payout is read from the text WITHOUT its referral clauses: "$25 for each friend you invite" is not the offer's own payout.
+    base_text, _ = earning.split_referral(text)
+    referral = earning.extract_referral(text)
     if payout is None and type_ != "hackathon":
-        stated, kind = earning.extract_reward(text, type_)
+        stated, kind = earning.extract_reward(base_text, type_)
         if stated is not None and kind == "pool":
             pool_usd = stated          # a total shared among participants: stated, but not what one reader receives
         elif stated is not None and kind == "unclear":
@@ -245,7 +248,8 @@ def build_payload(raw: dict, now: datetime) -> dict:
         "source_tier": src["tier"], "kind": src["kind"], "published_at": raw["published_at"], "url": raw["url"],
         "landing_url": landing_norm, "landing_domain": earning.registrable_domain(host), "referral_link": earning.is_referral_link(landing_raw or ""),
         "type": type_, "payout_usd": payout, "payout_kind": payout_kind, "pool_usd": pool_usd, "unclear_usd": unclear_usd,
-        "other_amount_max": max([a for a in earning.extract_amounts_usd(text) if payout is None or abs(a - payout) > 0.5] or [0.0]),
+        "referral": referral,
+        "other_amount_max": max([a for a in earning.extract_amounts_usd(base_text) if payout is None or abs(a - payout) > 0.5] or [0.0]),
         "deadline": _iso(deadline) if deadline else None, "capital_usd": capital, "effort_minutes": effort, "prereqs": prereqs, "geo": geo,
         "steps_text": extra.get("steps_text") or "",
         "terms": {"deadline": deadline is not None, "eligibility": eligibility, "payout": payout is not None or pool_usd is not None or unclear_usd is not None or earning.payout_stated(text)},
