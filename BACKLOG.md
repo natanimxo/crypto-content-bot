@@ -1535,9 +1535,8 @@ most large native-ETH moves between cycles were never looked at (24h check: 2 mo
 1; Kraken 1, old page 0). Fetch is now time-windowed: everything since a block ~12h ago (one
 getblocknobytime per cycle), up to Etherscan's 10,000-row page, truncation logged loudly. Dry run on the new
 watchlist: 12 notable moves in the 12h window (9 of them Bitfinex USDT). Expect whale candidate volume and
-notified volume to RISE somewhat; caps (12/day category, 2/cycle) are unchanged. Not built: a dormancy
-detector for wallets (the four dead ones went unnoticed for months) -- needs a last-activity lookup per
-wallet; worth a weekly check.
+notified volume to RISE somewhat; caps (12/day category, 2/cycle) are unchanged. (The dormancy detector
+that was "not built" here was built 2026-11-15 -- see Phase 2 follow-ups below.)
 Binance is the exchange with the lowest accept rate (5/83); Cold Wallet 20 likely behaves like Cold Wallet 28.
 Left in place -- revisit with a week of data.
 
@@ -1552,3 +1551,35 @@ shared with the channel-voice brief): exchange withdrawal = accumulation / less 
 possible sell pressure, stablecoin = no directional read. Real generations through the legacy path on all
 four cases (ETH in/out, stablecoin in/out) read correctly. The other 50 sampled legacy prompts are
 byte-identical; only the 6 whale ones changed.
+
+### Phase 2 follow-ups (2026-11-15)
+
+**Wallet dormancy detector** (`collectors/whale_movements.py`: `find_dormant_wallets`, `alert_dormant_wallets`,
+`DORMANT_WALLET_DAYS = 7`). Same shape as the news stale-feed check: a watchlist wallet with no transaction of
+any kind (native or token, any size) for 7 days is dead, not quiet -- recorded in the run's
+`details.dormant_wallets` and the operator gets one Telegram alert per wallet per week
+(`llm_anomaly_alerts` kind `wallet_dormant`). Runs every cycle but costs ~0 API calls: a wallet that returned
+any tx in the 12h fetch window proves it is alive for free; only a wallet with an empty window gets a
+last-activity lookup (newest native + newest token row). It cannot fail the collection (own try/except), and
+a failed lookup skips the wallet rather than flagging it.
+*Threshold evidence (live API, 2026-11-15):* every live watchlist wallet's last activity was <= 1.8 days
+(Binance 15's native-only gap was 8.8 days but it had token transfers 0.3 days ago -- hence "any kind");
+the four retired wallets' latest activity was 16.7 / 63 / 63 / 220 days. 7 days separates them with margin on
+both sides: detector run against the 10 live + 4 retired wallets flagged exactly the 4 retired, none of the
+live. Also tested: lookup error -> skipped, never-active -> flagged as "no activity on record", alert sent
+once and suppressed on the immediate repeat, and a wiring run of `collect()` with a live + a dormant wallet
+(details recorded, one alert, no inserts; test rows removed).
+*Known limits:* dust/spam token transfers into a dead wallet count as activity and would mask it (the
+retired Coinbase wallet's last token transfer was 16.7 days ago, native 80.9 -- a spammier wallet could stay
+"alive" forever); activity != yield (a live wallet that never moves $2M is not flagged -- the accept-rate
+calibration is the check for that).
+
+**News: why 5 items collected but zero cards (00:00 UTC cycle).** Not a bug -- the rolling 24h cap was full.
+`soft_daily_cap` counts ITEMS notified in the trailing 24h across both channels (news is shared). On
+2026-11-14 the pre-fix per-channel cap let news go out at 08:06 (4 items), 09:31 (4) and 20:03 (4) = 12-14
+items in the window at the 00:00 and 04:00 cycles (limit 6), so remaining headroom was 0 and nothing was
+eligible; at 08:00 the window had drained to 12 -> still over. The 08:06 and 09:31 sends aged out on
+2026-11-15, leaving the 20:03 pair (4 items < 6) -- headroom 2, per-cycle cap 1, with the best candidate
+(score 77.5) waiting. The 20:03 pair ages out at 20:03 on 11-15. This is a one-off transition from the old
+cap to the new one, not steady state. Verification of the first card under the new cap: next cycle.
+

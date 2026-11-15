@@ -20,8 +20,11 @@ import os
 import sys
 import time
 
+from datetime import datetime, timezone
+
 from dotenv import load_dotenv
 
+from pipeline import llm_usage
 from pipeline.db import get_conn
 from pipeline.http import get_json
 from pipeline.run_log import run_log
@@ -291,6 +294,68 @@ def _fetch_token_txs(address: str, start_block: int) -> list[dict]:
     return _fetch_window("tokentx", address, start_block)
 
 
+# DORMANT-WALLET DETECTION (2026-11-15, same idea as the news collector's stale-feed check). Four of
+# the eight original watchlist wallets were dead for 80-1,986 days before anyone noticed -- a dead
+# wallet answers the API with an empty list, which looks exactly like a quiet one. A wallet with no
+# transaction of ANY kind (native or token, any size) for DORMANT_WALLET_DAYS is dead, not quiet.
+# Measured 2026-11-15: every live watchlist wallet's longest observed gap was ~1.8 days, and the four
+# retired wallets' most recent activity (native or token) was 17, 63, 63 and 220 days ago -- 7 days
+# separates them with margin on both sides. It is a floor on "any activity", deliberately not "any
+# $2M move": a wallet that is alive but never moves $2M is a yield problem, not a dormancy one. Known
+# limit: dust/spam token transfers into a dead wallet count as activity and will mask it.
+DORMANT_WALLET_DAYS = 7
+DORMANT_REALERT_MINUTES = 7 * 24 * 60  # re-alert at most weekly per wallet
+
+
+def _last_activity_ts(address: str) -> int | None:
+    """Unix timestamp of the wallet's newest native or token transaction (one row each, newest
+    first), or None if it has never had one."""
+    newest = []
+    for action in ("txlist", "tokentx"):
+        body = _etherscan_get({
+            "module": "account", "action": action, "address": address,
+            "startblock": 0, "endblock": 99999999, "page": 1, "offset": 1, "sort": "desc",
+        })
+        rows = body.get("result")
+        if isinstance(rows, list) and rows:
+            newest.append(int(rows[0]["timeStamp"]))
+    return max(newest) if newest else None
+
+
+def find_dormant_wallets(entries: list[dict], now_ts: int, fetch_last_ts=_last_activity_ts) -> dict[str, float | None]:
+    """{address: days since last activity (None = never active)} for every entry silent for at least
+    DORMANT_WALLET_DAYS. A wallet whose lookup fails is skipped, not flagged -- an API error says
+    nothing about the wallet."""
+    dormant: dict[str, float | None] = {}
+    for entry in entries:
+        address = entry["address"]
+        try:
+            last_ts = fetch_last_ts(address)
+        except Exception as exc:
+            logger.warning("whale_movements: dormancy lookup failed for %s %s, skipping: %s",
+                           entry["exchange"], address, exc)
+            continue
+        if last_ts is None:
+            dormant[address] = None
+        elif (now_ts - last_ts) >= DORMANT_WALLET_DAYS * 86400:
+            dormant[address] = round((now_ts - last_ts) / 86400, 1)
+    return dormant
+
+
+def alert_dormant_wallets(conn, dormant: dict[str, float | None], now: datetime) -> None:
+    for address, days in dormant.items():
+        exchange = WATCHLIST_BY_ADDRESS.get(address, {}).get("exchange", "?")
+        since = "no activity on record" if days is None else f"no activity for {days:g} days"
+        logger.error("whale_movements: watchlist wallet %s %s is DORMANT -- %s", exchange, address, since)
+        llm_usage._send_anomaly_alert(
+            conn, "wallet_dormant", address,
+            f"🐋 <b>Whale watchlist wallet gone quiet: {exchange}</b>\n<code>{address}</code>\n"
+            f"{since.capitalize()} (alert at {DORMANT_WALLET_DAYS}). An empty response looks the same as a "
+            f"quiet wallet, so nothing else would flag it -- replace it in collectors/whale_movements.py "
+            f"WATCHLIST (move it to KNOWN_EXCHANGE_ADDRESSES).",
+            now, DORMANT_REALERT_MINUTES)
+
+
 def _counterparty_establishment(address: str) -> dict:
     """First-tx age + sent-tx count (nonce) — a cheap 'is this wallet real and
     established' signal, only fetched for transfers that already cleared
@@ -408,6 +473,7 @@ def collect() -> int:
             fetched_count = 0
             stale_skipped = 0
             address_errors: list[str] = []
+            window_active: set[str] = set()  # wallets that returned any tx in the fetch window
             now_ts = int(time.time())
             start_block = _start_block(now_ts)
 
@@ -421,6 +487,7 @@ def collect() -> int:
                 # if EVERY wallet failed does the collector itself fail (below).
                 try:
                     for tx in _fetch_native_txs(address, start_block):
+                        window_active.add(address)
                         fetched_count += 1
                         if not _is_recent(tx, now_ts):
                             stale_skipped += 1
@@ -437,6 +504,7 @@ def collect() -> int:
                             items.append(item)
 
                     for tx in _fetch_token_txs(address, start_block):
+                        window_active.add(address)
                         fetched_count += 1
                         if not _is_recent(tx, now_ts):
                             stale_skipped += 1
@@ -470,6 +538,17 @@ def collect() -> int:
             state["details"]["address_errors"] = len(address_errors)
             if len(address_errors) == len(WATCHLIST):
                 raise RuntimeError(f"all {len(WATCHLIST)} watchlist wallets failed (Etherscan down or key problem)")
+            # Dormancy check: a wallet that returned nothing in the window is the only one that needs
+            # a lookup (busy wallets prove they are alive for free), so this is usually zero API
+            # calls. It can never fail the collection -- it is monitoring, not collecting.
+            try:
+                suspects = [e for e in WATCHLIST if e["address"] not in window_active
+                            and e["address"] not in address_errors]
+                dormant = find_dormant_wallets(suspects, now_ts)
+                state["details"]["dormant_wallets"] = dormant
+                alert_dormant_wallets(conn, dormant, datetime.fromtimestamp(now_ts, timezone.utc))
+            except Exception:
+                logger.exception("whale_movements: dormancy check failed (collection unaffected)")
             state["details"]["fetched"] = fetched_count
             state["details"]["stale_skipped"] = stale_skipped
             state["details"]["notable"] = len(items)
