@@ -69,6 +69,9 @@ SOURCE_GEO_DEFAULT = {"ozbargain": "single", "mydealz": "single", "dealabs": "si
 # links that are an aggregator's own redirect/page, not the offer's landing page: the topic key falls back to the title
 AGGREGATOR_LANDINGS = {"gamerpower.com", "doctorofcredit.com", "ozbargain.com.au", "mydealz.de", "dealabs.com", "airdrops.io"}
 
+# posts that are discussion or housekeeping, not an offer (found on real r/FreeGamesOnSteam relays: "Weekly Discussion Thread")
+_NOT_AN_OFFER_RE = re.compile(r"discussion thread|megathread|weekly thread|daily thread|read the rules|subreddit rules|\bAMA\b|poll:", re.IGNORECASE)
+
 _AD_RE = re.compile(r"(?:^|\W)(?:#ad|#sponsored|sponsored|advertisement|\bAD\b|promo code|use code)(?:\W|$)", re.IGNORECASE)
 
 
@@ -464,7 +467,7 @@ def collect() -> int:
                 kind = earning.SOURCES[raw["source"]]["kind"]
                 if kind == "telegram":
                     eng = (raw.get("extra") or {}).get("engagement_ratio")
-                    if _AD_RE.search(raw["text"]) or (eng is not None and eng < MIN_ENGAGEMENT_RATIO):
+                    if _AD_RE.search(raw["text"]) or _NOT_AN_OFFER_RE.search(raw["title"] or "") or (eng is not None and eng < MIN_ENGAGEMENT_RATIO):
                         dropped_spam += 1
                         continue
                     if not earning.pick_landing_url(raw["links"]):
