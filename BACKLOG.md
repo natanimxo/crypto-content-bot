@@ -2183,3 +2183,32 @@ roughly 1/day or less (single snapshot: Superteam deadlines run 3-28 days).
 geography contribute ~50 points to any free, global, no-KYC item, so a Superteam bounty with 279 entrants on a $250 pool (expected payout $0.90)
 scores 51.5 and a $500 pool with 282 entrants (expected $1.77) scores 60. Raising the value floor to 55 does NOT remove the second. Candidate fix:
 a third floor on the EXPECTED PAYOUT (e.g. >= $5 or $10) -- tightening, not widening, as the operator prefers.
+
+### Phase 5 follow-ups, round 7 (2026-11-16, operator rulings: the expected-payout floor)
+
+**Third hard floor: expected payout >= $10.** Selection is now trust >= 40 AND value >= 40 AND expected payout >= $10, ordered by value. It is a
+floor, not a weight: nothing about value or trust moved. Items below it are stored and scored (`score_breakdown.expected_payout_usd`) but never
+surface (`select_candidates.get_new_candidates`, `earning.expected_payout_ok`). **Unknown expected payout PASSES** -- no figure is not a fail --
+and its payout component stays at 20-25, so it has to earn its way through on the other components. Why it exists: value 40 was reachable with
+ZERO payout, because a free, global, no-KYC offer earns ~50 points from friction alone (capital 100, prerequisites 100, geography 100). Expected
+payout = nominal x payout probability by type (airdrop 0.3, bank bonus 0.8, bounty 0.1, giveaway winners/entrants), or the pool / entrants for
+`ev` items (Devpost, Zindi, Superteam competitions). `scripts/earning_report.py` "eligible" now applies it.
+
+**Rulings recorded.** (a) Do NOT cap all unknown payouts at 30: the token cap exists only because "689,655 BAOBAO" is a specific claim the system
+refuses to price; an airdrop with no stated figure is a different case and stays at 20-25 on the component. (b) Chapter-scoped bounties: no rule, the
+weighting stays as is. A Ukraine-only bounty scoring ~60 is useful to the Ukrainian part of the audience and the geo component already discounts it;
+the system does not decide readers' nationalities for them.
+
+**Effect on live items (live, not held, trust >= 40 and value >= 40):** 83 -> 67. Devpost 48 -> 32 (16 of its 48 have an expected payout under $10);
+Doctor of Credit 17 -> 17; the four airdrop channels unchanged (their payouts are mostly unknown, so they pass).
+
+**The 11 Superteam listings against it: 6 survive.** 2 are token-denominated (BAOBAO, NOS: capped at 30, never reach the operator); 3 are crowded
+creator-style content bounties with an expected payout of $0.88-$1.77 (Anna $250 pool / 279 entrants, KriptoK $200 / 227, Premier League $500 / 282).
+The 6 survivors: Raenest $13,000 ($183 expected), MultiHopper $5,000 ($64), two Superteam Ukraine bounties ($40, $50), OOBE $500 ($50), SSR $300 ($27).
+Zindi: 6 of 7 (one $5,000 pool with ~1,100 entrants fails at $4.25). Immunefi: Plether passes (expected payout unknown).
+**Is Superteam weaker than it looked? No, but it is more selective:** 8 of the 11 open listings were published in the last 7 days (about 1.1 new
+listings/day still open, more in truth since closed ones are not visible), and 5 of those 8 clear the floor today, so roughly 0.6-0.7 surfacing/day,
+comfortably above the target of one good item every two days. Caveats: (1) the entrant count is read at FIRST collection and the score is not
+refreshed, so a listing seen early passes even if it gets crowded later (SSR has 11 entrants today: $27 expected; at 60 it would be $5);
+(2) turnover is a single snapshot; (3) the crowded content bounties are the bulk of the ones that fail, so the floor removes exactly the kind of
+card that would have said "$250 pool" to a reader with a 1-in-280 chance.
