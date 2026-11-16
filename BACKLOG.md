@@ -2104,14 +2104,14 @@ verification"); not added unasked.
 
 **Method.** 52 candidate endpoints in `pipeline/source_probe.py`, each fetched with no credentials FROM RAILWAY (`collect-earning`, 2026-11-16
 06:31 UTC, stored in run_logs `source_probe`) and from the dev machine, then compared. The collect-earning service had silently done nothing for
-its first two cron slots because its `DATABASE_URL` was the placeholder host `db.xxxxxxxxxxxx.supabase.co` (fixed by the operator at ~06:00 UTC):
+its first two cron slots because its `DATABASE_URL` was the placeholder host `db.xxxxxxxxxxxx.supabase.co` (fixed by the operator before the 06:30 UTC run):
 a service is not "running" until it has a run_logs row. Railway vs local DIFFERED for: OKX (12 announcement types locally, 4 from Railway --
 the regional feed again), Coinbase Learn (200 local, 403 Railway), Bybit (200 local, 403 Railway, known). Immunefi's public JSON was added
 after the first run and is verified at the next cycle (08:30 UTC).
 
 **Ranked by trustworthiness (platform that holds the money > aggregator > open campaign tool), then fit. Volume is a single snapshot, not measured turnover.**
 1. **Superteam Earn** `earn.superteam.fun/api/listings` -- keyless JSON, Railway 200. Real money (USDC / USDG; some listings pay a project's own token: only
-   USDC/USDG/USDT may count as USD -- one listing is "689,655 BAOBAO"). Fields: rewardAmount, token, deadline, sponsor, status. 11 open, ~$25k in stablecoin.
+   USDC/USDG/USDT may count as USD -- one listing is "689,655 BAOBAO"). Fields: rewardAmount, token, deadline, sponsor, status. 11 open, about $21k outside the two token-denominated listings (BAOBAO, NOS), most of it one $13k bounty.
    Writing, design, video, dev tasks: fits CoinCraft's non-technical audience. Gaps: the `type` filter is ignored (project/grant return the same 11); the list
    exposes no region, and some listings are country chapters (Superteam Ukraine) -- geo needs the per-listing endpoint (unverified).
 2. **Zindi** `api.zindi.africa/v1/competitions` -- keyless JSON, Railway 200 (10, newest end 2027-02). `reward` "$40 000 USD", open flag, dates, organisation.
