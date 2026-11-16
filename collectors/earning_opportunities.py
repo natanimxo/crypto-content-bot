@@ -419,7 +419,7 @@ def build_payload(raw: dict, now: datetime) -> dict:
         "referral": referral, "token_reward": extra.get("token_reward"), "kyc_known": bool(extra.get("kyc_known")),
         "headline_max_usd": extra.get("headline_max_usd"), "registrations": extra.get("registrations"),
         "award_kind": extra.get("award_kind"), "prize": extra.get("prize"),
-        "skill": extra.get("skill") or (prizes.skill_domains(text[:1500], raw["source"]) if type_ in ("bounty", "hackathon") else []), **displays,
+        "skill": (extra["skill"] if "skill" in extra else (prizes.skill_domains(text[:1500], raw["source"]) if type_ in ("bounty", "hackathon") else [])), **displays,
         "other_amount_max": max([a for a in earning.extract_amounts_usd(base_text) if payout is None or abs(a - payout) > 0.5] or [0.0]),
         "deadline": _iso(deadline) if deadline else None, "capital_usd": capital, "effort_minutes": effort, "prereqs": prereqs, "geo": geo,
         "steps_text": extra.get("steps_text") or "",

@@ -1,248 +1,151 @@
-# Handoff — 2026-09-11
+# Handoff — 2026-11-16
 
-Written for a fresh Claude Code session picking this project up cold. Read
-this before touching anything — it's the fast path to current state, without
-re-deriving what already got figured out. [intelligence-bot-spec-v2.md](intelligence-bot-spec-v2.md)
-is the full design reference (checked in as of today); this doc is state +
-history + what's actually still open, not a design doc.
+For a fresh Claude Code session picking this project up cold. This is STATE + the rules the operator has set + what is open. `BACKLOG.md` is the long decision log (read its
+"READ FIRST -- traps" block, then the section for whatever you touch); `intelligence-bot-spec-v2.md` is the original design. The previous handoff (2026-09-11, stale: it says
+"not yet live") is kept at `docs/HANDOFF-2026-09-11-archive.md` for the bug history of the first three categories.
 
-## Current state per category
+## STATUS AT THE END OF THE 2026-11-16 SESSION (read this first)
 
-| Category | Channel(s) | Status |
+The session was cut short by the operator's usage limit. Nothing was left half-rewired in committed code: HEAD passes all four regression scripts (`check_earning`, `check_sources`, `check_exchange_listings`,
+`check_voice_checks`) and the cycle scripts import cleanly. The poller was healthy (last `approval_poll` success 12:42 UTC). **No more test or regenerated cards are being sent**: the one-off regeneration scripts
+(scratchpad, not in the repo) finished; nothing in the repo sends test cards. (The daily below-the-line digest and the normal cards are production features and will still send.)
+
+### LIVE NOW (committed, pushed, running on the Railway cron services)
+- Earn Stack: guaranteed / raffle / competition classification with prize structure + odds in the ORIGINAL currency; skill fact; competitions lowest priority and at most 2 a day; the third floor (expected payout >= $10,
+  or for competitions a largest-prize floor of $100); referral counts in value; recruitment-shaped offers get a trust penalty; the daily below-the-line digest with an Approve button per item; Superteam / Zindi / Immunefi / Devpost / Doctor of Credit / 4 airdrop channels.
+- Earn Stack display name (key `coincraft`, chat_id unchanged). Hustle shares 2 / 2 / 1 / 1 seeded into the DB (the cap change is already in effect).
+- New collectors wired into `scripts/collect_cycle.py` (they first run at the next `0 */4` cycle, 16:00 UTC): Whale Alert (`collect_whale_alert`), ZachXBT (`collect_zachxbt`), Wu Blockchain + Cointelegraph inside `collect_news`,
+  Binance Announcements corroboration inside `collect_exchange_listings`, `collect_startup_news` (+ scorer, facts, template, config, channel wiring). Verified LOCALLY against live data with no database writes; **NOT yet verified from Railway**.
+
+### HALF-DONE / UNVERIFIED (where it stopped)
+- **Railway verification of the new sources** was the step in progress. The Telegram-channel probe (`run_logs` job `telegram_probe`, 15 handles) and the startup RSS probes (`startup_*` in `source_probe`) were pushed; their first Railway rows
+  had not appeared when the session ended (the 12:30 UTC `collect-earning` run had not logged yet). Next step: read `run_logs` for `telegram_probe`, `source_probe`, then the 16:00 UTC `collect_whale_alert`, `collect_zachxbt`,
+  `collect_news` (details.telegram), `collect_exchange_listings` (details.telegram_binance), `collect_startup_news` (details.feeds), and compare with the local numbers in BACKLOG. Do NOT call a source verified before that.
+- **Cards the operator already received in the old competition format**: regenerated in place where possible (two Zindi candidate cards were edited; two Devpost drafts were regenerated and re-sent, one header message was sent twice).
+  Two drafts first went out with WRONG claims and were corrected: "one $25,000 prize" (Devpost's `prizes_counts.cash` is prize categories, not winners) and "needs machine learning skill" for a Photoshop design contest (a theme tag is not a
+  requirement). The Meta VR Start draft was already published, so it could not be regenerated and still carries the OLD wording ("average per participant" style): check it before forwarding.
+- Uncommitted before this handoff: the `skill` fallback fix in `collectors/earning_opportunities.py` (a Devpost theme tag must not become a skill). Committed with this file.
+- `BACKLOG.md` has NOT yet been given the "Channels and Phase 6" section (what was built, the local channel facts, the Cointelegraph reversal note). The Cointelegraph reversal IS recorded in the `collectors/news.py` module comment and in
+  this file; copy it into BACKLOG next session.
+
+### STILL TO DO (the operator's open asks, in the order he gave them)
+1. **Earn Stack "full control" spec -- NOT STARTED.** The operator's words (relayed at the end of the session): remove the floors, caps and gates; a money-only score; everything else becomes a LABEL; a digest with Approve / Skip; and a
+   command that lists what was dropped. I have no copy of the detailed spec in this session's conversation, only that summary: get the spec text from him before building. NONE of it is implemented: the floors (trust 40 / value 40 / expected
+   payout $10 / competition $100), the cap of 8, the 2-a-day competition cap, the hard gate and the recruitment penalty are all still in force. Hard gates he has said stay out: seed phrase / upfront fee (forgery and KYC-evasion he handles by hand).
+2. **Referral / recruitment-shaped offers: the operator's latest statement is that he does NOT want to cut referral offers or ANY recruitment-shaped offer.** This reverses the 2026-11-16 ruling that gave recruitment-shaped offers a 30-point trust
+   penalty (the Raenest bounty was expired for it). NOT implemented: the penalty is still in `pipeline/earning.py`. Under the full-control spec these become labels ("recruitment-shaped", "referral promotion") on the card, not penalties and not exclusions.
+3. **Phase 6 + the channel builds: BUILT and committed, not verified from Railway** (see above). Still outstanding there: the startup_jobs name link is built strictly but unproven (expected 0-1 a month); `startup_news` "notable launches" were deliberately not built.
+4. Nov 23 report (scheduled task `earn-stack-draft-attempts-nov23`), Discord (waits on the operator's server and bot), the Bybit-from-Railway decision.
+
+### The operator's decisions this session, for the record
+- Competitions: show prize structure and odds, never pool / entrants; pool / entrants only for raffles; never convert currency; "skill required" fact; fewer competitions (priority + 2 a day) -- DONE.
+- Channels: build Whale Alert (transfers only, tx-hash dedupe), Wu Blockchain, Cointelegraph (reverses his September exclusion: deliberate), ZachXBT, Binance Announcements (corroboration only); skip Cryptopolitan, ICO Drops, CryptoRank, CryptoQuant,
+  CoinMarketCap News, TON Community, CertiK -- DONE (built; unverified on Railway).
+- Phase 6: startup_news from Tech.eu / Sifted / TechCrunch Venture RSS, skip @tech, Hustle shares 2 / 2 / 1 / 1, startup_jobs name link at low priority -- DONE (built; unverified on Railway).
+- Skip the forgery / KYC-evasion gate (he handles those by hand) -- honoured.
+- Full-control spec and "keep every referral / recruitment-shaped offer" -- recorded above, NOT done.
+
+## What this is
+
+A pipeline that collects items, scores them, sends the operator a candidate card on Telegram, and on **Approve** writes the post (DeepSeek) and sends a forwardable preview.
+**The bot never posts to a channel**: the operator copies / forwards the text himself (`pipeline/publish.py`). Nothing reaches a reader without his tap.
+
+Stack: Python on Railway, Supabase Postgres, DeepSeek (`deepseek-v4-flash` writer; `deepseek-flash` + the `deepseek_read_url` tool for landing-page reads), Telegram bot polling.
+
+## Railway services (project `fortunate-success`, production)
+
+| Service | What | Schedule |
 |---|---|---|
-| `defi_yields` | Crypto Notebook | **Built, tested, live.** Phase 1 MVP — full notify→approve→write→deliver loop validated end-to-end first, before any other category was started. |
-| `whale_movements` | Crypto Wall Street | **Built, tested, live.** Deep verification pass (first category with genuinely messy real-world data — dormant wallets, mislabeled exchanges, stale transactions). Three real bugs found and fixed same-day (see below). $2M collect floor and the 10k institutional heuristic are both first-pass tuned, not yet revisited against more cycles. |
-| `web3_jobs` | Alpha Edge Crypto / Earn Stack (alternation) | **Built, tested, live.** Faster verification pace by explicit operator direction (structured data, no price verification, no editorial judgment needed). Volume is thin (13/56 raw listings relevant per cycle; only 2 have ever cleared `review_threshold`) — see "Source volume" below. |
-| `news`, `tool_launches`, `grants`, `startup_jobs`, `airdrops` | Crypto Wall Street / Hustle to Million | **Not built.** Listed in `channel_config.yaml` for record-keeping only; `bot/notify.py` skips them via `category_config_exists()`. `airdrops` specifically paused by operator direction (no reliable free source for wallet-level whale tracking). |
+| `crypto-content-bot` | always-on poller (approve / edit / reject taps, previews) | always on; redeploys on every push (~60-90 s gap) |
+| `collect-cycle` | `scripts/collect_cycle.py`: every collector -> score -> notify for ALL channels | cron `0 */4 * * *` |
+| `collect-earning` | `scripts/collect_earning.py`: earning_opportunities only -> notify Earn Stack, then the below-the-line digest (once a day), source probes | cron `30 */2 * * *` |
 
-**Production deployment: not yet live.** GitHub Actions Secrets have never
-been configured — see "GitHub Actions secrets" below. Everything above has
-been validated by running the pipeline manually/locally against the real
-Supabase DB and real Telegram bot, not via the actual cron.
+IaC is `.railway/railway.ts`; `railway config apply` is authoritative. A cron service must EXIT. A service is not "running" until it has a `run_logs` row: `collect-earning` ran
+twice doing nothing because its `DATABASE_URL` was the placeholder `db.xxxxxxxxxxxx.supabase.co`. `railway ssh` is not used (needs a registered key).
+**Verify every source FROM RAILWAY** (a dev machine and Railway see different data: OKX served a regional feed, Bybit and Coinbase Learn answer 403 from Railway). Daily probes are in
+`run_logs` jobs `source_probe` and `telegram_probe` (`pipeline/source_probe.py`); both re-run whenever their candidate set changes.
 
-## Every bug found this session, with root cause
+## Channels -> categories (config/channel_config.yaml; `chat_id`s live there)
 
-### 1. Stale-transaction recency (`whale_movements`)
-**Symptom:** a transaction from 2023-06-21 got collected as if it had just
-happened. **Root cause:** fetching "the most recent 100 transactions" from
-Etherscan has no implicit recency guarantee for a low-activity address — a
-wallet with under 100 total (or under-100-since) transactions can have that
-window reach back years. Confirmed live: two OKX withdrawals from
-2023-06-21 surfaced today because the watched wallet's real recent activity
-was almost entirely dust/spam-token noise, so its actual top-100-by-index
-still reached back three years for the last "real" transfer. **Fix:**
-`WHALE_MAX_AGE_HOURS = 24` — generous over the 4h collection cadence (a
-single missed/delayed cycle still won't lose anything) while enforcing
-genuine freshness. See `collectors/whale_movements.py`.
+| Key | Displayed as | Categories (daily caps) |
+|---|---|---|
+| `crypto_wall_street` | Crypto Wall Street | news (shared with Alpha Edge), whale_movements, exchange_listings (cap 4) |
+| `alpha_edge_crypto` | Alpha Edge Crypto | news (shared), defi_yields |
+| `crypto_notebook` | Crypto Notebook | gems_security, hacks_exploits |
+| `hustle_to_million` | Hustle to Million (cap 6) | tool_launches **2**, startup_jobs **2**, macro_news **1**, startup_news **1** (a category's own cap IS its share) |
+| `coincraft` | **Earn Stack** (renamed from CoinCraft 2026-11-16; the key and chat_id never changed) | earning_opportunities (cap 8; competitions at most 2/day, lowest priority) |
 
-### 2. Counterparty classification (`whale_movements`)
-**Symptom:** `0xa9d1e08c...`, Etherscan-labeled "Coinbase 10," wasn't on the
-watchlist, so 7 posts described transfers to it as going to "an external
-wallet" — when it's almost certainly Coinbase moving funds between its own
-wallets. **Root cause:** "not on our watchlist" was being treated as
-equivalent to "external/retail wallet," but the watchlist (`WATCHLIST`, the
-small set we actively collect *from*) was never meant to be exhaustive for
-*classification* purposes. **Fix:** split into two sets —
-`WATCHLIST` (collected from) vs. `KNOWN_EXCHANGE_ADDRESSES` (classification-
-only, ~17 addresses across 10 exchanges, WATCHLIST is a subset), plus a
-self-maintaining fallback (`INSTITUTIONAL_SENT_TX_THRESHOLD = 10_000`) that
-deprioritizes unlabeled-but-clearly-not-retail counterparties by transaction
-volume, since hand-verifying "hundreds" of real exchange addresses isn't
-practical. Calibration: confirmed exchange-linked counterparties observed
-have `sent_tx_count` in the millions (2.7M, 18.2M); genuine external wallets
-had 1–1,331. See the block comment above `WATCHLIST` in
-`collectors/whale_movements.py`.
+Voices: `config/channel_voices.yaml` (one profile per channel; the category supplies facts + guardrails, the channel supplies voice; guardrails beat voice). Config is YAML in git, upserted
+into the DB by `scripts/seed_config.py` (`seed_categories`, `seed_channels`, `seed_voices`); the DB row is what runs.
 
-### 3. DefiLlama confidence field (`whale_movements`)
-**Symptom:** none observed as a live failure — found by *adding* a check
-that wasn't there before, after live-verifying two real prices (PROM, SPK)
-against CoinGecko. **Root cause:** DefiLlama's `/prices/current/` and
-`/prices/historical/` responses carry `confidence` (0-1, DefiLlama's own
-reliability score) and `timestamp` (when that price point was actually
-recorded) — neither was being checked. A long-tail/thin-liquidity token is
-exactly the case where a cached/stale/low-confidence price could silently
-turn a routine transfer into a false "$2M+ whale move." **Fix:**
-`MIN_PRICE_CONFIDENCE = 0.8`, `MAX_PRICE_AGE_HOURS = 24` — below either
-threshold, `_get_token_price_usd()` (live path,
-`collectors/whale_movements.py`) and `_get_token_price_historical()`
-(write-time backfill, `pipeline/write_post.py`) both return `None` rather
-than a guessed price, and the item is skipped/omitted rather than published
-with an untrustworthy dollar figure.
+## Sources by category (the Telegram / RSS sources added 2026-11-16 are verified LOCALLY only -- see the status block above)
 
-### 4. RemoteOK server-side encoding (`web3_jobs`)
-**Symptom:** the Libertex listing's location rendered as
-`ÙØ³ÙØ·, ÙØ³ÙØ· ÙØ³ÙØ· Ø¹ÙØ§Ù` — mojibake, actually Arabic "Muscat,
-Oman." **Root cause:** RemoteOK's API has a server-side bug where non-ASCII
-text comes back with each UTF-8 byte reinterpreted as its own Latin-1
-codepoint before JSON-escaping. **Fix:** `_fix_mojibake()` in
-`collectors/web3_jobs.py` — re-encode as Latin-1 to recover the original
-bytes, decode as UTF-8. Applied unconditionally to every string field from
-this API; safe on already-correct text too (pure ASCII round-trips
-unchanged; genuinely-correct non-ASCII either round-trips unchanged or fails
-the encode/decode step outright, in which case the original value is
-returned rather than risking further corruption).
+- **news**: CoinDesk, The Block, Decrypt, Unchained, The Defiant, Protos (RSS) + **Wu Blockchain** (`@wublockchainenglish`, tier 3) + **Cointelegraph** (`@cointelegraph`, tier 2). Cointelegraph reverses the
+  operator's 2026-09-11 exclusion (deliberate, 2026-11-16). Telegram posts go through the same dedup, a text-based opinion / sponsored / promo gate, and the copyright guard.
+- **whale_movements**: Etherscan wallet watch + **Whale Alert** (`@whale_alert_io`): transfers only (never mints, burns, news posts, or a transfer with no exchange side), parsed deterministically,
+  **deduped by tx hash both ways**. Adds BTC and other chains.
+- **hacks_exploits**: DefiLlama `/hacks` + **ZachXBT** (`@investigations`, tier 3): only a post stating a loss with an amount >= $500k; the claim is attributed to him and never stated as confirmed;
+  deduped against DefiLlama by protocol name.
+- **exchange_listings**: Binance / OKX / Bybit / KuCoin announcement APIs (spot only; Bybit is blocked from Railway). **Binance Announcements** (`@binance_announcements`) = corroboration only: it sets a flag, it never creates an item.
+- **earning_opportunities** (income only): Devpost, Doctor of Credit, Superteam Earn, Zindi, Immunefi audit competitions, four airdrop Telegram channels. See "Earn Stack rules".
+- **startup_news** (Phase 6): Tech.eu, Sifted, TechCrunch Venture RSS. Funding rounds with a STATED amount and acquisitions only; amounts shown exactly as the outlet wrote them.
+- **Rejected on purpose (do not re-propose without new facts)**: Cryptopolitan (half price-bot posts, ~60 views), ICO Drops (news, not offers), CryptoRank / CryptoQuant (analysis, no category), CoinMarketCap News / TON Community /
+  CertiK (no live public channel found), @tech (1 funding amount in 123 posts), Galxe, exchange campaigns (KuCoin/Binance/Bitget), bug-bounty platform feeds (kept in BACKLOG "available if volume disappoints").
 
-### 5. The relevance gate (`web3_jobs`)
-**Symptom:** "Junior Illustrator at Twine" cleared scoring for a crypto
-channel — a generic freelance listing with a crypto tag, not a Web3 role.
-**Root cause:** live-confirmed ~70% of a real 56-listing collection were
-generic corporate roles (Little Caesars Pizza, The Walt Disney Company,
-Nestlé Health Science, DSW) swept in by RemoteOK's own tag system — some
-listings carried 40-58 tags, "crypto" just one of them. Raising the score
-threshold would have filtered by *score*, not *relevance* (a pizza-chain
-listing can score fine on salary/logo/location while being totally
-irrelevant). **Fix:** `_is_web3_relevant()`, a separate binary gate applied
-*before* scoring — checks company identity against `KNOWN_WEB3_COMPANIES`
-first, falls back to a job-title keyword check (`WEB3_TITLE_KEYWORDS`) for
-companies not on the list. Same "known-entity list + self-maintaining
-fallback" shape as bug #2's exchange classification.
+## Earn Stack rules (operator-set; the scoring is deliberate)
 
-### 6. Telegram callback-query expiry (approve tap failing across all 3 categories)
-**Symptom:** an operator tap on Approve/Edit/Reject/Mark-as-sent sometimes
-did nothing at all — no ack, no error, no downstream effect. Reported
-independently on `defi_yields`, `whale_movements`, and `web3_jobs`; only
-ever mitigated before (`_safe_ack()`), never root-caused. This was the
-single most severe bug found this session — it made the entire pipeline
-unusable regardless of collector quality, since nothing downstream of
-"operator taps a button" could be trusted to run.
+1. **Two scores, never blended**: `value` (what it is worth) and `trust` (checkable facts). Selection = trust >= 40 AND value >= 40 AND (expected payout >= $10, or for a competition the largest prize >= $100; UNKNOWN expected payout passes
+   and scores 20-25 on the payout component). Order by value. Both numbers, plus referral / KYC / skill facts, are on every card.
+2. **Award kind** (`pipeline/prizes.py`): `guaranteed`, `raffle` (pool / entrants is meaningful: the only kind with an expected amount), `competition` (prize structure + odds shown, no expected amount, e.g.
+   "Top 3 share €25,000 (€12k / €8k / €5k) · ~142 entrants · 3 winners"). **Amounts are ALWAYS shown in the original currency, never converted.** Devpost's `prizes_counts.cash` is NOT a winner count (it counts prize categories).
+3. **Hard gate** (item stored HELD, never a candidate): seed phrase / key, connect-wallet-to-claim, upfront fee, roundups, not income (free games, freebies, credits). The wallet rule is NARROW (claim-shaped only) for exactly
+   `superteam` / `zindi` / `immunefi`; broad for every relay (the Telegram channels, Devpost, Doctor of Credit). **No forgery / KYC-evasion gate: the operator handles those by hand** (e.g. the PumpFun posts).
+4. **Referral** (the recruitment penalty below is SUPERSEDED by the operator's last statement -- he wants none cut; see "STILL TO DO" #2; it is still in the code): counts in value (<= 12 points, added on top); availability is read from the offer TEXT only (a code on the source's own link is "unconfirmed"); referral parameters are still stripped from every stored link (the operator adds
+   his own). **Recruitment-shaped** (referral earnings above the base payout, multi-level / downline wording, or required work = promoting with your OWN referral code): no bonus, trust -30, no official-source exemption.
+5. **Token-denominated reward** (not a stablecoin): an unclear amount, never priced, value capped at 30 (below the floor).
+6. **Selection**: non-competitions first; competitions only fill slots nothing else wants, at most 2 per rolling 24h. One card per 2-hour cycle.
+7. **Daily "below the line" digest** (`bot/below_line.py`): every item that failed only a SOFT floor, with scores + reason + an Approve button into the normal write flow. Outside the cap (`notifications.kind = 'below_line'`; every cap
+   query counts only `kind = 'candidate'`). `python -m bot.below_line --dry-run --hours 72` previews it.
+8. Cards: curated-find voice (a "why this one" clause drawn ONLY from the facts' "what stands out" line), band 400-750 characters, 9 retries. `earning_draft` rows in `run_logs` count attempts.
+9. Any calibration data on this category from before 2026-11-16 is SUSPECT (a parser that could not read "50$" or Russian / Portuguese deposits, before the referral bonus and the competition change).
 
-**Investigation** (per the operator's explicit checklist): confirmed the
-polling offset persists correctly across runs (stable across 12+ runs, one
-writer); confirmed no Telegram webhook is registered (would silently steal
-updates from `getUpdates` if one were); confirmed the only other process
-that could touch the same bot's updates — `approval-poll.yml`'s own
-scheduled cron — had in fact *never once succeeded* (crash-looping on
-missing `DATABASE_URL`, failing before it ever reaches the Telegram API —
-this ruled it out as a competing consumer, but is itself bug/blocker #7
-below).
+## Standing operator rules (all categories)
 
-**Root cause**, via a deliberate controlled test (tap → poll immediately vs.
-tap → poll after exactly 10 minutes untouched, repeated twice): a tap
-succeeds 2/2 when polled within seconds, and is **completely absent** from
-`getUpdates` — not unanswerable, genuinely gone — after 10 minutes. Telegram
-drops an un-fetched `callback_query` from its delivery queue well under the
-documented 24h retention for ordinary updates, a property specific to
-`callback_query`'s interactive nature. This is separate from (and in
-addition to) the already-known `answerCallbackQuery`-expiry issue
-`_safe_ack()` already handled — that one meant a tap could be seen but not
-acknowledged; this one meant most taps were never seen at all on a 5-15
-minute short-polling cron.
+- Flag mistakes and surprises unprompted; confirm a plan before a big build; do not widen sources when you can tighten floors; near misses leave a floor alone; "unknown is never coded as clear".
+- Never state an inference as a fact on a card. Never relabel or convert currency. Never reproduce a source's wording (copyright guard). No investment advice anywhere.
+- A source is not verified until it has run from Railway. Dead sources flag themselves (stale-feed alerts); do not chase the ones already recorded as dead.
+- Hustle shares of its cap of 6 are 2 / 2 / 1 / 1; the channel cap rarely has to choose.
 
-**Fix:** switched `bot/approval_poller.py` to long-polling
-(`LONG_POLL_TIMEOUT_SECONDS = 270`, ~4.5 min, under the 6-minute job
-timeout) instead of short-polling (`timeout=0`). Telegram delivers an
-update the instant it occurs while a `getUpdates` call with `timeout>0` is
-open — holding that connection open for most of the gap between 5-minute
-cron firings shrinks the blind window from "up to 15 minutes" to roughly
-10-20 seconds. No server added (keeps the zero-infrastructure design).
-`approval-poll.yml` timeout raised to 6 minutes to match, plus a
-`concurrency: {group: approval-poll, cancel-in-progress: false}` guard so
-two long-polling runs never race against the same offset.
+## Open items / dates
 
-**Verified live:** a 2-minute long-poll window caught 3 real taps and
-returned in 0.4 seconds. The real poller then processed all three
-correctly — one against a still-live item (approved, write generated,
-preview sent), two against already-deleted items from earlier
-relevance/staleness cleanups (correctly no-opped as "already handled").
+- **2026-11-23 09:00 local**: a scheduled one-time task (`earn-stack-draft-attempts-nov23`) runs `python scripts/earning_report.py --drafts --days 7` and REPORTS mean attempts, the share needing 4+, and any source that keeps
+  failing. Decision rule: if most cards need 4+ attempts, WIDEN the 400-750 band rather than keep retrying. It only recommends.
+- **Discord** (Earn Stack): waits on the operator creating the server and bot.
+- Bybit from Railway (403): honest "not tracked after <date>" wording, a non-US proxy, or drop it: undecided.
+- Penalty-ignores-odds for giveaways (a design question), a competition size floor of $100 (the assistant's choice, one constant: `prizes.COMPETITION_MIN_TOP_PRIZE_USD`), the connect-wallet gate beyond the three hosted platforms: all in BACKLOG.
+- startup_jobs name link on startup_news: built strictly, expected ~0-1 a month; verify it ever fires before investing more.
+- `scripts/check_reproduction_masking.py` reports 2 PROBLEM cases and did so before the 2026-11-16 changes (it reads real DB items); not caused by them, not investigated.
 
-## Open issues, priority order
+## Traps (the expensive ones)
 
-1. **GitHub Actions Secrets are not configured — production cannot run at
-   all yet.** Confirmed via `gh run list` / `gh run view --log`:
-   `approval-poll.yml` has been crash-looping every ~5 minutes on missing
-   `DATABASE_URL` since the repo went public. Needed secrets (repo Settings
-   → Secrets and variables → Actions → New repository secret):
+- **Python in a bash heredoc halves backslashes** on this Windows setup: `\\n` becomes a real newline, `\\b` a backspace character. Write regex / string edits with the Edit or Write tool, or a script file; then `grep -c $'\x08' file`
+  and `python -c "import ast; ast.parse(...)"`. This corrupted five files before it was caught.
+- Local DNS can drop (scripts fail); `railway config plan` fails on an IaC CLI-version check (not applied); `SIGALRM` does not exist on Windows; DeepSeek's balance lags by minutes (see BACKLOG READ FIRST).
+- Telegram `t.me/s/<handle>` shows only the newest ~20 posts; a handle that answers 200 may be a hijacked or inactive channel (CoinMarketCapNews): check the newest post date AND the title.
 
-   | Secret | Where to get it | Required for |
-   |---|---|---|
-   | `DATABASE_URL` | Supabase dashboard → Project Settings → Database → Connection string (URI, "Session" mode) | both workflows |
-   | `TELEGRAM_BOT_TOKEN` | @BotFather → `/newbot` | both workflows |
-   | `TELEGRAM_OPERATOR_CHAT_ID` | DM the bot, then `https://api.telegram.org/bot<token>/getUpdates` (or @userinfobot) — this is the operator's own private chat with the bot, NOT any channel's chat_id | both workflows |
-   | `TELEGRAM_ALLOWED_USER_IDS` | @userinfobot for your own numeric id; comma-separate if more than one approver | `approval-poll.yml` |
-   | `DEEPSEEK_API_KEY` | platform.deepseek.com → API keys | both workflows (default triage/write model) |
-   | `ETHERSCAN_API_KEY` | etherscan.io/apis → sign up → create key (free tier: 3 calls/sec, 100k/day) | both workflows — `whale_movements` collection AND write-time history backfill on approve |
-   | `GEMINI_API_KEY` | aistudio.google.com/apikey | optional — free-tier alt triage model, not currently used by any live category |
+## How to check things
 
-   Once added: Actions tab → run `Collect` manually once (Run workflow
-   button) to confirm the full path before trusting the cron.
+```
+python scripts/check_earning.py       # earning scoring / gate / prizes / digest / selection (no DB, no network)
+python scripts/check_sources.py       # Whale Alert / news Telegram / ZachXBT / Binance corroboration / startup_news / Hustle shares
+python scripts/check_exchange_listings.py ; python scripts/check_voice_checks.py
+python scripts/earning_report.py [--unproven | --drafts --days 7]
+python -m bot.below_line --dry-run --hours 72
+python -m pipeline.source_probe [probe ids]          # local; Railway runs the same list daily
+```
+Railway: `railway logs --service collect-earning --lines 100`; `railway variables --service <name> --kv` (never print secrets); the DB is the same Supabase for all services, so a local script that writes is a production write.
 
-2. **`web3_jobs` source volume is thin.** 13/56 raw RemoteOK listings pass
-   the relevance gate per cycle, and only 2 have ever actually cleared
-   `review_threshold` (both went to `coincraft`; `alpha_edge_crypto` has
-   never had a qualifying candidate). Investigated 2026-09-11:
-   - Broadening RemoteOK's tag query (`web3`, `blockchain`, `defi` alongside
-     `crypto`) does **not** help — union of all four tags is 67 raw
-     listings, but the exact same 13 pass the relevance gate. Ruled out.
-   - Web3.career (`web3.career/api/v1`, via their "Bondex" platform) has a
-     real, structurally cleaner JSON/RSS API — but requires a free account +
-     API token (`?token=...` query param), which is outside what an
-     unattended agent can set up (account creation is off-limits). **Needs
-     the operator to sign up at `web3.career/web3-jobs-api` and hand over a
-     token** before a second collector gets built. Not currently blocking —
-     recommendation was to ship on RemoteOK alone and treat this as a later
-     volume upgrade, not a prerequisite.
+## Where the history is
 
-3. **`whale_movements` tuning not yet revisited.** Both tuned values below
-   are first-pass, calibrated against one clean cycle each — worth a few
-   more cycles of real data before adjusting further in either direction.
-
-4. **Exchange-to-exchange transfers can generate two `raw_items`** — one
-   per watched wallet's own `txlist`/`tokentx` call, since the collector
-   fetches per-address, not per-transaction. Not deduped across the two
-   sides. Lower priority: exchange↔exchange is already scored lower on
-   actionability, so the practical impact of a double-surface is likely
-   small. Candidate fix if it proves to matter: cross-check `tx_hash` at
-   collection time.
-
-5. **`defi_yields` APY-spike scoring gap** (oldest open item, pre-dates this
-   session): pools with 200%+ APY and 100+ point 7-day jumps score as high
-   as a healthy stable yield — `impact` saturates at 33%+ APY with no
-   ceiling-awareness, and `novelty` rewards a big swing regardless of
-   direction/plausibility. In practice this pattern usually signals
-   unsustainable token emissions, not a real opportunity. Candidate fix: a
-   penalty when APY is far above the category's own rolling
-   median/percentile (relative, not a fixed cutoff) — needs a rolling stat
-   over recent `raw_items`. See the `TODO(scoring)` comment in
-   `pipeline/score.py::score_defi_yields`. Deliberately still not
-   implemented — was waiting on the MVP loop validation, which is long done
-   now, so this is genuinely next-up whenever scoring work resumes.
-
-## Tuned config values and reasoning
-
-- **`whale_movements.collect_min_usd = $2,000,000`** — not the originally
-  proposed $500k. Exchange hot wallets move $500k as routine operations; at
-  that floor the collector would surface noise, not signal. DB-tunable
-  (`category_config.collect_min_usd`) specifically so it can come down later
-  without a redeploy if real daily volume proves thin. One clean cycle so
-  far: 8 collected, 3 cleared `review_threshold` — not enough data to
-  re-tune yet either direction.
-- **`INSTITUTIONAL_SENT_TX_THRESHOLD = 10,000`** (`collectors/whale_movements.py`)
-  — calibrated against real observed data: confirmed exchange-linked
-  counterparties had `sent_tx_count` in the millions (2.7M, 18.2M); genuine
-  external wallets had 1–1,331. 10,000 sits comfortably below the former and
-  above plausible high-activity retail use.
-- **`web3_jobs` undisclosed salary scores `impact = 30`, not `0`** —
-  live-verified only ~2% of RemoteOK's crypto-tagged listings disclose
-  `salary_max`. Zero would disqualify almost every real listing on the
-  feed; 30 reads as "unknown," not "bad," and doesn't punish the vast
-  majority of legitimate postings for something most listings never
-  disclose regardless of actual quality.
-- **`MIN_PRICE_CONFIDENCE = 0.8`, `MAX_PRICE_AGE_HOURS = 24`**
-  (`whale_movements`, both live-collection and write-time-backfill price
-  lookups) — DefiLlama's own reliability score, verified against two real
-  CoinGecko cross-checks (PROM, SPK, both correct at confidence 0.99).
-  Below either threshold, a price is treated as untrustworthy and the item
-  is skipped/omitted rather than published with a guessed dollar figure.
-- **`WHALE_MAX_AGE_HOURS = 24`** — generous over the 4h collection cadence
-  (a single missed/delayed cycle still loses nothing) while still enforcing
-  genuine freshness against Etherscan's no-recency-guarantee "last 100 txs."
-
-## Where to look next
-
-- [intelligence-bot-spec-v2.md](intelligence-bot-spec-v2.md) — full design,
-  section-numbered to match code comments.
-- [BACKLOG.md](BACKLOG.md) — deliberately-deferred items with fuller
-  narrative detail than this doc's summaries (git blame / commit history has
-  the rest, if a fix's exact reasoning needs re-deriving).
-- `gh run list` / `gh run view <id> --log` — check whether Actions Secrets
-  have been added yet and whether the cron is actually succeeding.
+`BACKLOG.md` sections, in order of build: Phase 0-4 (reliability, voices, channel remap, exchange_listings), Phase 5 (earning_opportunities, rounds 1-9, the source research, the platform sources, referral, competitions),
+"Channels and Phase 6" (this session's last block).
