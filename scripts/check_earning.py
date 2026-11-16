@@ -420,10 +420,95 @@ def main():
     check("removed sources have no collector functions", [n for n in ("fetch_epic", "fetch_gamerpower") if hasattr(C, n)], [])
     check("only Doctor of Credit is left as an RSS feed", sorted(C.RSS_FEEDS), ["doctorofcredit"])
     check("the registry is exactly the income sources", sorted(C.earning.SOURCES),
-          ["devpost", "doctorofcredit", "tg:airdropfind", "tg:airdrops_io", "tg:criptinho", "tg:incrypted_airdrops"])
+          ["devpost", "doctorofcredit", "immunefi", "superteam", "tg:airdropfind", "tg:airdrops_io", "tg:criptinho", "tg:incrypted_airdrops", "zindi"])
+    check("Galxe and the bounty-platform feeds are not built (operator)", [s for s in ("galxe", "yeswehack", "intigriti", "bugcrowd", "hackerone", "kucoin", "binance") if s in C.earning.SOURCES], [])
     for t, gated in [("free_game", True), ("freebie", True), ("credits", True), ("airdrop", False), ("hackathon", False),
                      ("bank_bonus", False), ("bounty", False), ("giveaway", False), ("cashback", False)]:
         check(f"not-income gate for type {t}", bool(C.earning.not_income_reason(t)), gated)
+
+    # ---- platforms that pay for work: Superteam Earn, Zindi, Immunefi audit competitions (operator 2026-11-16). Network mocked.
+    from datetime import timedelta
+    C.CALL_DELAY = 0
+    soon, later, past = (NOW + timedelta(days=9)).isoformat(), (NOW + timedelta(days=30)).isoformat(), (NOW - timedelta(days=2)).isoformat()
+    ST = [
+        {"id": "a", "slug": "global-usdc", "title": "Write a thread", "type": "bounty", "status": "OPEN", "rewardAmount": 1000, "token": "USDC", "deadline": soon,
+         "sponsor": {"name": "Raenest"}, "isWinnersAnnounced": False, "_count": {"Submission": 5}},
+        {"id": "b", "slug": "baobao", "title": "A narrative of buying BAOBAO", "type": "bounty", "status": "OPEN", "rewardAmount": 689655, "token": "BAOBAO", "deadline": soon,
+         "sponsor": {"name": "BAOBAO"}, "isWinnersAnnounced": False},
+        {"id": "c", "slug": "ukraine", "title": "Write about workshops", "type": "bounty", "status": "OPEN", "rewardAmount": 400, "token": "USDG", "deadline": soon,
+         "sponsor": {"name": "Superteam Ukraine"}, "isWinnersAnnounced": False},
+        {"id": "d", "slug": "closed", "title": "x", "type": "bounty", "status": "CLOSED", "rewardAmount": 10, "token": "USDC", "deadline": soon, "sponsor": {"name": "s"}},
+        {"id": "e", "slug": "decided", "title": "x", "type": "bounty", "status": "OPEN", "rewardAmount": 10, "token": "USDC", "deadline": soon, "sponsor": {"name": "s"}, "isWinnersAnnounced": True},
+        {"id": "f", "slug": "late", "title": "x", "type": "bounty", "status": "OPEN", "rewardAmount": 10, "token": "USDC", "deadline": past, "sponsor": {"name": "s"}},
+        {"id": "g", "slug": "job", "title": "Design a landing page", "type": "project", "status": "OPEN", "rewardAmount": 500, "token": "USDC", "deadline": later, "sponsor": {"name": "Acme"}},
+    ]
+    DETAIL = {"global-usdc": {"region": "GLOBAL", "description": "<p>Do the work</p>"}, "ukraine": {"region": None}, "baobao": {"region": "GLOBAL"}, "job": {"region": "INDIA"}}
+
+    def fake_json(url, params=None, headers=None, **kw):
+        if "/details/" in url:
+            return DETAIL[url.rsplit("/", 1)[1]]
+        return ST
+    real_get_json = C.get_json
+    C.get_json = fake_json
+    try:
+        st_raws, _ = C.fetch_superteam(NOW)
+    finally:
+        C.get_json = real_get_json
+    by = {r["ext_id"]: r for r in st_raws}
+    check("superteam: only open, undecided, future listings", sorted(by), ["a", "b", "c", "g"])
+    pa, pb, pc, pg = (C.build_payload(by[k], NOW) for k in ("a", "b", "c", "g"))
+    check("superteam: region GLOBAL from the detail endpoint -> worldwide", pa["geo"], "worldwide")
+    check("superteam: a chapter sponsor (Superteam Ukraine) with no region is NOT global", pc["geo"], "single")
+    check("superteam: a detail region other than GLOBAL is single", pg["geo"], "single")
+    check("superteam: a stablecoin competition is a pool with an expected value, never a per-person payout",
+          (pa["payout_kind"], pa["pool_usd"], pa["payout_usd"]), ("ev", 1000.0, 100.0))
+    check("superteam: a fixed-pay project's amount is stated", (pg["payout_kind"], pg["payout_usd"]), ("stated", 500.0))
+    check("superteam: a project-token reward is NOT priced (no payout, no pool) and is flagged", (pb["payout_usd"], pb["pool_usd"], pb["token_reward"]["token"]), (None, None, "BAOBAO"))
+    sa, sb, sc_ = E.score_earning(pa), E.score_earning(pb), E.score_earning(pc)
+    check("a token-denominated reward caps VALUE at 30 (below the 40 floor: it never reaches the operator)", (sb["value"] <= 30.0, E.passes_floors(sb)), (True, False))
+    check("the cap records what the value would have been", sb["value_capped_by"]["value_uncapped"] > sb["value"], True)
+    check("a stablecoin reward is not capped", "value_capped_by" in sa, False)
+    check("a chapter-scoped bounty scores lower on geography than a global one", sc_["value_components"]["geo"] < sa["value_components"]["geo"], True)
+    check("stablecoins: USDC / USDG yes, BAOBAO / SOL / NOS no", [E.is_stablecoin(t) for t in ("USDC", "usdg", "BAOBAO", "SOL", "NOS")], [True, True, False, False, False])
+
+    ZI = [
+        {"id": "genai", "title": "GenAI for Good", "open": True, "reward_type": "prize", "reward": "$40 000 USD", "participations_count": 400, "organization": {"name": "Acme"},
+         "start_time": past, "end_time": later, "entries_close_at": soon, "is_access_restricted": False},
+        {"id": "knowledge", "title": "Learn", "open": True, "reward_type": "knowledge", "reward": "Knowledge", "end_time": later},
+        {"id": "closed", "title": "Over", "open": False, "reward_type": "prize", "reward": "$1 000 USD", "end_time": later},
+        {"id": "secret", "title": "Private", "open": True, "reward_type": "prize", "reward": "$1 000 USD", "end_time": later, "secret_code_required": True},
+    ]
+    C.get_json = lambda url, params=None, headers=None, **kw: ZI
+    try:
+        z_raws, _ = C.fetch_zindi(NOW)
+    finally:
+        C.get_json = real_get_json
+    check("zindi: only an open, public, prize-paying competition", [r["ext_id"] for r in z_raws], ["genai"])
+    pz = C.build_payload(z_raws[0], NOW)
+    check("zindi: pool read from the reward text, expected value = pool / entrants, deadline = entries close",
+          (pz["pool_usd"], pz["payout_kind"], pz["payout_usd"], pz["deadline"][:10], pz["geo"]), (40000.0, "ev", 100.0, soon[:10], "worldwide"))
+
+    IM = [
+        {"project": "Audit Competition | Plether", "slug": "plether", "maxBounty": 80000, "rewardsToken": "USDC", "launchDate": past, "endDate": soon, "kyc": True},
+        {"project": "Standing bounty", "slug": "standing", "maxBounty": 500000, "rewardsToken": "USDC", "launchDate": past, "endDate": None, "kyc": False},
+        {"project": "Finished comp", "slug": "done", "maxBounty": 70000, "rewardsToken": "USDC", "launchDate": past, "endDate": past, "kyc": False},
+        {"project": "Open comp, no KYC", "slug": "nokyc", "maxBounty": 20000, "rewardsToken": "USDC", "launchDate": past, "endDate": later, "kyc": False},
+        {"project": "Paid in a token", "slug": "tok", "maxBounty": 90000, "rewardsToken": "ABC", "launchDate": past, "endDate": later, "kyc": False},
+    ]
+    C.get_json = lambda url, params=None, headers=None, **kw: IM
+    try:
+        i_raws, _ = C.fetch_immunefi(NOW)
+    finally:
+        C.get_json = real_get_json
+    check("immunefi: ONLY time-boxed competitions with a future end (never a standing program, never a finished one)", sorted(r["ext_id"].split(":")[0] for r in i_raws), ["nokyc", "plether", "tok"])
+    ip = {r["ext_id"].split(":")[0]: C.build_payload(r, NOW) for r in i_raws}
+    check("immunefi: KYC required is a fact (prereq + card), no KYC is a known fact too", (E.score_earning(ip["plether"])["kyc"], E.score_earning(ip["nokyc"])["kyc"]), (True, False))
+    check("immunefi: the prize is a pool, not a payout", (ip["plether"]["pool_usd"], ip["plether"]["payout_usd"]), (80000.0, None))
+    check("immunefi: a competition paid in a non-stablecoin token is capped like any token reward", E.score_earning(ip["tok"])["value"] <= 30.0, True)
+    check("KYC unknown stays unknown (never 'no KYC')", E.score_earning(dict(base))["kyc"], None)
+    from bot import notify as N
+    check("the card shows the KYC fact", N._score_text("earning_opportunities", {"score": 1, "score_breakdown": E.score_earning(ip["plether"])}).endswith("KYC required"), True)
+    check("the card shows 'no KYC' only when known", N._score_text("earning_opportunities", {"score": 1, "score_breakdown": E.score_earning(ip["nokyc"])}).endswith("no KYC"), True)
 
     # ---- the three exchange-announcement channels are corroboration only, never opportunity sources
     check("exchange channels are not candidate sources", [h for h in C.earning.CORROBORATION_ONLY_TELEGRAM if f"tg:{h}" in C.earning.SOURCES], [])

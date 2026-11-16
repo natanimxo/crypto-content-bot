@@ -2140,3 +2140,46 @@ the items are guides, not offers).
 **Paid research / user testing / AI-data work (Prolific, UserTesting, Respondent, Outlier, DataAnnotation): exist and pay real money, but there is no
 public listing, only marketing pages and a login.** Nothing to ingest and nothing to verify; at most a static, hand-curated "evergreen" list.
 **Learn & Earn (Coinbase, Binance): no API; Coinbase is 403 from Railway.**
+
+### Phase 5: Superteam Earn, Zindi, Immunefi audit competitions built (2026-11-16, operator rulings)
+
+**Built, in the operator's order.** All three are keyless JSON, tier 2 (a platform hosting third-party sponsors' prizes, like Devpost), in
+`collectors/earning_opportunities.py` (`fetch_superteam`, `fetch_zindi`, `fetch_immunefi`) and `earning.SOURCES`. `extra["structured"]` tells
+`build_payload` NOT to read a reward out of free text: amount, token and deadline are fields here.
+
+1. **Superteam region.** The LIST carries no region, but the DETAIL endpoint (`/api/listings/details/{slug}`) does: `region` is "Global",
+   "Ukraine", "Nigeria", ... It matters: of the 11 open listings, 2 are Ukraine-only (Superteam Ukraine) and the BAOBAO bounty is Nigeria-only.
+   `superteam_geo`: region "Global" -> worldwide; any other region -> single; no region -> a "Superteam <Country>" sponsor / title is a chapter
+   (single); otherwise unknown (the text is read). The geo component reflects it. NOTE the effect is modest (geo is 15% of value, 35 vs 100): a
+   Ukraine-only bounty still clears the floors at value ~60. If a chapter-scoped bounty should not reach a global audience at all, that is a
+   separate rule, not a scoring weight. The API host moved: `earn.superteam.fun` 308-redirects to `superteam.fun` (list, detail and listing pages).
+2. **Token-denominated rewards.** A reward in anything but a stablecoin (`earning.STABLECOINS`: USDC, USDT, USDG, DAI, PYUSD, ...) is an UNCLEAR
+   amount: not priced (pricing needs a token price = a valuation call, a different kind of claim from any other here), `token_reward` is stored and
+   VALUE is capped at `TOKEN_REWARD_VALUE_CAP = 30` (the breakdown keeps `value_capped_by` with the uncapped value). **The cap (30) is below the
+   value floor (40): such an item is stored and scored but never reaches the operator.** Correction to the ruling's premise: "same as any unknown
+   payout" -- unknown payouts are NOT capped at 30 today. An unknown payout scores 20-25 on the payout component only, so an airdrop with no stated
+   figure can still reach value ~58. The cap exists only for explicit token rewards. If unknown payouts should be capped too, that would remove most airdrop posts.
+3. **Immunefi: time-boxed audit competitions only.** A program qualifies only with a real `endDate` in the future, `launchDate` not in the future,
+   not paused, not invite-only. The ~200 standing programs have no end date and are never surfaced (a permanently-open bounty is not an
+   opportunity with a deadline). The prize is a POOL (`pool_usd`), never a per-person payout. KYC is a structured fact shown on the card
+   (`value 60 · trust 53 · referral no · no KYC` / `KYC required`); it replaces any wording-based guess, and "unknown" is never shown as "no KYC".
+   Right now 1 competition is open (Plether, $80k, ends 2026-11-16).
+   Zindi: only `open`, public, `reward_type == prize` competitions; the pool is read from the reward text; the page moved to zindi.world
+   (zindi.africa redirects; the stored link keeps zindi.africa, which has the older domain for the RDAP fact).
+   Expected value for pool competitions = pool / max(entrants, 10), the Devpost convention (`payout_kind = ev`, never penalised).
+
+**Not built, on purpose (operator).** YesWeHack / Intigriti / Bugcrowd / HackerOne feeds: the "new program launched" framing is right, but they are
+narrow for Earn Stack's audience; AVAILABLE IF VOLUME DISAPPOINTS (Intigriti createdAt, YesWeHack last_update_at, bounty-targets-data on GitHub;
+filter maxBounty > 0). Galxe: "anyone can create a campaign" makes it low trust by construction; scoring cannot fix that. Exchange campaigns
+(KuCoin / Binance / Bitget): token payouts + KYC + trading requirements + overlap with exchange_listings.
+
+**Volume re-measured after the "50$" fix (in-scope sources only, 2026-11-16).** Posts per day that clear BOTH floors: airdropfind ~1.7/day (19 posts
+in 1.2 days, 2 pass), criptinho ~0.9, Doctor of Credit ~1.2, incrypted_airdrops ~0.7, airdrops_io ~0.5: about 5/day from Telegram + DoC at
+value >= 40, ~2.5/day at 55. Devpost is the swing: 48 open hackathons (42 backfill, 6 new in the first day after), almost all pass 40, 36 pass
+55, 31 pass 60, so its steady-state turnover (unmeasured, days of data) decides the total. Estimate stays "about 10/day at 40" -- the fix
+did not move it materially (2 payouts, 2 capital figures). The three new sources add 17 items that clear both floors on day one, then
+roughly 1/day or less (single snapshot: Superteam deadlines run 3-28 days).
+**Scoring weakness found by this measurement (NOT fixed, needs a ruling):** value 40 is reachable with ZERO payout. Capital, prerequisites and
+geography contribute ~50 points to any free, global, no-KYC item, so a Superteam bounty with 279 entrants on a $250 pool (expected payout $0.90)
+scores 51.5 and a $500 pool with 282 entrants (expected $1.77) scores 60. Raising the value floor to 55 does NOT remove the second. Candidate fix:
+a third floor on the EXPECTED PAYOUT (e.g. >= $5 or $10) -- tightening, not widening, as the operator prefers.

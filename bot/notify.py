@@ -109,6 +109,8 @@ def _score_text(category: str, row: dict) -> str:
             if ref is not None:        # a fact beside the two scores, not part of either: can the reader invite others and earn
                 text += " · referral " + ("yes ⚠ recruitment-shaped" if ref.get("recruitment_shape") else "yes" if ref.get("available")
                                           else "unconfirmed (source link carried a code)" if ref.get("link_code") else "no")
+            if b.get("kyc") is not None:                # a fact beside the scores (113 of 218 Immunefi programs require it): shown, never inferred
+                text += " · KYC required" if b["kyc"] else " · no KYC"
             return text
     return f"score {row['score']}/100"
 

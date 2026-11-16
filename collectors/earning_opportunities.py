@@ -135,6 +135,143 @@ def fetch_devpost(now: datetime):
     return raws, now
 
 
+# ---- Platforms that pay money for work or skill (research 2026-11-16; operator: Superteam Earn, Zindi, Immunefi audit competitions, in that order).
+# All three are keyless JSON, verified from Railway. `extra["structured"]` tells build_payload NOT to read a reward out of free text: the
+# amount, the token and the deadline are fields here, and a stray "$" in a description must not become the payout.
+
+SUPERTEAM_LIST = "https://superteam.fun/api/listings"          # earn.superteam.fun 308-redirects here (checked 2026-11-16)
+SUPERTEAM_DETAIL = "https://superteam.fun/api/listings/details/{slug}"
+SUPERTEAM_PAGE = "https://superteam.fun/earn/listing/{slug}"
+_CHAPTER_RE = re.compile(r"\b(?i:superteam)[ -]+(?!(?i:earn|dao|labs?|foundation|global)\b)([A-Z][A-Za-z]+(?: [A-Z][A-Za-z]+)?)", re.UNICODE)
+
+
+def superteam_geo(region: str | None, sponsor: str | None, title: str | None) -> str | None:
+    """'worldwide' | 'single' | None (unknown: build_payload then reads the text). A chapter-scoped listing is NOT global (operator 2026-11-16):
+    the detail endpoint's `region` is authoritative; failing that, a 'Superteam <Country>' sponsor / title is a chapter."""
+    r = (region or "").strip().upper().replace("_", " ")
+    if r:
+        return "worldwide" if r in ("GLOBAL", "WORLDWIDE") else "single"
+    m = _CHAPTER_RE.search(f"{sponsor or ''} | {title or ''}")
+    return "single" if m else None
+
+
+def _parse_dt(s) -> datetime | None:
+    try:
+        return datetime.fromisoformat(str(s).replace("Z", "+00:00")) if s else None
+    except ValueError:
+        return None
+
+
+def fetch_superteam(now: datetime):
+    d = get_json(SUPERTEAM_LIST, params={"take": 50}, headers=HEADERS)
+    listings = d if isinstance(d, list) else d.get("listings") or d.get("data") or []
+    raws = []
+    for it in listings:
+        slug = it.get("slug")
+        deadline = _parse_dt(it.get("deadline"))
+        if not slug or it.get("status") != "OPEN" or it.get("isWinnersAnnounced") or (deadline and deadline <= now):
+            continue
+        sponsor = (it.get("sponsor") or {}).get("name") or ""
+        region, detail_text = None, ""
+        try:                                                   # the list carries no region; the detail endpoint does
+            time.sleep(CALL_DELAY)
+            det = get_json(SUPERTEAM_DETAIL.format(slug=slug), headers=HEADERS)
+            region = det.get("region")
+            detail_text = _strip_html(det.get("description") or "")[:900]
+        except Exception as exc:                               # never fatal: the chapter name and the text still say something
+            logger.warning("earning: superteam detail %s failed: %s", slug, exc)
+        amount, token = it.get("rewardAmount"), (it.get("token") or "").strip()
+        extra = {"structured": True, "deadline": _iso(deadline) if deadline else None, "geo": superteam_geo(region, sponsor, it.get("title")),
+                 "region": region, "steps_text": "", "winners": None}
+        kind = it.get("type") or "bounty"
+        if amount and earning.is_stablecoin(token):
+            subs = (it.get("_count") or {}).get("Submission") or 0
+            if kind == "bounty":                               # a competition: the figure is the prize POOL, shared by position
+                extra.update(pool_usd=float(amount), payout_usd=round(float(amount) / max(subs, 10), 2), payout_kind="ev", registrations=subs)
+            else:                                              # a project / fixed-pay job: what the selected applicant is paid
+                extra.update(payout_usd=float(amount), payout_kind="stated")
+            money = f"${float(amount):,.0f} {token}"
+        elif amount:                                           # paid in a project's own token: an UNCLEAR amount, never priced
+            extra["token_reward"] = {"token": token or "token", "amount": float(amount)}
+            money = f"{float(amount):,.0f} {token or 'tokens'}"
+        else:
+            money = "reward not stated"
+        title = f"{it.get('title')} ({sponsor}): {money}"
+        raws.append({"source": "superteam", "ext_id": str(it.get("id") or slug), "title": title,
+                     "text": f"{it.get('title')}. {kind} on Superteam Earn by {sponsor}. Reward {money}. Deadline {(deadline or now).date()}. {detail_text}",
+                     "links": [SUPERTEAM_PAGE.format(slug=slug)], "url": SUPERTEAM_PAGE.format(slug=slug), "published_at": _iso(now), "extra": extra})
+    return raws, now
+
+
+ZINDI_LIST = "https://api.zindi.africa/v1/competitions"
+ZINDI_PAGE = "https://zindi.africa/competitions/{id}"
+
+
+def fetch_zindi(now: datetime):
+    d = get_json(ZINDI_LIST, params={"per_page": 40}, headers=HEADERS)
+    comps = d if isinstance(d, list) else d.get("data") or d.get("competitions") or []
+    raws = []
+    for c in comps:
+        end = _parse_dt(c.get("end_time"))
+        close = _parse_dt(c.get("entries_close_at"))
+        if not c.get("open") or c.get("secret_code_required") or c.get("private") or (end and end <= now):
+            continue
+        if (c.get("reward_type") or "").lower() != "prize":     # knowledge / points / jobs are not money
+            continue
+        reward_text = str(c.get("reward") or "")
+        amounts = earning.extract_amounts_usd(reward_text)
+        if not amounts:
+            continue
+        pool, parts = max(amounts), c.get("participations_count") or 0
+        org = (c.get("organization") or {}).get("name") if isinstance(c.get("organization"), dict) else c.get("organization")
+        cid = str(c.get("id"))
+        deadline = close or end
+        raws.append({"source": "zindi", "ext_id": cid, "title": f"{c.get('title')} (Zindi competition): {reward_text} in prizes",
+                     "text": f"{c.get('title')} data-science competition on Zindi{' by ' + org if org else ''}. Prize {reward_text}. Ends {(end or now).date()}.",
+                     "links": [ZINDI_PAGE.format(id=cid)], "url": ZINDI_PAGE.format(id=cid), "published_at": _iso(_parse_dt(c.get("start_time")) or now),
+                     "extra": {"structured": True, "payout_usd": round(pool / max(parts, 10), 2), "payout_kind": "ev", "pool_usd": pool, "registrations": parts,
+                               "deadline": _iso(deadline) if deadline else None, "geo": "single" if c.get("is_access_restricted") else "worldwide",
+                               "winners": None, "steps_text": ""}})
+    return raws, now
+
+
+IMMUNEFI_JSON = "https://immunefi.com/public-api/bounties.json"
+IMMUNEFI_PAGE = "https://immunefi.com/audit-competition/{slug}/"
+
+
+def fetch_immunefi(now: datetime):
+    """ONLY the time-boxed audit competitions (a program with a real end date still in the future). The ~200 standing bug bounties are never
+    surfaced: a permanently-open program is not an opportunity with a deadline, and resurfacing it would be manufacturing an event (operator)."""
+    data = get_json(IMMUNEFI_JSON, headers=HEADERS)
+    raws = []
+    for p in data if isinstance(data, list) else []:
+        end, start = _parse_dt(p.get("endDate")), _parse_dt(p.get("launchDate"))
+        if not end or end <= now or (start and start > now) or p.get("isPaused") or p.get("inviteOnly"):
+            continue
+        try:
+            pool = float(p.get("maxBounty") or 0)
+        except (TypeError, ValueError):
+            pool = 0.0
+        token, slug = (p.get("rewardsToken") or "").strip(), p.get("slug") or ""
+        if not slug:
+            continue
+        kyc = bool(p.get("kyc"))
+        extra = {"structured": True, "deadline": _iso(end), "geo": "worldwide", "winners": None, "steps_text": "", "kyc": kyc, "kyc_known": True}
+        if pool and earning.is_stablecoin(token):
+            extra.update(pool_usd=pool)                        # a pool shared by findings: never a per-person payout
+            money = f"${pool:,.0f} {token}"
+        elif pool:
+            extra["token_reward"] = {"token": token or "token", "amount": pool}
+            money = f"{pool:,.0f} {token or 'tokens'}"
+        else:
+            money = "prize not stated"
+        name = p.get("project") or slug
+        raws.append({"source": "immunefi", "ext_id": f"{slug}:{end.date()}", "title": f"{name}: smart-contract audit competition, {money}",
+                     "text": f"{name} audit competition on Immunefi. Prize pool {money}. Ends {end.date()}.",
+                     "links": [IMMUNEFI_PAGE.format(slug=slug)], "url": IMMUNEFI_PAGE.format(slug=slug), "published_at": _iso(start or now), "extra": extra})
+    return raws, now
+
+
 def fetch_rss(source_id: str, now: datetime):
     url, must = RSS_FEEDS[source_id]
     parsed = feedparser.parse(_get_text(url).encode("utf-8"))
@@ -222,7 +359,7 @@ def build_payload(raw: dict, now: datetime) -> dict:
     # The payout is read from the text WITHOUT its referral clauses: "$25 for each friend you invite" is not the offer's own payout.
     base_text, _ = earning.split_referral(text)
     referral = earning.extract_referral(text)
-    if payout is None and type_ != "hackathon":
+    if payout is None and type_ != "hackathon" and not extra.get("structured"):
         stated, kind = earning.extract_reward(base_text, type_)
         if stated is not None and kind == "pool":
             pool_usd = stated          # a total shared among participants: stated, but not what one reader receives
@@ -239,6 +376,8 @@ def build_payload(raw: dict, now: datetime) -> dict:
     if deadline is None:
         deadline = earning.extract_deadline(text, now)
     prereqs = earning.extract_prereqs(text[:600] if src["kind"] == "rss" else text)   # a long article body mentions unrelated things
+    if extra.get("kyc_known"):         # a structured fact (Immunefi) replaces whatever the wording suggests
+        prereqs = [p for p in prereqs if p != "kyc"] + (["kyc"] if extra.get("kyc") else [])
     capital = earning.extract_capital_usd(text, type_)
     effort = earning.estimate_effort_minutes(text, type_, prereqs)
     geo = extra.get("geo") or earning.geo_breadth(text, SOURCE_GEO_DEFAULT.get(raw["source"]))
@@ -248,7 +387,7 @@ def build_payload(raw: dict, now: datetime) -> dict:
         "source_tier": src["tier"], "kind": src["kind"], "published_at": raw["published_at"], "url": raw["url"],
         "landing_url": landing_norm, "landing_domain": earning.registrable_domain(host), "referral_link": earning.is_referral_link(landing_raw or ""),
         "type": type_, "payout_usd": payout, "payout_kind": payout_kind, "pool_usd": pool_usd, "unclear_usd": unclear_usd,
-        "referral": referral,
+        "referral": referral, "token_reward": extra.get("token_reward"), "kyc_known": bool(extra.get("kyc_known")),
         "other_amount_max": max([a for a in earning.extract_amounts_usd(base_text) if payout is None or abs(a - payout) > 0.5] or [0.0]),
         "deadline": _iso(deadline) if deadline else None, "capital_usd": capital, "effort_minutes": effort, "prereqs": prereqs, "geo": geo,
         "steps_text": extra.get("steps_text") or "",
@@ -506,6 +645,9 @@ def collect() -> int:
                 return rows
 
             raws += run("devpost", lambda: fetch_devpost(now), None)
+            raws += run("superteam", lambda: fetch_superteam(now), None)
+            raws += run("zindi", lambda: fetch_zindi(now), None)
+            raws += run("immunefi", lambda: fetch_immunefi(now), None)
             for sid in RSS_FEEDS:
                 raws += run(sid, lambda sid=sid: fetch_rss(sid, now), STALE_DAYS[sid])
             for h in earning.TELEGRAM_HANDLES:

@@ -47,6 +47,11 @@ VALUE_FLOOR = 40.0
 SOURCES = {
     "devpost": {"name": "Devpost", "tier": 2, "kind": "api", "default_type": "hackathon"},
     "doctorofcredit": {"name": "Doctor of Credit", "tier": 2, "kind": "rss", "default_type": "bank_bonus"},
+    # Platforms that pay for work or skill (added 2026-11-16, keyless JSON, verified from Railway). Tier 2 like Devpost: a platform that hosts
+    # third-party sponsors' prizes, not the sponsor itself.
+    "superteam": {"name": "Superteam Earn", "tier": 2, "kind": "api", "default_type": "bounty"},
+    "zindi": {"name": "Zindi", "tier": 2, "kind": "api", "default_type": "hackathon"},
+    "immunefi": {"name": "Immunefi audit competitions", "tier": 2, "kind": "api", "default_type": "bounty"},
     "tg:airdropfind": {"name": "Airdrop Finder (Telegram)", "tier": 3, "kind": "telegram", "default_type": "airdrop"},
     "tg:airdrops_io": {"name": "AIRDROPS.IO (Telegram)", "tier": 3, "kind": "telegram", "default_type": "airdrop"},
     "tg:incrypted_airdrops": {"name": "Incrypted Airdrops (Telegram)", "tier": 3, "kind": "telegram", "default_type": "airdrop"},
@@ -635,7 +640,19 @@ def has_multilevel(text: str) -> bool:
     return bool(ref) and bool(_MULTILEVEL_COUNTED_RE.search(t))
 
 
-REFERRAL_VALUE_MAX = 12.0            # points of the 100-point value score a referral program can ever add ("around 10-15%")
+# ---- Token-denominated rewards (operator 2026-11-16): "689,655 BAOBAO" is not a dollar figure. A reward paid in anything but a stablecoin is an
+# UNCLEAR amount: it is never priced (pricing it needs a token price, i.e. a valuation call, a different kind of claim from any other this
+# system makes) and the item's VALUE is capped at TOKEN_REWARD_VALUE_CAP. NOTE the cap is below VALUE_FLOOR: such an item is recorded and
+# scored but never reaches the operator.
+STABLECOINS = {"usd", "usdc", "usdt", "usdg", "dai", "pyusd", "fdusd", "usde", "tusd", "busd", "usdp", "gusd", "lusd"}
+TOKEN_REWARD_VALUE_CAP = 30.0
+
+
+def is_stablecoin(token: str | None) -> bool:
+    return (token or "").strip().lower() in STABLECOINS
+
+
+REFERRAL_VALUE_MAX = 12.0           # points of the 100-point value score a referral program can ever add ("around 10-15%")
 REFERRAL_RECRUITMENT_PENALTY = 30.0  # trust points lost when referral earnings exceed the base payout OR the wording is multi-level (no official-source exemption, operator 2026-11-16)
 
 
@@ -771,10 +788,18 @@ def score_earning(payload: dict) -> dict:
     base = round(sum(VALUE_WEIGHTS[k] * vc[k] for k in VALUE_WEIGHTS), 1)
     bonus = round(REFERRAL_VALUE_MAX / 100.0 * referral_component(payload), 1)      # 0 .. REFERRAL_VALUE_MAX points, added on top
     value = round(min(100.0, base + bonus), 1)
+    uncapped = value
+    if payload.get("token_reward"):
+        value = min(value, TOKEN_REWARD_VALUE_CAP)        # a non-stablecoin token reward is an unclear amount, never priced (operator 2026-11-16)
     tc = trust_components(payload)
     trust = round(max(0.0, min(100.0, sum(v for k, v in tc.items() if not k.endswith("penalty")) - sum(v for k, v in tc.items() if k.endswith("penalty")))), 1)
-    return {"value": value, "trust": trust, "value_base": base, "referral_bonus": bonus, "referral": referral_info(payload),
-            "value_components": vc, "trust_components": tc}
+    kyc = True if "kyc" in (payload.get("prereqs") or []) else (False if payload.get("kyc_known") else None)    # None = unknown, never "no"
+    out = {"value": value, "trust": trust, "value_base": base, "referral_bonus": bonus, "referral": referral_info(payload), "kyc": kyc,
+           "value_components": vc, "trust_components": tc}
+    if payload.get("token_reward"):
+        out["value_capped_by"] = {"reason": "token-denominated reward (not a stablecoin): unclear amount, never priced", "cap": TOKEN_REWARD_VALUE_CAP,
+                                  "value_uncapped": uncapped, "token": payload["token_reward"].get("token")}
+    return out
 
 
 def passes_floors(breakdown: dict) -> bool:
