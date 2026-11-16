@@ -2099,3 +2099,44 @@ instructions to defeat identity verification with forged documents. Neither the 
 clear the floor). Candidate gate terms: forged / photoshopped documents (фотошоп, "photoshop" near statement / KYC / document), fake GPS /
 spoofed location, "VPN" paired with a residency claim. Proposed as a deterministic gate reason ("instructs how to defeat identity
 verification"); not added unasked.
+
+### Phase 5: new income sources -- research, verified from Railway (2026-11-16)
+
+**Method.** 52 candidate endpoints in `pipeline/source_probe.py`, each fetched with no credentials FROM RAILWAY (`collect-earning`, 2026-11-16
+06:31 UTC, stored in run_logs `source_probe`) and from the dev machine, then compared. The collect-earning service had silently done nothing for
+its first two cron slots because its `DATABASE_URL` was the placeholder host `db.xxxxxxxxxxxx.supabase.co` (fixed by the operator at ~06:00 UTC):
+a service is not "running" until it has a run_logs row. Railway vs local DIFFERED for: OKX (12 announcement types locally, 4 from Railway --
+the regional feed again), Coinbase Learn (200 local, 403 Railway), Bybit (200 local, 403 Railway, known). Immunefi's public JSON was added
+after the first run and is verified at the next cycle (08:30 UTC).
+
+**Ranked by trustworthiness (platform that holds the money > aggregator > open campaign tool), then fit. Volume is a single snapshot, not measured turnover.**
+1. **Superteam Earn** `earn.superteam.fun/api/listings` -- keyless JSON, Railway 200. Real money (USDC / USDG; some listings pay a project's own token: only
+   USDC/USDG/USDT may count as USD -- one listing is "689,655 BAOBAO"). Fields: rewardAmount, token, deadline, sponsor, status. 11 open, ~$25k in stablecoin.
+   Writing, design, video, dev tasks: fits CoinCraft's non-technical audience. Gaps: the `type` filter is ignored (project/grant return the same 11); the list
+   exposes no region, and some listings are country chapters (Superteam Ukraine) -- geo needs the per-listing endpoint (unverified).
+2. **Zindi** `api.zindi.africa/v1/competitions` -- keyless JSON, Railway 200 (10, newest end 2027-02). `reward` "$40 000 USD", open flag, dates, organisation.
+   Cash prizes; global participation (Africa-founded, some competitions region-limited). Requires data-science skill.
+3. **Immunefi** `immunefi.com/public-api/bounties.json` -- keyless JSON, 218 programs (6 MB), maxBounty, rewardsToken (USDC), launchDate, endDate; audit
+   competitions have a fixed window and a prize (Plether, $80k, ends today). Local 200; Railway pending. 113 of 218 require KYC. Security-researcher audience.
+4. **Bug bounty program feeds** -- YesWeHack `api.yeswehack.com/programs` (bounty_reward_min/max), Intigriti `app.intigriti.com/api/core/public/programs`
+   (minBounty/maxBounty, createdAt), Bugcrowd `engagements.json` (rewardSummary), bounty-targets-data on GitHub (HackerOne / Bugcrowd / YesWeHack / Intigriti
+   scopes). All Railway 200, keyless, global. Pay real money, but they are ONGOING programs, not time-boxed offers; skill-gated; many VDPs pay nothing
+   (filter maxBounty > 0). Use only as a "new program launched" signal.
+5. **KuCoin activities** `api.kucoin.com/api/v3/announcements?annType=activities` -- keyless, Railway 200 (7). Listing campaigns with token giveaways ("Matrix (MTX)
+   70,000 MTX Giveaway"), trading competitions ("Win your share of 550,000 USDT"). Official, but paid in tokens, needs KYC and trading, and it overlaps
+   exchange_listings (the same event on two channels). **Binance CMS** catalog 93 ("Latest Activities"): Railway 200; trading competitions and quiz-to-earn
+   posts; HTML-in-JSON, needs a parser. **Bitget** announcements: Railway 200, but today's items are notices, not campaigns. **OKX**: the feed differs from
+   Railway (see above) -- do not trust. **Bybit / Coinbase Learn: 403 from Railway.**
+6. **Devfolio** `api.devfolio.co/api/hackathons` -- Railway 200 (20, to 2027-03), NO prize fields, many in-person in India: weak. **HackerEarth** events: Railway 200 but
+   corporate events / webinars, not prize hackathons: weak.
+7. **Galxe** GraphQL (POST) -- Railway 200; campaigns anyone can create ("like, comment and RT", "Win $50 USDT"): tier 3 by construction. Possible only as
+   a low-trust source behind the existing gate.
+
+**Exist, but NOT usable:** Sherlock (JSON works, but the feed holds only finished contests, newest 2026-06); Topcoder (v6 returns drafts/tests, 0 active,
+and the 404 path in the probe is wrong -- not worth chasing); Algora (200, empty); Gitcoin bounties (404, discontinued); DoraHacks (404, no known API);
+ETHGlobal / MLH / Code4rena / Cantina / CodeHawks / HackenProof / Immunefi site (HTML only, no feed); Kaggle (401, auth); AIcrowd (401); DrivenData and
+Prolific and IssueHunt (login wall); Numerai (not an API); Layer3 (403); DefiLlama airdrops (404); airdrops.io RSS (works, newest item 2026-10-02, and
+the items are guides, not offers).
+**Paid research / user testing / AI-data work (Prolific, UserTesting, Respondent, Outlier, DataAnnotation): exist and pay real money, but there is no
+public listing, only marketing pages and a login.** Nothing to ingest and nothing to verify; at most a static, hand-curated "evergreen" list.
+**Learn & Earn (Coinbase, Binance): no API; Coinbase is 403 from Railway.**
