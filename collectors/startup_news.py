@@ -49,10 +49,10 @@ HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; crypto-content-bot)"}
 
 _TAG_RE = re.compile(r"<[^>]+>")
 _NOT_NEWS_CATEGORIES = {"sponsored", "partner content", "press release", "advertorial", "opinion", "analysis", "podcast", "newsletter", "events", "event", "video"}
-_NOT_NEWS_TITLE_RE = re.compile(r"^\s*(?:sponsored|partner(?:ed)? content|press release|opinion|podcast|webinar|event)\b|\bsponsored\b|\bpaid post\b", re.IGNORECASE)
+_NOT_NEWS_TITLE_RE = re.compile(r"^\s*(?:sponsored|partner(?:ed)? content|press release|opinion|podcast|webinar|event)\b|\bsponsored\b|\bpaid post\b|\bsummit\b|\bdisrupt\b|\bwebinar\b|\bpass rates?\b|\bnewsletter\b", re.IGNORECASE)
 
 _RAISE_RE = re.compile(r"\b(?:raises?|raised|secures?|secured|lands?|landed|closes?|closed|bags?|nets?|snags?|gets|announces)\b", re.IGNORECASE)
-_ACQ_RE = re.compile(r"\b(?:acquires?|acquired|acquisition of|to acquire|buys|bought|merges? with|snaps up|takes over)\b", re.IGNORECASE)
+_ACQ_RE = re.compile(r"\b(?:acquires?|acquired|acquisition of|to acquire|buys|bought|merges? with|snaps up)\b", re.IGNORECASE)
 _FUND_RE = re.compile(r"\d\s?(?:[mkb]n?|million|billion)\s+(?:\w+\s+){0,2}fund\b|\b(?:new|fresh|second|third|debut)\s+(?:\w+\s+)?fund\b|\bfund (?:ii|iii|iv|v)\b", re.IGNORECASE)
 _MONEY_RE = re.compile(
     r"(?P<all>(?P<cur>[$€£])\s?(?P<n>\d[\d.,]*)\s?(?P<u>bn|billion|b|million|mn|m|thousand|k)?(?![\w])"
@@ -89,6 +89,7 @@ def parse_money(text: str) -> dict | None:
 
 def company_from_title(title: str, verb_re: re.Pattern) -> str | None:
     """The company in '<descriptor> <Company> raises ...': the trailing run of capitalised words before the verb ('AI inference startup Daisytuner' -> 'Daisytuner')."""
+    title = re.sub(r"^\s*(?:exclusive|breaking|just in|update)\s*:\s*", "", title or "", flags=re.IGNORECASE)
     m = verb_re.search(title or "")
     if not m:
         return None
@@ -103,6 +104,22 @@ def company_from_title(title: str, verb_re: re.Pattern) -> str | None:
     return name if 2 <= len(name) <= 40 else None
 
 
+# An acquisition's PRICE only when the text says it is the price ("for $8 billion", "valued at", "a deal worth"): a figure in the same sentence is often something else
+# ("WeRoad acquires Swiss TravelTribe as it targets EUR 70M in M&A-driven growth" -- a target, not a price).
+_PRICE_RE = re.compile(r"\b(?:for|valued at|worth|deal of)\s+(?:about |around |roughly |an estimated |up to |nearly |over )?(?=[$€£])", re.IGNORECASE)
+
+
+def same_story(a: dict, b: dict) -> bool:
+    """The same raise reported by two outlets: equal dollar-equivalent amount (within 1%) AND company names that overlap (one contains the other, or they share a word of 4+ letters)."""
+    ua, ub = a.get("amount_usd_equiv"), b.get("amount_usd_equiv")
+    if not ua or not ub or abs(ua - ub) > 0.01 * max(ua, ub):
+        return False
+    na, nb = (a.get("company") or "").lower(), (b.get("company") or "").lower()
+    if not na or not nb:
+        return False
+    return na in nb or nb in na or bool(set(re.findall(r"[a-z0-9]{4,}", na)) & set(re.findall(r"[a-z0-9]{4,}", nb)))
+
+
 def classify(title: str, summary: str, categories: list[str] | None = None, link: str = "") -> dict | None:
     """{story_type, company, money, stage, led_by} for a qualifying story, else None. See the module docstring for what qualifies."""
     cats = {c.lower() for c in categories or []}
@@ -111,7 +128,8 @@ def classify(title: str, summary: str, categories: list[str] | None = None, link
     head = f"{title}. {(summary or '')[:300]}"
     if _ACQ_RE.search(title):
         company = company_from_title(title, _ACQ_RE)
-        return {"story_type": "acquisition", "company": company, "money": parse_money(head), "stage": None, "led_by": None} if company else None
+        pm = _PRICE_RE.search(head)
+        return {"story_type": "acquisition", "company": company, "money": parse_money(head[pm.start():]) if pm else None, "stage": None, "led_by": None} if company else None
     if _RAISE_RE.search(title) and not _FUND_RE.search(title):
         money = parse_money(head)
         if not money:
@@ -207,13 +225,15 @@ def collect() -> int:
             items, merged = [], {}
             for source, entry, published, c in sorted(cands, key=lambda x: x[2] or now):
                 key = (c["company"] or entry["title"]).lower()
-                if key in seen:
-                    if key in merged:
-                        merged[key]["also_covered_by"].append(SOURCE_LABEL[source])
-                    continue
-                seen.add(key)
                 link = jobs.get(normalise_company(c["company"]))
                 payload = to_payload(c, source, entry, published, link)
+                twin = next((p for p in merged.values() if same_story(p, payload)), None)
+                if key in seen or twin is not None:
+                    holder = merged.get(key) or twin
+                    if holder is not None and SOURCE_LABEL[source] not in holder["also_covered_by"] and SOURCE_LABEL[source] != holder["source_name"]:
+                        holder["also_covered_by"].append(SOURCE_LABEL[source])
+                    continue
+                seen.add(key)
                 merged[key] = payload
                 items.append((f"{source}:{entry['id']}", payload))
             source_id = get_or_create_source(conn, CATEGORY, SOURCE_NAME, "rss", {"feeds": list(FEEDS)})
