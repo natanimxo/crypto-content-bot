@@ -2212,3 +2212,28 @@ comfortably above the target of one good item every two days. Caveats: (1) the e
 refreshed, so a listing seen early passes even if it gets crowded later (SSR has 11 entrants today: $27 expected; at 60 it would be $5);
 (2) turnover is a single snapshot; (3) the crowded content bounties are the bulk of the ones that fail, so the floor removes exactly the kind of
 card that would have said "$250 pool" to a reader with a 1-in-280 chance.
+
+### Phase 5: the new platform sources on Railway, and writing cards for them (2026-11-16)
+
+**Verified from Railway** (run at 08:04 UTC, run_logs `collect_earning_opportunities`): superteam 11 items, zindi 7, immunefi 1, inserted and scored with
+the new code. 13 clear all three floors (Superteam 6, Zindi 6, Immunefi 1). Domain-age facts: superteam.fun 1,876 days, zindi.africa 3,177, immunefi.com
+2,255 -> trust 62 for all three. The first CoinCraft card from them (Raenest, value 77.9) was sent at 08:05.
+
+**Drafting problems found by generating a card for each type (not visible in scoring).** The landing-page enrichment works well for Superteam and
+Zindi (it returns real steps, a prize ladder, eligibility) but those facts are so dense that the writer overshot the 400-650 character budget (+15
+to +300 characters) and the guard then rejected the draft after every retry; Devpost / Immunefi cards (enrichment returns nothing) were fine.
+Fixes, in `pipeline/post_facts.py` and `pipeline/write_post.py`: (1) at most 3 steps (80 characters each), then "the rest are on the offer's page";
+the prize ladder is cut at 120 characters; (2) a step or an eligibility clause about a REFERRAL / promo code is never handed to the writer (the
+guard rejects referral language and the operator adds referral links by hand, so a post built from such a step could only fail); (3) a structured
+platform's own deadline beats the page text (the page showed Dec 14 07:29 for Dec 13 23:59 UTC and the guard checks the structured date: Zindi
+Dis-Chem could never pass); (4) `VOICE_MAX_RETRIES_BY_CATEGORY["earning_opportunities"] = 9` (more draws, not a longer limit).
+**Result: 5 of 6 tested cards now write (Dis-Chem, GenAI for Good, MultiHopper, SSR.FUN, Underwater Vessel, AMD, AI Agents for RAN, Telco all pass at
+least once); the Raenest bounty still fails every time (664-694 characters).** It has three tracks, a 25-place prize ladder and steps that are
+mostly about a referral code. If it is approved the draft fails and the operator writes it by hand with Edit.
+
+**Other things seen.** (a) The connect-wallet-to-claim gate matched a bounty STEP ("connect your wallet and grab your referral link", worm
+Premier League bounty) and held it. It was under the payout floor anyway, but the rule reads any "connect your wallet"; for a vetted platform's
+own bounty text it should probably look only at the claim-shaped alternatives -- not changed, needs a ruling. (b) The Raenest bounty REQUIRES each
+participant to promote Raenest with their own referral code; the post cannot say so (guard). (c) MultiHopper's listing title says "Up to $50,000 +
+Revenue Share" while the structured reward is $5,000 USDC; the card repeats both ("up to $50,000 plus revenue share, including $5,000 USDC") --
+the sponsor's own claim, kept, but the structured figure is the reliable one.

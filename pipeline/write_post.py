@@ -1814,6 +1814,9 @@ NEUTRALITY_CHECKED_CATEGORIES = {"macro_news"}
 SPECULATION_CHECKED_CATEGORIES = {"hacks_exploits"}
 
 
+# earning_opportunities from the platform sources (Superteam, Zindi) carries a real steps list, a prize ladder and eligibility, so a draft lands a few
+# characters over 650 more often than an airdrop post does; 4 of 6 such drafts failed at 5 retries on 2026-11-16 (+15 to +120 characters). More draws, not a longer limit.
+VOICE_MAX_RETRIES_BY_CATEGORY = {"earning_opportunities": 9}
 VOICE_MAX_RETRIES = 5  # after the first draft; each retry shows the rejected draft + the specific issues. 2 left ~1 in 12 short writes failing by a few characters; 3 left 3 of 15 Crypto Notebook gems writes (the longest, 600-900) 1-50 characters over, 2026-11-15
 
 
@@ -1928,7 +1931,8 @@ def generate_post_with_report(conn, category: str, channel: str, raw_item: dict,
         chars = channel_voice.measure(assemble(str(parsed.get("title", "")), parsed["paragraphs"], final=False))
         return hits + channel_voice.find_voice_issues(profile, parsed, chars, facts_have_figures)
 
-    parsed, attempts, retry_issues = _generate_voiced_write(conn, category, prompt, check)
+    parsed, attempts, retry_issues = _generate_voiced_write(conn, category, prompt, check,
+                                                                 max_retries=VOICE_MAX_RETRIES_BY_CATEGORY.get(category, VOICE_MAX_RETRIES))
     text = assemble(parsed["title"], parsed["paragraphs"], final=True)
     return {
         "text": text, "attempts": attempts, "retry_issues": retry_issues, "prompt": prompt, "channel": channel,

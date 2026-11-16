@@ -25,6 +25,7 @@ same helpers, so the two prompt paths cannot drift (legacy stays for any channel
 without a voice profile, e.g. CoinCraft until Phase 5).
 """
 
+import re
 from dataclasses import dataclass
 from typing import Callable
 
@@ -227,6 +228,26 @@ def facts_exchange_listings(p: dict) -> str:
 - Background for you, NOT for the post: the record goes back to {record}, so a listing before those dates would not appear in it."""
 
 
+MAX_FACT_STEPS = 3
+STRUCTURED_SOURCES = {"superteam", "zindi", "immunefi"}      # platforms whose API gives the amount, token and deadline as fields
+# A participation step (or an eligibility clause) that is about a referral / promo code is never handed to the writer: the operator adds referral
+# links by hand and no one else's code goes out under his name (the guard rejects referral language anyway, so a post built from such a step could
+# only fail). Found on the Superteam "Raenest" bounty, whose own steps say "sign up using code: community" and "include your unique referral code".
+_REFERRAL_STEP_RE = re.compile(r"referral|referrer|refer a |invite (?:code|link)|promo(?:tional)? code|affiliate|(?:using|with|use) (?:the )?code\b|\bcode:", re.IGNORECASE)
+
+
+def _shorten(text: str | None, limit: int) -> str | None:
+    """Cut at a clause boundary under `limit` characters; None stays None."""
+    if not text or len(text) <= limit:
+        return text
+    cut = text[:limit]
+    for sep in ("; ", ", ", " - ", ". "):
+        i = cut.rfind(sep)
+        if i > limit * 0.5:
+            return cut[:i] + " (more on the page)"
+    return cut.rsplit(" ", 1)[0] + " (more on the page)"
+
+
 def facts_earning_opportunities(p: dict) -> str:
     import datetime as _dt
 
@@ -238,8 +259,11 @@ def facts_earning_opportunities(p: dict) -> str:
             return None
 
     enriched = p.get("enriched") or {}
-    steps = enriched.get("steps") or []
-    reward = enriched.get("reward")
+    steps = [s for s in (enriched.get("steps") or []) if not _REFERRAL_STEP_RE.search(s)]
+    extra_steps = max(0, len(steps) - MAX_FACT_STEPS)
+    steps = [_shorten(x, 80).replace(" (more on the page)", "") for x in steps[:MAX_FACT_STEPS]]       # a 400-650 character post cannot carry a paragraph per step
+    dropped_referral = len(enriched.get("steps") or []) - len(steps) - extra_steps > 0
+    reward = _shorten(enriched.get("reward"), 120)
     if not reward and p.get("payout_kind") == "ev" and p.get("pool_usd"):
         reward = (f"a prize pool of ${p['pool_usd']:,.0f} shared among the winners only -- most participants win nothing "
                   f"(average per participant: about ${p['payout_usd']:,.0f})")
@@ -253,12 +277,19 @@ def facts_earning_opportunities(p: dict) -> str:
     cap = p.get("capital_usd")
     cost = enriched.get("cost") or ("nothing is stated as required up front" if cap == 0 else
                                     (f"about ${cap:,.0f} of your own money is needed" if cap else "not stated"))
-    deadline = enriched.get("deadline") or day(p.get("deadline")) or "not stated"
+    # A structured platform's own deadline (an ISO timestamp from its API) is authoritative: the page text shows the same instant in the fetcher's
+    # local time ("14 December 07:29" for Dec 13 23:59 UTC), and the guard checks the post against the structured date -- preferring the page made
+    # that guard impossible to satisfy (Zindi Dis-Chem, 2026-11-16).
+    deadline = ((day(p.get("deadline")) if p.get("source") in STRUCTURED_SOURCES else None) or enriched.get("deadline") or day(p.get("deadline")) or "not stated")
     geo = {"worldwide": "open worldwide", "multi": "open in several regions (check the page for which)", "single": "open in ONE country only"}.get(p.get("geo"), "countries not stated")
-    where = enriched.get("eligibility") or geo
+    where = _shorten("; ".join(c for c in re.split(r"\s*;\s*", enriched.get("eligibility") or "") if c and not _REFERRAL_STEP_RE.search(c)), 170) or geo
     reqs = ", ".join(x.replace("_", " ") for x in (p.get("prereqs") or [])) or "none stated"
-    steps_block = ("\n".join(f"  {i}. {s}" for i, s in enumerate(steps, 1)) if steps else
-                   "  NOT AVAILABLE -- the offer's own page could not be read. Write NO steps; tell the reader the steps are on the offer's page.")
+    if steps:
+        steps_block = "\n".join(f"  {i}. {s}" for i, s in enumerate(steps, 1))
+        if extra_steps or dropped_referral:     # the writer has a 400-650 character budget: a long ladder of steps cannot fit, and a referral step is the operator's to add
+            steps_block += "\n  (the offer has further steps -- say the rest are on the offer's page; never write them yourself)"
+    else:
+        steps_block = "  NOT AVAILABLE -- the offer's own page could not be read. Write NO steps; tell the reader the steps are on the offer's page."
     return f"""Facts about this opportunity (collected automatically; the reader's own checks still apply):
 - What: {p.get('title')}
 - Kind: {(p.get('type') or 'other').replace('_', ' ')}

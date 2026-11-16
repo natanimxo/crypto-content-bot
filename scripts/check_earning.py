@@ -520,6 +520,18 @@ def main():
     check("the card shows the KYC fact", N._score_text("earning_opportunities", {"score": 1, "score_breakdown": E.score_earning(ip["plether"])}).endswith("KYC required"), True)
     check("the card shows 'no KYC' only when known", N._score_text("earning_opportunities", {"score": 1, "score_breakdown": E.score_earning(ip["nokyc"])}).endswith("no KYC"), True)
 
+    # ---- facts handed to the writer for the platform sources (a 400-650 character post cannot carry a whole prize ladder and every step)
+    from pipeline import post_facts as PF
+    fp = dict(ip['plether'], source='zindi', deadline='2026-12-13T23:59:00+00:00', geo='worldwide', enriched={
+        'steps': ['Sign up on Raenest using code: community', 'Choose one track', 'Publish one long article on Medium or Substack, plus one X post that is long enough to be cut down at a boundary',
+                  'Include your unique Raenest referral code or link', 'Post the video', 'Tag the sponsor'],
+        'deadline': '14 December 2026 at 07:29', 'eligibility': 'Must have an account; must use a referral code; open to all', 'reward': '$5 000 USD in prizes: 1st $2,500 USD, 2nd $1,500 USD, 3rd $1,000 USD, plus a lot more detail that does not fit'})
+    ff = PF.facts_earning_opportunities(fp)
+    check('facts: a referral / promo-code step is never handed to the writer', ('referral' in ff.lower(), 'code: community' in ff.lower()), (False, False))
+    check('facts: at most 3 steps, then a pointer to the page', (ff.count("\n  1. "), ff.count("\n  4. "), 'further steps' in ff), (1, 0, True))
+    check('facts: a structured platform deadline beats the page text (the page shows the same instant in local time)', ('Deadline: Dec 13' in ff, '14 December' in ff), (True, False))
+    check('facts: eligibility clauses about a referral code are dropped', 'must use a referral code' in ff, False)
+
     # ---- the three exchange-announcement channels are corroboration only, never opportunity sources
     check("exchange channels are not candidate sources", [h for h in C.earning.CORROBORATION_ONLY_TELEGRAM if f"tg:{h}" in C.earning.SOURCES], [])
     check("the dead / absent handles are not configured", [h for h in ("WWGiveaways", "freestuff_hub", "FREE_UDEMY_COURSES1", "bugbountyplzen", "officialairdropalert", "cryptosale_tg", "2top_airdrop")
