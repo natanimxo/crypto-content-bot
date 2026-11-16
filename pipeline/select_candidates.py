@@ -365,6 +365,10 @@ def get_new_candidates(conn, category: str, channel: str) -> list[dict]:
                 continue
         if category == "earning_opportunities" and not _earning_still_valid(row["payload"], now):
             continue
+        if category == "earning_opportunities":
+            from pipeline import earning as _earning       # the third hard floor: expected payout (unknown passes) -- see earning.expected_payout_ok
+            if not _earning.expected_payout_ok(row.get("score_breakdown") or {}):
+                continue
         if max_age_hours is not None:
             published_at = _published_at(category, row["payload"])
             if published_at and (now - published_at).total_seconds() > max_age_hours * 3600:

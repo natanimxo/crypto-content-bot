@@ -201,6 +201,16 @@ def main():
     check("floors: both pass", E.passes_floors({"value": 40.0, "trust": 40.0}), True)
     check("floors: high value, low trust fails", E.passes_floors({"value": 95.0, "trust": 39.9}), False)
     check("floors: high trust, low value fails", E.passes_floors({"value": 39.9, "trust": 95.0}), False)
+    # ---- the THIRD hard floor: expected payout >= $10; unknown passes (operator 2026-11-16)
+    check("floor: expected payout $9.99 fails even with value 90 and trust 90", E.passes_floors({"value": 90.0, "trust": 90.0, "expected_payout_usd": 9.99}), False)
+    check("floor: expected payout exactly $10 passes", E.passes_floors({"value": 90.0, "trust": 90.0, "expected_payout_usd": 10.0}), True)
+    check("floor: unknown expected payout passes", E.passes_floors({"value": 90.0, "trust": 90.0, "expected_payout_usd": None}), True)
+    check("floor: unknown expected payout is not absent either (a row scored before the floor existed)", E.expected_payout_ok({"value": 90.0, "trust": 90.0}), True)
+    z = E.score_earning(dict(base, payout_usd=0.9, payout_kind="ev"))
+    check("a $0.90 expected payout scores 40+ on value yet never passes the floors (the weakness this floor exists for)", (z["value"] >= 40.0, z["expected_payout_usd"], E.passes_floors(z)), (True, 0.9, False))
+    u = E.score_earning(dict(base, payout_usd=None, payout_kind=None))
+    check("unknown payout: expected payout is None, the payout component stays low (20-25)", (u["expected_payout_usd"], u["value_components"]["payout"]), (None, 20.0))
+    check("probability-adjusted: a $20 airdrop (30% chance) is $6 expected and fails", (E.score_earning(dict(base, payout_usd=20.0))["expected_payout_usd"], E.passes_floors(E.score_earning(dict(base, payout_usd=20.0)))), (6.0, False))
 
     # ---- the post guard: actionable means no invented steps, no invented amounts, the deadline stated, no referral / URL
     from pipeline.write_post import _find_earning_issues as G

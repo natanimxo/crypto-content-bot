@@ -37,7 +37,7 @@ def main():
                 print(f"value {float(r['value']):5.1f} trust {r['trust']:5.1f} | {r['type']:10} {r['source']:22} age={r['age']} corro={r['corroborators']} | {r['title']}")
             return
         cur.execute("""SELECT r.payload->>'source' AS src, count(*) AS n, count(*) FILTER (WHERE r.held) AS held,
-                              count(*) FILTER (WHERE NOT r.held AND (s.score_breakdown->>'trust')::float >= 40 AND s.score >= 40) AS eligible,
+                              count(*) FILTER (WHERE NOT r.held AND (s.score_breakdown->>'trust')::float >= 40 AND s.score >= 40 AND (s.score_breakdown->>'expected_payout_usd' IS NULL OR (s.score_breakdown->>'expected_payout_usd')::float >= 10)) AS eligible,
                               count(*) FILTER (WHERE (s.score_breakdown->>'trust')::float < 40) AS trust_low,
                               round(avg((s.score_breakdown->>'trust')::float)::numeric, 1) AS avg_trust, round(avg(s.score)::numeric, 1) AS avg_value
                        FROM raw_items r JOIN scores s ON s.raw_item_id = r.id WHERE r.category = 'earning_opportunities' GROUP BY 1 ORDER BY 1""")
@@ -45,7 +45,7 @@ def main():
         for r in cur.fetchall():
             print(f"{r['src']:24} {r['n']:4} {r['held']:4} {r['eligible']:8} {r['trust_low']:8} {r['avg_trust']:9} {r['avg_value']:9}")
         cur.execute("""SELECT r.payload->>'type' AS type, count(*) AS n,
-                              count(*) FILTER (WHERE NOT r.held AND (s.score_breakdown->>'trust')::float >= 40 AND s.score >= 40) AS eligible
+                              count(*) FILTER (WHERE NOT r.held AND (s.score_breakdown->>'trust')::float >= 40 AND s.score >= 40 AND (s.score_breakdown->>'expected_payout_usd' IS NULL OR (s.score_breakdown->>'expected_payout_usd')::float >= 10)) AS eligible
                        FROM raw_items r JOIN scores s ON s.raw_item_id = r.id WHERE r.category = 'earning_opportunities' GROUP BY 1 ORDER BY 2 DESC""")
         print("\nby type (stored -> eligible):", ", ".join(f"{r['type']} {r['n']}->{r['eligible']}" for r in cur.fetchall()))
 

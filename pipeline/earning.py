@@ -14,7 +14,7 @@ THE RULES (operator-approved 2026-11-15):
      and any upfront payment to take part (a fee, "gas to claim", "send X to receive Y"). Capital you deposit and keep
      (a bank-bonus deposit) is not a fee: it is the VALUE score's `capital` component.
   2. TRUST and VALUE are two separate numbers and are NEVER blended. trust = checkable facts about the source and the
-     offer; value = what it is worth a reader's time. Selection is trust >= 40 AND value >= 40, ordered by value
+     offer; value = what it is worth a reader's time. Selection is trust >= 40 AND value >= 40 AND expected payout >= $10 (unknown passes), ordered by value
      (trust is a gate, not a ranking dimension). `scores.score` is set to the VALUE only; trust lives in
      score_breakdown, and every card shows both.
   3. Trust is facts, not judgment: source tier, independent corroboration, whether terms are stated (deadline /
@@ -39,6 +39,9 @@ from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 TRUST_FLOOR = 40.0
 VALUE_FLOOR = 40.0
+# A THIRD hard floor, not a weight (operator 2026-11-16): value 40 is reachable with ZERO payout, because a free, global, no-KYC offer earns ~50
+# points from friction alone (capital 100, prereq 100, geo 100). An expected payout under $10 surfaces nothing. Unknown passes (see expected_payout_ok).
+EXPECTED_PAYOUT_FLOOR = 10.0
 
 # ----------------------------------------------------------------------------- sources
 
@@ -794,13 +797,21 @@ def score_earning(payload: dict) -> dict:
     tc = trust_components(payload)
     trust = round(max(0.0, min(100.0, sum(v for k, v in tc.items() if not k.endswith("penalty")) - sum(v for k, v in tc.items() if k.endswith("penalty")))), 1)
     kyc = True if "kyc" in (payload.get("prereqs") or []) else (False if payload.get("kyc_known") else None)    # None = unknown, never "no"
+    ep = expected_payout_usd(payload)
     out = {"value": value, "trust": trust, "value_base": base, "referral_bonus": bonus, "referral": referral_info(payload), "kyc": kyc,
-           "value_components": vc, "trust_components": tc}
+           "expected_payout_usd": round(ep, 2) if ep is not None else None, "value_components": vc, "trust_components": tc}
     if payload.get("token_reward"):
         out["value_capped_by"] = {"reason": "token-denominated reward (not a stablecoin): unclear amount, never priced", "cap": TOKEN_REWARD_VALUE_CAP,
                                   "value_uncapped": uncapped, "token": payload["token_reward"].get("token")}
     return out
 
 
+def expected_payout_ok(breakdown: dict) -> bool:
+    """The third hard floor (operator 2026-11-16): the probability-adjusted payout must be at least EXPECTED_PAYOUT_FLOOR. UNKNOWN passes (no
+    figure is not a fail) -- its payout component is already scored low (20-25), so it has to earn its way through on other merits."""
+    ep = breakdown.get("expected_payout_usd")
+    return ep is None or float(ep) >= EXPECTED_PAYOUT_FLOOR
+
+
 def passes_floors(breakdown: dict) -> bool:
-    return breakdown.get("trust", 0) >= TRUST_FLOOR and breakdown.get("value", 0) >= VALUE_FLOOR
+    return (breakdown.get("trust", 0) >= TRUST_FLOOR and breakdown.get("value", 0) >= VALUE_FLOOR and expected_payout_ok(breakdown))
