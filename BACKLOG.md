@@ -2205,7 +2205,7 @@ Doctor of Credit 17 -> 17; the four airdrop channels unchanged (their payouts ar
 **The 11 Superteam listings against it: 6 survive.** 2 are token-denominated (BAOBAO, NOS: capped at 30, never reach the operator); 3 are crowded
 creator-style content bounties with an expected payout of $0.88-$1.77 (Anna $250 pool / 279 entrants, KriptoK $200 / 227, Premier League $500 / 282).
 The 6 survivors: Raenest $13,000 ($183 expected), MultiHopper $5,000 ($64), two Superteam Ukraine bounties ($40, $50), OOBE $500 ($50), SSR $300 ($27).
-Zindi: 6 of 7 (one $5,000 pool with ~1,100 entrants fails at $4.25). Immunefi: Plether passes (expected payout unknown).
+Zindi: 6 of 7 (one $5,000 pool with about 1,175 entrants fails at $4.25). Immunefi: Plether passes (expected payout unknown).
 **Is Superteam weaker than it looked? No, but it is more selective:** 8 of the 11 open listings were published in the last 7 days (about 1.1 new
 listings/day still open, more in truth since closed ones are not visible), and 5 of those 8 clear the floor today, so roughly 0.6-0.7 surfacing/day,
 comfortably above the target of one good item every two days. Caveats: (1) the entrant count is read at FIRST collection and the score is not
