@@ -149,7 +149,7 @@ whale_movements:
     financial advice. Measured tone: no hype, no manufactured urgency, no
     emoji beyond what the template itself adds.
 
-# Phase 2, category 3 of 2026-09-10 — web3_jobs -> Alpha Edge Crypto / CoinCraft
+# Phase 2, category 3 of 2026-09-10 — web3_jobs -> Alpha Edge Crypto / Earn Stack
 # (shared, alternation via pipeline/channel_router.py — spec Section 3). Moved
 # faster than the first two: structured data, no price verification, no
 # editorial judgment about listing quality/meaning needed.
@@ -196,7 +196,7 @@ web3_jobs:
     no emoji beyond what the template itself adds.
 
 # Phase 2/3, 2026-09-11 — gems_security (originally Crypto Notebook; moved to
-# CoinCraft 2026-09-20, sole security-screening feed for that channel). Discovery reuses defi_yields' own DefiLlama pool feed
+# Earn Stack 2026-09-20, sole security-screening feed for that channel). Discovery reuses defi_yields' own DefiLlama pool feed
 # (operator-approved plan) rather than a separate source — see
 # collectors/gems_security.py's module docstring for the full reasoning,
 # the rate-limit math, and pipeline/goplus.py for the live-measured GoPlus
@@ -503,7 +503,7 @@ macro_news:
 hacks_exploits:
   # Added 2026-09-30 (operator direction) -- confirmed post-hack incidents
   # (DefiLlama's /hacks), complementing gems_security's pre-hack token risk
-  # screening on the same channel (CoinCraft) without splitting defi_yields
+  # screening on the same channel (Earn Stack) without splitting defi_yields
   # away from alpha_edge_crypto. See collectors/hacks_exploits.py's module
   # docstring for the source research (raises API now paywalled, Snapshot
   # governance too noisy without a curated DAO list) and BACKLOG for the
@@ -550,7 +550,7 @@ hacks_exploits:
                            # properly rather than lower a threshold"). Real cadence
                            # at 50, live-checked against 180 real days: ~0.22/day
                            # (~1.5/week); combined with gems_security's own real
-                           # rate (~0.5/week), CoinCraft's two categories together
+                           # rate (~0.5/week), Earn Stack's two categories together
                            # land around 2/week -- thin, but real and honestly
                            # reported as such, not stretched.
   # topic_key is the protocol's own name (collectors/hacks_exploits.py's
@@ -647,7 +647,7 @@ earning_opportunities:
   # Added 2026-11-15 (Phase 5, operator direction) -- anything a reader can take part in to EARN money: money INTO the
   # pocket, not money SAVED (a discount is a cheaper purchase and a free game is a free purchase -- neither is earning; those
   # sources were removed 2026-11-15). In scope: airdrops, hackathons / bounties, giveaways with cash or crypto prizes, signup and
-  # deposit bonuses, paid beta testing, bug bounties, paid research / surveys, cashback that pays out in money. CoinCraft's
+  # deposit bonuses, paid beta testing, bug bounties, paid research / surveys, cashback that pays out in money. Earn Stack's
   # category (a GLOBAL, non-crypto audience: internationally accessible beats single-country). Telegram (t.me/s/) and
   # RSS/API sources first; Discord later. See pipeline/earning.py for the gate and both scores, and BACKLOG.md.
   #
@@ -678,6 +678,6 @@ earning_opportunities:
     - "#Rewards"
 
   voice: how_to
-  # Legacy-path fields only: CoinCraft writes this category through its channel voice profile (config/channel_voices.yaml).
+  # Legacy-path fields only: Earn Stack writes this category through its channel voice profile (config/channel_voices.yaml).
   prompt_notes: >
     Practical and instructional: what the reader gets, who can join, exactly how to do it, and the catch. No hype.

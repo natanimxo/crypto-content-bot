@@ -132,7 +132,7 @@ def load_profiles_from_yaml(path: str = VOICES_PATH) -> dict[str, VoiceProfile]:
 
 def load_profile(conn, channel: str) -> VoiceProfile | None:
     """The channel's profile from channel_config.voice_profile, or None -- None
-    means "use the legacy category voice" (CoinCraft today; any channel whose
+    means "use the legacy category voice" (Earn Stack today; any channel whose
     profile hasn't been seeded)."""
     with dict_cursor(conn) as cur:
         cur.execute("SELECT voice_profile FROM channel_config WHERE channel = %s", (channel,))

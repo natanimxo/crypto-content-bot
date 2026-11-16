@@ -33,7 +33,7 @@ export default defineRailway(() => {
     env: { DATABASE_URL: preserve(), DEEPSEEK_API_KEY: preserve(), ETHERSCAN_API_KEY: preserve(), TELEGRAM_ALLOWED_USER_IDS: preserve(), TELEGRAM_BOT_TOKEN: preserve(), TELEGRAM_OPERATOR_CHAT_ID: preserve() },
   });
 
-  // 2-hour earning_opportunities cycle (Phase 5, 2026-11-15, operator direction): collect -> score -> notify CoinCraft only, then
+  // 2-hour earning_opportunities cycle (Phase 5, 2026-11-15, operator direction): collect -> score -> notify Earn Stack only, then
   // exit. A separate service because the main cycle's notify visits every channel and its pacing assumes 4 hours. Cron at :30 so it
   // never overlaps the :00 main cycle. The operator created the service (and set the schedule through a preset); the schedule is
   // defined HERE and `railway config apply` is authoritative. Secrets are preserve(): Railway keeps the existing values.

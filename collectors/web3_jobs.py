@@ -1,6 +1,6 @@
 """Web3 jobs collector — RemoteOK's free, keyless JSON feed (Phase 2,
 2026-09-10). Third category, first one shared across two channels (Alpha
-Edge Crypto / CoinCraft, alternation via pipeline/channel_router.py).
+Edge Crypto / Earn Stack, alternation via pipeline/channel_router.py).
 
 Verified live before building against it: `?tags=crypto` returns real,
 current web3/crypto listings with the expected fields (company, position,

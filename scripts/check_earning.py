@@ -534,13 +534,16 @@ def main():
 
     # ---- the connect-wallet gate: claim-shaped wording only for a VETTED source; the broad rule stays for tier 3 / unknown (operator 2026-11-16)
     step = "Go to the site, connect your wallet and grab your referral link from the Earn button"
-    check("gate: 'connect your wallet and grab your referral link' passes for a vetted platform (tier 2)", E.gate(step, 2), [])
-    check("gate: the same words from an open Telegram channel (tier 3) are still gated", E.gate(step, 3), ["connect-wallet-to-claim"])
+    check("gate: 'connect your wallet and grab your referral link' passes for an offer hosted on a vetted platform (superteam)", E.gate(step, "superteam"), [])
+    check("gate: the same words relayed by an aggregator channel (airdrops_io) are still gated", E.gate(step, "tg:airdrops_io"), ["connect-wallet-to-claim"])
     check("gate: the same words with no tier are still gated", E.gate(step), ["connect-wallet-to-claim"])
-    check("gate: connect-to-CLAIM trips even for a vetted source", E.gate("Connect your wallet to claim your tokens", 2), ["connect-wallet-to-claim"])
-    check("gate: connect-to-RECEIVE trips even for a vetted source", E.gate("Connect your wallet in order to receive your reward", 1), ["connect-wallet-to-claim"])
-    check("gate: 'connect your wallet and sign a message' passes for a vetted platform", E.gate("Connect your wallet and sign a message with your X handle", 2), [])
-    check("gate: the seed-phrase rule is not tier-dependent", E.gate("Enter your seed phrase to continue", 1), ["asks for a seed phrase / private key / wallet import"])
+    check("gate: connect-to-CLAIM trips even for a vetted source", E.gate("Connect your wallet to claim your tokens", "zindi"), ["connect-wallet-to-claim"])
+    check("gate: connect-to-RECEIVE trips even for a vetted source", E.gate("Connect your wallet in order to receive your reward", "immunefi"), ["connect-wallet-to-claim"])
+    check("gate: 'connect your wallet and sign a message' passes for a vetted platform", E.gate("Connect your wallet and sign a message with your X handle", "superteam"), [])
+    check("gate: the relaxation is for HOSTED platforms only -- exactly superteam / zindi / immunefi", sorted(E.GATE_NARROW_WALLET_SOURCES), ["immunefi", "superteam", "zindi"])
+    for relayed in ("tg:airdrops_io", "tg:incrypted_airdrops", "tg:airdropfind", "tg:criptinho", "doctorofcredit", "devpost"):
+        check(f"gate: {relayed} keeps the BROAD wallet rule (it relays someone else's text)", E.gate(step, relayed), ["connect-wallet-to-claim"])
+    check("gate: the seed-phrase rule is not tier-dependent", E.gate("Enter your seed phrase to continue", "superteam"), ["asks for a seed phrase / private key / wallet import"])
 
     # ---- required work = promoting with your OWN referral code is a recruitment campaign (operator 2026-11-16, the Raenest bounty)
     raen = ("Sign up on Raenest using code: community\n Choose one track: Written Content, Video, or Animation\n"

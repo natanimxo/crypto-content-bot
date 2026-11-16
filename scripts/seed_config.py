@@ -120,7 +120,7 @@ def seed_voices(conn, path: str):
     A profile is applied only to a channel that has a row; a channel without one (crypto_notebook
     until the remap recreates it) is reported and picked up the next time this runs after the row
     exists. A channel with a row but NO profile entry gets voice_profile = NULL, i.e. the legacy
-    category voice -- CoinCraft's deliberate state until its Phase 5 profile.
+    category voice -- Earn Stack's deliberate state until its Phase 5 profile.
     """
     from pipeline.channel_voice import load_profiles_from_yaml
 

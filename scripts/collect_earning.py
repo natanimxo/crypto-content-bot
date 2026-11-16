@@ -1,4 +1,4 @@
-"""The 2-hour earning_opportunities cycle (Phase 5, 2026-11-15): collect -> score -> notify CoinCraft only, then exit.
+"""The 2-hour earning_opportunities cycle (Phase 5, 2026-11-15): collect -> score -> notify Earn Stack only, then exit.
 
 Operator direction: this category runs every 2 hours, not 4. It is a separate entry point (and, once the Railway service
 exists, a separate cron service -- `0 */2 * * *`) because the main cycle's notify visits EVERY channel and its pacing

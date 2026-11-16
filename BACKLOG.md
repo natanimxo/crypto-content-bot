@@ -2270,3 +2270,32 @@ TITLE carries the headline maximum. Same principle as the "up to $15,000" ruling
 source, drafts that gave up). The ruling: if most cards need 4+ attempts, the 400-650 band is too tight for offers with real steps and prize ladders --
 WIDEN THE BAND rather than keep retrying (9 retries is a cost and latency on every approval). Pre-measurement: of the 9 platform-source cards generated on
 2026-11-16, 8 eventually wrote, several only after 3-5 attempts, and the Raenest-type offers never did.
+
+### Phase 5 follow-ups, round 9 (2026-11-16, operator checks: wallet gate scope, Earn Stack, voice, floors)
+
+**NAME: the channel formerly called CoinCraft is now "Earn Stack"** (renamed 2026-11-16). The internal key stays `coincraft` (DB rows, config keys, code) and its
+`chat_id` (-1002704031424) is unchanged. Everything above this line in BACKLOG that says "CoinCraft" means Earn Stack. Done in this commit: `display_name`
+in config/channel_config.yaml and the DB row, every doc and code comment that named the channel (README, HANDOFF, spec table, config comments, code), and the operator
+output: the candidate header ("N new candidate(s) cleared threshold for Earn Stack" -- it used to print the raw channel key) and the post label ("... -> Earn Stack").
+The repo stores no Telegram usernames, only chat_ids, so the @cryptonoteboo username is not recorded anywhere here and could not be confirmed or changed.
+
+**Wallet gate scope (operator check).** The narrow rule (only connect-to-CLAIM / connect-to-RECEIVE wording) now applies by SOURCE ID, not by tier:
+`earning.GATE_NARROW_WALLET_SOURCES = {superteam, zindi, immunefi}` -- offers HOSTED on the platform itself. It was tier-based first, which would also have
+relaxed Devpost and Doctor of Credit; those, and every aggregator / relay (airdrops_io, incrypted_airdrops, airdropfind, criptinho), keep the broad rule. Tier 1-2 today:
+devpost, doctorofcredit, superteam, zindi, immunefi (no tier 1); tier 3: the four Telegram channels. Re-checked on stored rows: 0 of the 66 Devpost / Doctor of Credit
+rows would be gated by the broad rule, so nothing changed for them.
+
+**Voice: a curated find, not a feed item.** The profile (`config/channel_voices.yaml`, `coincraft`) now says the post is a pick someone made for the reader and can
+justify in one plain clause; paragraph 1 carries that clause. The reason is NEVER invented: the facts hold a "What stands out" line built only from checkable fields (few
+entrants so far -- under 30, days left >= 14, a stated payout >= $50, nothing up front, open to readers anywhere; strongest first) and the writer may use ONE or TWO of them.
+`registrations` is now stored on the payload for that. **The length band was widened 400-650 -> 400-750**: the extra clause pushed 2 of 4 platform cards over by 2-9 characters
+even after 9 retries; at 700, 2 of 6 still gave up (by 13-20); at 750, 8 of 8 wrote (attempts 3,3,9,8,2,2,2,2; the 8-9 were guard quirks -- 'talks about the facts', verbatim
+reproduction -- not length). This is the operator's own rule applied early (widen rather than keep retrying), on a measured failure rate, and is reversible; the Nov 23 check decides.
+
+**Third floor (expected payout >= $10): confirmed landed (2eece99), unknown passes and scores low.** Unknown expected payout passes the floor, its payout component stays at 20-25
+(23 live unknown-payout items pass trust+value today, all airdrops, components 20 or 25). Of the new platform sources: 17 stored live, 16 still valid, 14 clear trust and value,
+**11 survive the floor** (3 cut: Zindi Underwater $4.25, Superteam KriptoK $0.88, Anna $0.90). The earlier "13" was already measured with the floor applied; it is 11 now because the
+Raenest bounty is expired / recruitment-shaped and the Plether competition ended today. Whole category: 60 pass trust+value, 45 survive the floor (15 cut, mostly Devpost).
+
+**Scheduled:** one-time task `earn-stack-draft-attempts-nov23` (2026-11-23 09:00 local): runs `python scripts/earning_report.py --drafts --days 7` and reports mean attempts, the
+share needing 4+, and any source that keeps failing; recommends, never edits. Runs only while the desktop app is open (otherwise at next launch).

@@ -398,7 +398,7 @@ def build_payload(raw: dict, now: datetime) -> dict:
         "landing_url": landing_norm, "landing_domain": earning.registrable_domain(host), "referral_link": earning.is_referral_link(landing_raw or ""),
         "type": type_, "payout_usd": payout, "payout_kind": payout_kind, "pool_usd": pool_usd, "unclear_usd": unclear_usd,
         "referral": referral, "token_reward": extra.get("token_reward"), "kyc_known": bool(extra.get("kyc_known")),
-        "headline_max_usd": extra.get("headline_max_usd"),
+        "headline_max_usd": extra.get("headline_max_usd"), "registrations": extra.get("registrations"),
         "other_amount_max": max([a for a in earning.extract_amounts_usd(base_text) if payout is None or abs(a - payout) > 0.5] or [0.0]),
         "deadline": _iso(deadline) if deadline else None, "capital_usd": capital, "effort_minutes": effort, "prereqs": prereqs, "geo": geo,
         "steps_text": extra.get("steps_text") or "",
@@ -698,7 +698,7 @@ def collect() -> int:
                         dropped_no_landing += 1
                         continue
                 payload = build_payload(raw, now)
-                reasons = earning.gate(raw["text"] + " " + " ".join(raw["links"] or []), source_tier=payload["source_tier"])
+                reasons = earning.gate(raw["text"] + " " + " ".join(raw["links"] or []), source=raw["source"])
                 if earning.is_roundup(raw["title"], raw["text"]):
                     reasons.append("not an offer: a digest / roundup of several projects")
                 income_reason = earning.not_income_reason(payload["type"])

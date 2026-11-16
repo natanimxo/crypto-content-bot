@@ -1036,7 +1036,7 @@ def _find_listing_issues(parsed: dict, payload: dict) -> list[str]:
     return issues
 
 
-# earning_opportunities output guard (Phase 5, 2026-11-15). The CoinCraft post has to be genuinely ACTIONABLE, which is the
+# earning_opportunities output guard (Phase 5, 2026-11-15). The Earn Stack post has to be genuinely ACTIONABLE, which is the
 # one place a model's habit of inventing a plausible step is dangerous: a wrong step wastes a reader's time or sends them
 # somewhere they should not go. Checked on the output, not just requested: no invented steps, no amounts the facts do not
 # contain, the deadline stated when there is one, and no referral language (the operator adds referral links by hand).
@@ -1311,7 +1311,7 @@ def compute_exchange_listings_elements(conn, raw_item: dict, history: list) -> d
 
 @register_prompt_builder("earning_opportunities")
 def build_earning_opportunities_prompt(cfg: dict, region_profile: str, raw_item: dict, history: list) -> str:
-    """Legacy-shape fallback. CoinCraft writes this category through its channel voice profile; this exists so the
+    """Legacy-shape fallback. Earn Stack writes this category through its channel voice profile; this exists so the
     category never raises NotImplementedError. The rules it carries are the FactSpec's."""
     p = raw_item["payload"]
     spec = FACT_SPECS["earning_opportunities"]
@@ -1973,7 +1973,7 @@ def generate_post(conn, category: str, channel: str, raw_item: dict) -> str:
 
     A channel with a voice profile (channel_config.voice_profile) and a category with
     a FactSpec is written through the channel-voice path -- the channel owns voice,
-    the category supplies facts and guardrails. Anything else (CoinCraft until its
+    the category supplies facts and guardrails. Anything else (Earn Stack until its
     Phase 5 profile, a category without a FactSpec) takes the legacy path below,
     unchanged."""
     if category in FACT_SPECS and channel_voice.load_profile(conn, channel) is not None:

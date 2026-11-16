@@ -1,6 +1,6 @@
 """Channel routing for categories shared across multiple channels (spec
 Section 3's alternation — Airdrops and Web3 jobs are eligible for both Alpha
-Edge Crypto and CoinCraft, and "each individual item is assigned to exactly
+Edge Crypto and Earn Stack, and "each individual item is assigned to exactly
 one of the two channels ... never both"). First real use, 2026-09-10, for
 web3_jobs. Extended 2026-09-30 to `news` (crypto_wall_street /
 alpha_edge_crypto) -- same mechanism, different pair of channels; see

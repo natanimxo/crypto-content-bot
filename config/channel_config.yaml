@@ -8,7 +8,7 @@
 # (see pipeline/publish.py); the operator copies/forwards the labeled text
 # themselves after tapping "Mark as sent". display_name IS actively used — it's
 # the human-readable half of the label header every post arrives with (e.g.
-# "🌾 DEFI YIELDS → CoinCraft"), since the operator needs to know at a
+# "🌾 DEFI YIELDS → Earn Stack"), since the operator needs to know at a
 # glance which channel a post is for when copying it themselves.
 #
 # Channel -> category mapping, rebalanced 2026-09-20 (operator direction; crypto_notebook was
@@ -24,8 +24,8 @@
 # bot/notify.py skips any category that doesn't have a category_config row yet.
 #
 # PHASE 3 REMAP, 2026-11-15 (operator direction): crypto_notebook is BACK, as the educational
-# channel -- gems_security + hacks_exploits move to it from CoinCraft (voice: config/channel_voices.yaml).
-# CoinCraft is left with NO categories on purpose: it becomes the non-crypto earning-opportunities
+# channel -- gems_security + hacks_exploits move to it from Earn Stack (voice: config/channel_voices.yaml).
+# Earn Stack is left with NO categories on purpose: it becomes the non-crypto earning-opportunities
 # channel in Phase 5, and the row has to survive until then. A channel with `categories: []` is
 # safe everywhere it is read (bot/notify.py visits it, finds no candidates, sends nothing). The
 # category -> channel table is now:
@@ -44,7 +44,7 @@
 # 10/day category cap. defi_yields stays alpha_edge_crypto-only, deliberately
 # NOT split with coincraft (operator: "highest-priced channel, steady volume
 # is what I'm selling on it" -- splitting was evaluated and would cost it
-# ~20% of its own volume for CoinCraft's gain, real but not worth the trade).
+# ~20% of its own volume for Earn Stack's gain, real but not worth the trade).
 # coincraft gets a new category instead: hacks_exploits (see category_config.
 # yaml) -- complements gems_security (pre-hack risk screening) with confirmed
 # post-hack incidents, no cost to any other channel.
@@ -112,7 +112,7 @@ crypto_notebook:
   chat_id: "-1002905948541"   # the channel's original chat_id, from before it was removed 2026-09-20; unused (see top)
 
 coincraft:
-  display_name: "CoinCraft"
+  display_name: "Earn Stack"
   categories:
     - earning_opportunities   # Phase 5, 2026-11-15: the non-crypto earning-opportunities channel (global audience).
                                # Telegram (t.me/s/) + RSS/API sources; Discord hub to follow.

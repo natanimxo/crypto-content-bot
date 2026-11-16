@@ -1,7 +1,7 @@
 """earning_opportunities -- the deterministic core (Phase 5, 2026-11-15).
 
 Anything a reader can take part in to earn money or get something of value: giveaways, free games, signup and
-account bonuses, free credits, hackathon prizes, bounties, airdrops. CoinCraft's category (a global, non-crypto
+account bonuses, free credits, hackathon prizes, bounties, airdrops. Earn Stack's category (a global, non-crypto
 audience), written to by Telegram channels (t.me/s/) and RSS/API sources; Discord comes later.
 
 Everything here is a PURE function of text and stored facts -- no network, no database -- so the gate and both
@@ -156,22 +156,24 @@ def not_income_reason(type_: str) -> str | None:
     return "not income: saves money, does not pay it (free game / freebie / credit)" if type_ in NON_INCOME_TYPES else None
 
 
-# For a VETTED source (tier 1-2: a platform that hosts sponsors' bounties, a curated aggregator) only a connect-to-CLAIM / connect-to-RECEIVE
-# construction trips the gate (operator 2026-11-16): "connect your wallet and grab your referral link" or "connect your wallet and sign a
-# message" on a platform's own bounty is a step, not the drainer pattern. It is the COMBINATION of an unvetted source and connect-to-claim that is
-# dangerous, so tier 3 (open Telegram channels) and an unknown tier keep the broad rule above.
+# The narrow wallet rule applies ONLY to offers HOSTED on a vetted platform itself (operator 2026-11-16): the platform's own listing, written by a sponsor
+# the platform vets. It does NOT apply to an aggregator or a channel RELAYING someone else's text (airdrops_io, incrypted, airdropfind, criptinho -- all
+# tier 3 -- nor to Doctor of Credit, a curated blog, nor to Devpost): for those the broad rule stays. On a hosted platform listing "connect your wallet and
+# grab your referral link" or "... and sign a message" is a step, not the drainer pattern; a connect-to-CLAIM / connect-to-RECEIVE construction still
+# trips everywhere. The trigger is the SOURCE ID, not the tier: a new tier-2 source never inherits the relaxation by accident.
+GATE_NARROW_WALLET_SOURCES = frozenset({"superteam", "zindi", "immunefi"})
 _WALLET_CLAIM_NARROW_RE = re.compile(
     r"(?:connect|link)\s+(?:your |a |the )?(?:crypto |web3 )?wallet\s+(?:to|and|in order to|so (?:you|that))\s+(?:\w+\s+){0,2}(?:claim|receive|collect|redeem|withdraw)|"
     r"claim\s+(?:your |the )?(?:airdrop|tokens?|reward|drop|prize)s?[^.\n]{0,40}(?:connect|wallet)|"
     r"(?:connect|wallet)[^.\n]{0,40}\b(?:to claim|to receive|to collect|to redeem|claim your|receive your|collect your)", re.IGNORECASE)
 
 
-def gate(text: str, source_tier: int | None = None) -> list[str]:
+def gate(text: str, source: str | None = None) -> list[str]:
     """Reasons this item is excluded before any scoring; [] means it passes. Deterministic and boring on purpose."""
     reasons = []
     if _SEED_RE.search(text or ""):
         reasons.append("asks for a seed phrase / private key / wallet import")
-    wallet_re = _WALLET_CLAIM_NARROW_RE if source_tier in (1, 2) else _WALLET_CLAIM_RE
+    wallet_re = _WALLET_CLAIM_NARROW_RE if source in GATE_NARROW_WALLET_SOURCES else _WALLET_CLAIM_RE
     if wallet_re.search(text or ""):
         reasons.append("connect-wallet-to-claim")
     if _FEE_RE.search(text or ""):

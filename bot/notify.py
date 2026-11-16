@@ -36,6 +36,7 @@ from pipeline.alerts import check_and_alert  # noqa: E402
 from pipeline.channel_router import SHARED_CATEGORY_CHANNELS  # noqa: E402
 from pipeline.db import dict_cursor, get_conn  # noqa: E402
 from pipeline.llm import generate_triage  # noqa: E402
+from pipeline.publish import get_channel_display_name  # noqa: E402
 from pipeline.run_log import run_log  # noqa: E402
 from pipeline.score import category_config_exists, load_category_config  # noqa: E402
 from pipeline.select_candidates import CAP_WINDOW_HOURS, _age_bonus, get_new_candidates  # noqa: E402
@@ -168,7 +169,7 @@ def notify_channel(conn, channel: str, categories: list[str], soft_daily_cap: in
     # send fails (rate limit, chat-not-found, transient network), NOTHING is
     # persisted, so these candidates remain "new" and get retried next cycle
     # instead of being silently and permanently marked as already-notified.
-    lines = [f"🆕 <b>{len(all_candidates)} new candidate(s)</b> cleared threshold for <b>{channel}</b>\n"]
+    lines = [f"🆕 <b>{len(all_candidates)} new candidate(s)</b> cleared threshold for <b>{html.escape(get_channel_display_name(conn, channel))}</b>\n"]
     keyboard_rows = []
 
     for category, row in all_candidates:
@@ -215,7 +216,7 @@ def notify_channel(conn, channel: str, categories: list[str], soft_daily_cap: in
 
 
 def run(only_channels: list[str] | None = None, job_name: str = "notify") -> None:
-    """`only_channels` scopes a run to some channels (the 2-hour earning_opportunities service notifies CoinCraft only --
+    """`only_channels` scopes a run to some channels (the 2-hour earning_opportunities service notifies Earn Stack only --
     running the full notify at 2 hours would double every other channel's per-cycle pacing); `job_name` keeps that run's
     run_logs row and its 3-consecutive-failures alert separate from the main cycle's."""
     load_dotenv()  # no-op in CI (no .env there); picks up local .env when run directly

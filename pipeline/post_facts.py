@@ -22,7 +22,7 @@ operator who wants to loosen one should have to change the check next to it too.
 The `facts_*` helpers return the exact "Facts about ..." block the legacy
 per-category prompt builders in write_post.py embed -- those builders call these
 same helpers, so the two prompt paths cannot drift (legacy stays for any channel
-without a voice profile, e.g. CoinCraft until Phase 5).
+without a voice profile, e.g. Earn Stack until Phase 5).
 """
 
 import re
@@ -304,6 +304,25 @@ def facts_earning_opportunities(p: dict) -> str:
     geo = {"worldwide": "open worldwide", "multi": "open in several regions (check the page for which)", "single": "open in ONE country only"}.get(p.get("geo"), "countries not stated")
     where = _shorten("; ".join(c for c in re.split(r"\s*;\s*", enriched.get("eligibility") or "") if c and not _REFERRAL_STEP_RE.search(c)), 170) or geo
     reqs = ", ".join(x.replace("_", " ") for x in (p.get("prereqs") or [])) or "none stated"
+    # WHY THIS ONE (operator 2026-11-16: the voice must read as a curated find, not a feed item). Built only from checkable fields, so the "reason it is
+    # worth a look" can never be invented: the writer is told to use ONE or TWO of these and nothing else.
+    stands = []                  # strongest reasons first; a weak one ("open anywhere") only when nothing stronger is true
+    regs = p.get("registrations")
+    if p.get("payout_kind") == "ev" and regs is not None and regs < 30:
+        stands.append(f"only {regs} entrants so far, so the pool is shared among very few")
+    try:
+        left = (_dt.datetime.fromisoformat(p["deadline"]) - _dt.datetime.now(_dt.timezone.utc)).days
+        if left >= 14:
+            stands.append(f"{left} days left to take part")
+    except (KeyError, TypeError, ValueError):
+        pass
+    if p.get("payout_kind") in ("stated", "max") and p.get("payout_usd") and p["payout_usd"] >= 50:
+        stands.append(f"a stated payout of ${p['payout_usd']:,.0f}")
+    if cap == 0:
+        stands.append("nothing is stated as required up front")
+    if p.get("geo") == "worldwide":
+        stands.append("open to readers anywhere")
+    stands_line = "; ".join(stands[:4]) if stands else "nothing beyond the reward itself -- then say only what it pays and what it needs"
     if steps:
         steps_block = "\n".join(f"  {i}. {s}" for i, s in enumerate(steps, 1))
         if extra_steps or dropped_referral:     # the writer has a 400-650 character budget: a long ladder of steps cannot fit, and a referral step is the operator's to add
@@ -319,6 +338,7 @@ def facts_earning_opportunities(p: dict) -> str:
 - Deadline: {deadline}
 - Who can take part: {where}
 - Other requirements: {reqs}
+- What stands out (give ONE or TWO of these as the reason this one is worth a look; use only these, never invent a reason): {stands_line}
 - Participation steps ({'from the offer itself' if steps else 'none available'}):
 {steps_block}"""
 

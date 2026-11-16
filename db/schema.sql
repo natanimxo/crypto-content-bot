@@ -219,7 +219,7 @@ CREATE TABLE IF NOT EXISTS run_logs (
     finished_at TIMESTAMPTZ
 );
 
--- Tracks which of the two shared channels (Alpha Edge Crypto / CoinCraft) got the
+-- Tracks which of the two shared channels (Alpha Edge Crypto / Earn Stack) got the
 -- last item for each alternating category, so assignment stays a simple round-robin.
 CREATE TABLE IF NOT EXISTS channel_alternation (
     category TEXT PRIMARY KEY,
@@ -307,7 +307,7 @@ ALTER TABLE llm_usage ADD COLUMN IF NOT EXISTS source TEXT;
 -- 2026-11-14: channel-level voice. The CHANNEL owns voice (who is talking, post shape, length,
 -- person, hashtags, whether history/context lines appear); the category supplies only facts and
 -- guardrails (pipeline/post_facts.py). NULL = no profile -> the legacy category voice is used
--- (CoinCraft until its Phase 5 profile). Source of truth: config/channel_voices.yaml, applied by
+-- (Earn Stack until its Phase 5 profile). Source of truth: config/channel_voices.yaml, applied by
 -- scripts/seed_config.py. Read by pipeline/channel_voice.py::load_profile.
 ALTER TABLE channel_config ADD COLUMN IF NOT EXISTS voice_profile JSONB;
 

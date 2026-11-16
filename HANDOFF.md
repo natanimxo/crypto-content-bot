@@ -12,7 +12,7 @@ history + what's actually still open, not a design doc.
 |---|---|---|
 | `defi_yields` | Crypto Notebook | **Built, tested, live.** Phase 1 MVP — full notify→approve→write→deliver loop validated end-to-end first, before any other category was started. |
 | `whale_movements` | Crypto Wall Street | **Built, tested, live.** Deep verification pass (first category with genuinely messy real-world data — dormant wallets, mislabeled exchanges, stale transactions). Three real bugs found and fixed same-day (see below). $2M collect floor and the 10k institutional heuristic are both first-pass tuned, not yet revisited against more cycles. |
-| `web3_jobs` | Alpha Edge Crypto / CoinCraft (alternation) | **Built, tested, live.** Faster verification pace by explicit operator direction (structured data, no price verification, no editorial judgment needed). Volume is thin (13/56 raw listings relevant per cycle; only 2 have ever cleared `review_threshold`) — see "Source volume" below. |
+| `web3_jobs` | Alpha Edge Crypto / Earn Stack (alternation) | **Built, tested, live.** Faster verification pace by explicit operator direction (structured data, no price verification, no editorial judgment needed). Volume is thin (13/56 raw listings relevant per cycle; only 2 have ever cleared `review_threshold`) — see "Source volume" below. |
 | `news`, `tool_launches`, `grants`, `startup_jobs`, `airdrops` | Crypto Wall Street / Hustle to Million | **Not built.** Listed in `channel_config.yaml` for record-keeping only; `bot/notify.py` skips them via `category_config_exists()`. `airdrops` specifically paused by operator direction (no reliable free source for wallet-level whale tracking). |
 
 **Production deployment: not yet live.** GitHub Actions Secrets have never

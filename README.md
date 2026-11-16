@@ -12,7 +12,7 @@ state, known bugs/fixes, and open issues.
 DeFi yields (DefiLlama, free/keyless) → Alpha Edge Crypto (originally Crypto Notebook; rerouted 2026-09-20). Phase 2 is underway,
 one category at a time per Section 0's discipline: whale movements (Etherscan,
 watches known exchange hot wallets) → Crypto Wall Street, and web3 jobs
-(RemoteOK) → Alpha Edge Crypto / CoinCraft, are both live as of 2026-09-10/11.
+(RemoteOK) → Alpha Edge Crypto / Earn Stack, are both live as of 2026-09-10/11.
 Airdrops stays deliberately paused (no reliable free source for individual
 wallet-level "whale" tracking either, hence whale_movements' exchange-watchlist
 design — see `config/category_config.yaml`'s whale_movements section for the

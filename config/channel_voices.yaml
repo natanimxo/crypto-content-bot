@@ -151,25 +151,32 @@ hustle_to_million:
   keep_context_lines: true
 
 coincraft:
-  # Added 2026-11-15 (Phase 5): CoinCraft is no longer a crypto channel -- it carries earning_opportunities for a global,
+  # Added 2026-11-15 (Phase 5): Earn Stack is no longer a crypto channel -- it carries earning_opportunities for a global,
   # geographically diverse audience. Operator direction: practical and instructional, shorter than Notebook, no hype,
   # clear steps; the one channel where a post has to be genuinely ACTIONABLE rather than informative. The steps in a post
   # come only from the offer itself (pipeline/enrich_landing.py) and are checked against it in code.
+  # Revised 2026-11-16 (operator): it must read as a CURATED FIND -- one thing someone picked for the reader and can say why -- not as a feed
+  # item announcing that something exists. The "why" is never invented: it comes only from the facts' "What stands out" line (entrants so far,
+  # nothing up front, open anywhere, posted by the platform itself, time left, a stated payout).
   name: how_to
   summary: >-
-    A short, practical how-to for readers anywhere in the world: what you can get,
-    whether you can take part, and exactly how to do it.
+    A short, practical pick for readers anywhere in the world: one opportunity chosen because it is worth
+    the reader's time -- what you can get, why this one is worth a look, whether you can take part, and exactly how.
   tone: >-
-    Practical and direct, in the second person. Plain words a reader who is not a native
-    English speaker can follow; short sentences. No hype, no urgency, no promises. Say what
-    it costs or requires as plainly as what it pays. Steps are imperative, one action each.
+    Practical and direct, in the second person, like a person who picked this one for you and can say why in one plain
+    clause -- not a notice that something exists. Plain words a reader who is not a native English speaker can follow;
+    short sentences. No hype, no urgency, no promises. Say what it costs or requires as plainly as what it pays. Steps are
+    imperative, one action each.
   title_style: >-
     What you earn plus the action, concrete -- for example "Earn a $250 bonus when you open a
     529 account" or "Compete for a share of $100,000 in a hackathon, open worldwide, until
     Dec 4". Not clickbait.
   title_check: null
   paragraphs:
-    - "What it is and what you get: the reward, who can take part (countries, requirements) and the deadline, exactly as the facts give them."
+    - >-
+      What it is and what you get: the reward, who can take part (countries, requirements) and the deadline, exactly as
+      the facts give them -- plus ONE short clause on why this one is worth a look, taken only from the facts' "What
+      stands out" line (for example "only 7 entrants so far" or "nothing is needed up front"). Never invent a reason.
     - >-
       How to do it: the steps from the facts as a numbered list (1. 2. 3.), one action each --
       or, if the facts say no steps are available, one sentence saying the steps are on the
@@ -177,7 +184,7 @@ coincraft:
     - >-
       The catch: what it costs or requires (money up front, documents or ID checks, time), any
       limits the facts state, and anything that is not stated -- plain, never alarmist.
-  length: {min: 400, max: 650}
+  length: {min: 400, max: 750}      # was 650 until 2026-11-16: the "why this one" clause (curated-find voice) needs room (at 700, 2 of 6 platform cards still gave up after 9 tries); Nov 23 --drafts decides whether it is right
   person: second
   hashtags: true
   keep_context_lines: true

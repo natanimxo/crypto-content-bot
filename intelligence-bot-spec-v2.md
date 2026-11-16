@@ -97,7 +97,7 @@ last one left off.
 ## Section 3 — Channels
 
 Five channels are in `channel_config` (Crypto Notebook was removed 2026-09-20 and **restored 2026-11-15** in the
-Phase 3 channel remap; **CoinCraft has no categories** until Phase 5, when it becomes the non-crypto
+Phase 3 channel remap; **Earn Stack has no categories** until Phase 5, when it becomes the non-crypto
 earning-opportunities channel -- its row is kept on purpose, and a channel with zero categories is safe: `bot/notify.py`
 visits it, finds no candidates and sends nothing). Only the categories with a working collector are
 actually seeded into `channel_config.categories` (see `config/channel_config.yaml`);
@@ -108,8 +108,8 @@ via `category_config_exists()` until built.
 |---|---|---|---|
 | `crypto_wall_street` | Crypto Wall Street | `whale_movements`, `news` (shared via alternation), `exchange_listings` (2026-11-15, Phase 4) | `default` |
 | `alpha_edge_crypto` | Alpha Edge Crypto | `defi_yields`, `news` (shared via alternation) | `us` |
-| `crypto_notebook` | Crypto Notebook | `gems_security`, `hacks_exploits` (moved from CoinCraft 2026-11-15) | `default` |
-| `coincraft` | CoinCraft | `earning_opportunities` (2026-11-15, Phase 5; global audience, non-crypto) | `default` |
+| `crypto_notebook` | Crypto Notebook | `gems_security`, `hacks_exploits` (moved from Earn Stack 2026-11-15) | `default` |
+| `coincraft` | Earn Stack | `earning_opportunities` (2026-11-15, Phase 5; global audience, non-crypto) | `default` |
 
 **`web3_jobs` retired 2026-11-14** (operator direction, Phase 2): the RemoteOK feed had been dry for two
 months (3 notified cards in 60 days). Removed from both channels and from the collect cycle; the collector,
@@ -315,7 +315,7 @@ structure, a role per paragraph), `length: {min, max}`, `person`, `hashtags`,
 `keep_context_lines`, `banned_words`, and `length_excludes_risk_line` (default false; true only for
 Crypto Notebook, whose 600-900 explainer cannot hold a gems risk line of 91-417 characters) (see
 `pipeline/channel_voice.py`). A channel
-with no profile (CoinCraft until its Phase 5 profile) keeps the legacy category
+with no profile (Earn Stack until its Phase 5 profile) keeps the legacy category
 voice. What a category contributes now lives in `pipeline/post_facts.py` and is
 deliberately in code, not config: its **facts**, a voice-neutral **content
 brief**, and its **guardrails** (never-rules), each guardrail paired with a
@@ -667,12 +667,12 @@ action is processed — the bot's chat is not itself a secret boundary
   starts:
   1. `whale_movements` → Crypto Wall Street. Complete, deep verification
      (first category with genuinely messy real-world data — see BACKLOG.md).
-  2. `web3_jobs` → Alpha Edge Crypto / CoinCraft (shared via alternation).
+  2. `web3_jobs` → Alpha Edge Crypto / Earn Stack (shared via alternation).
      Complete, faster verification pace by explicit operator direction
      (structured data, no price verification, no editorial judgment
      required).
 - **Phase 3** — in progress, 2026-09-11/12:
-  3. `gems_security` → CoinCraft (originally Crypto Notebook; rerouted 2026-09-20).
+  3. `gems_security` → Earn Stack (originally Crypto Notebook; rerouted 2026-09-20).
      Complete — see BACKLOG.md for the real, multi-round tuning history
      (TVL screening band, protocol-template dominance rule, the
      behavioral-vs-capability field split).
@@ -687,7 +687,7 @@ action is processed — the bot's chat is not itself a secret boundary
   `grants` (Hustle to Million) deliberately out of scope, see Section 3.
   `airdrops` (paused, see Section 3; re-checked live 2026-09-30, still no
   structured free source -- see BACKLOG's "Channel routing (2026-09-30)").
-  8. `hacks_exploits` → CoinCraft (added 2026-09-30, operator direction) --
+  8. `hacks_exploits` → Earn Stack (added 2026-09-30, operator direction) --
      DefiLlama `/hacks`, confirmed post-incident reports complementing
      `gems_security`'s pre-hack risk screening. Complete — see BACKLOG.md
      for the source research, threshold/cadence calibration, and the
@@ -707,7 +707,7 @@ Suggested `soft_daily_cap` ranges used when the live categories were tuned
 `defi_yields` did at 6-8):
 
 - Crypto-focused channels (Crypto Wall Street, Alpha Edge Crypto,
-  CoinCraft): 4–15, tuned per channel/category based on realistic
+  Earn Stack): 4–15, tuned per channel/category based on realistic
   source volume (`defi_yields` 6-8, `whale_movements` 12, `web3_jobs` 8-12,
   `news` 10, `hacks_exploits` 4 -- rare-and-notable, same posture as
   `gems_security`). Channel-level caps (crypto_wall_street/alpha_edge_crypto
