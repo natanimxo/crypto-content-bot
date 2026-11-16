@@ -68,9 +68,11 @@ def main():
         conn = get_conn()
         try:
             with conn.cursor() as cur:
-                cur.execute("SELECT 1 FROM run_logs WHERE job_name = 'source_probe' AND started_at > now() - interval '20 hours' LIMIT 1")
-                if cur.fetchone():
-                    return
+                cur.execute("SELECT details FROM run_logs WHERE job_name = 'source_probe' AND started_at > now() - interval '20 hours' ORDER BY started_at DESC LIMIT 1")
+                row = cur.fetchone()
+                done_ids = {r.get("id") for r in ((row[0] or {}).get("results") or [])} if row else None
+                if done_ids is not None and done_ids == {p["id"] for p in source_probe.PROBES}:
+                    return                  # probed within 20h AND with the same probe set; a new probe is verified at the next cycle
             results = source_probe.probe_all()
             keep = ("id", "dir", "status", "kind", "items", "newest", "bytes", "secs", "auth_or_blocked", "login_wall", "error", "sample", "html_title", "snippet")
             with run_log(conn, "source_probe") as state:

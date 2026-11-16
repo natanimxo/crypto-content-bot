@@ -41,6 +41,7 @@ PROBES = [
     {"id": "yeswehack_programs", "dir": "bug bounty", "url": "https://api.yeswehack.com/programs?page=1&resultsPerPage=20"},
     {"id": "intigriti_public", "dir": "bug bounty", "url": "https://app.intigriti.com/api/core/public/programs"},
     {"id": "immunefi_explore", "dir": "bug bounty", "url": "https://immunefi.com/bug-bounty/"},
+    {"id": "immunefi_public_json", "dir": "bug bounty", "url": "https://immunefi.com/public-api/bounties.json"},   # keyless JSON: 218 programs, launchDate / maxBounty / rewardsToken / endDate (audit competitions)
     {"id": "hackenproof", "dir": "bug bounty", "url": "https://hackenproof.com/programs"},
     {"id": "code4rena_contests", "dir": "audit contests", "url": f"{B}/code-423n4/code4rena-org/main/_data/contests/contests.json"},
     {"id": "code4rena_site", "dir": "audit contests", "url": "https://code4rena.com/audits"},
