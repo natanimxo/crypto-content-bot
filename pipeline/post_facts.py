@@ -274,6 +274,26 @@ def facts_earning_opportunities(p: dict) -> str:
         reward = f"a pool of ${p['pool_usd']:,.0f} shared among participants; what one person receives is not stated"
     elif not reward and p.get("unclear_usd"):
         reward = f"an amount of ${p['unclear_usd']:,.0f} is mentioned, but it is not clear whether it is per person or a total shared among winners"
+    what = p.get("title")
+    headline = p.get("headline_max_usd")
+    if p.get("source") in STRUCTURED_SOURCES and (p.get("pool_usd") or p.get("payout_usd")):
+        # The platform's structured figure is the FACT; a headline maximum in the listing's own title is marketing (operator 2026-11-16: the same
+        # principle as "up to $15,000" -- a nominal ceiling nobody is promised is not the payout). Lead with the structured figure; the page's own
+        # breakdown (a prize ladder) is kept only when nothing in it exceeds the pool.
+        pool = p.get("pool_usd") or p.get("payout_usd")
+        avg = f"; most participants win nothing (average per participant: about ${p['payout_usd']:,.0f})" if p.get("payout_kind") == "ev" and p.get("payout_usd") else ""
+        base = (f"a prize pool of ${pool:,.0f} shared among the winners only{avg} (this is the reward -- lead with it)" if p.get("pool_usd")
+                else f"${pool:,.0f} (this is the reward -- lead with it)")
+        from pipeline import earning as _earning
+        detail = _shorten(enriched.get("reward"), 120)
+        if detail and max(_earning.extract_amounts_usd(detail) or [0.0]) <= pool * 1.05:
+            base += f"; the page breaks it down as: {detail}"
+        reward = base
+        if headline:
+            reward += (f". The listing's own title also says \"up to ${headline:,.0f}\": that is a stated ceiling nobody is promised, NOT the reward. "
+                       f"Never put it in the title or lead with it; if you mention it at all, say it is listed as up to that amount")
+            what = re.sub(r"\s*\|?\s*\bup to\s*[$€£]?\s*[\d,.]+\s*[kKmM]?\b[^()|:]*", " ", what or "", flags=re.IGNORECASE)
+            what = re.sub(r"\s{2,}", " ", what).replace("| (", "(").strip(" |")
     cap = p.get("capital_usd")
     cost = enriched.get("cost") or ("nothing is stated as required up front" if cap == 0 else
                                     (f"about ${cap:,.0f} of your own money is needed" if cap else "not stated"))
@@ -291,7 +311,7 @@ def facts_earning_opportunities(p: dict) -> str:
     else:
         steps_block = "  NOT AVAILABLE -- the offer's own page could not be read. Write NO steps; tell the reader the steps are on the offer's page."
     return f"""Facts about this opportunity (collected automatically; the reader's own checks still apply):
-- What: {p.get('title')}
+- What: {what}
 - Kind: {(p.get('type') or 'other').replace('_', ' ')}
 - Posted by: {p.get('source_name')}
 - Reward: {reward or 'not stated'}

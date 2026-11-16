@@ -2237,3 +2237,36 @@ own bounty text it should probably look only at the claim-shaped alternatives --
 participant to promote Raenest with their own referral code; the post cannot say so (guard). (c) MultiHopper's listing title says "Up to $50,000 +
 Revenue Share" while the structured reward is $5,000 USDC; the card repeats both ("up to $50,000 plus revenue share, including $5,000 USDC") --
 the sponsor's own claim, kept, but the structured figure is the reliable one.
+
+### Phase 5 follow-ups, round 8 (2026-11-16, operator rulings: Raenest, the wallet gate, MultiHopper, draft attempts)
+
+**1. Raenest: expired, not drafted. Referral promotion is now detectable.** A bounty whose main task is promoting with your OWN referral code is a
+recruitment campaign; that the post could not be written without breaking the referral-language rule was the system telling us something true. The
+item is expired (approval 1899 `expired`, `expired_reason = 'recruitment_shaped'`, never judged, so not 'rejected'); the card message in the chat is
+inert (buttons look up `decision = 'pending'`). It reached the top of the queue at value 77.9 because nothing in value or trust knew.
+`earning.has_referral_promotion`: clause by clause, the participant must put their OWN referral code / link in their deliverable (not optional) AND
+the offer has at least two referral-code lines in all (e.g. "sign up using code: X" plus "include your unique referral code"). It is recruitment-shaped
+exactly like "downline": no value bonus, trust -30, the card says "recruitment-shaped", no official-source exemption. For Superteam it is judged on the
+platform's FULL brief (the stored text is cut at 900 characters). Evidence: of the 11 live Superteam listings TWO trip it -- Raenest ("your unique Raenest
+referral code ... in your content", "avoid self-referrals") and the worm Premier League bounty ("Your worm referral link is required", "[your referral link]"
+in every template) -- both now trust 32 / 23, below the floor; 0 of the 381 stored rows (Telegram, Doctor of Credit, Devpost, Zindi, Immunefi) trip it.
+Not covered: a poster's own code mentioned once or twice (the channel's affiliate link, a different shape), and an own-code requirement buried in a long
+brief with no second referral-code line.
+
+**2. Connect-wallet gate: claim-shaped wording for vetted sources.** `earning.gate(text, source_tier)`: tier 1-2 (a platform hosting sponsors' bounties, a
+curated aggregator) trip only on a connect-to-CLAIM / connect-to-RECEIVE construction ("connect your wallet to claim", "... in order to receive your reward");
+"connect your wallet and grab your referral link" and "connect your wallet and sign a message" pass. Tier 3 (open Telegram channels) and an unknown tier keep the
+broad rule -- it is the COMBINATION of an unvetted source and connect-to-claim that is dangerous. The seed-phrase and upfront-fee rules are not tier-dependent.
+The one stored row this would now let through (worm Premier League, held under the old rule) is recruitment-shaped anyway and stays held.
+
+**3. Headline maximum vs structured reward.** `headline_max_usd` is recorded when a listing's own title names an amount above 1.5x the structured reward
+(MultiHopper: "Up to $50,000 + Revenue Share" vs $5,000 USDC). For the platform sources (Superteam / Zindi / Immunefi) the facts handed to the writer now
+LEAD with the structured figure ("a prize pool of $5,000 ... this is the reward -- lead with it"), carry the maximum only as "a stated ceiling nobody is
+promised", strip "up to $X" from the What line, and keep the page's prize ladder only when nothing in it exceeds the pool. A guard rejects a draft whose
+TITLE carries the headline maximum. Same principle as the "up to $15,000" ruling: a nominal ceiling nobody gets is not the payout.
+
+**4. Draft attempts are measured.** Every PRODUCTION earning draft (not review runs with a supplied profile) writes a run_logs row, job `earning_draft`
+(`raw_item_id, source, attempts, chars, ok`). **Check after a week:** `python scripts/earning_report.py --drafts` (mean attempts, share needing 4+, per
+source, drafts that gave up). The ruling: if most cards need 4+ attempts, the 400-650 band is too tight for offers with real steps and prize ladders --
+WIDEN THE BAND rather than keep retrying (9 retries is a cost and latency on every approval). Pre-measurement: of the 9 platform-source cards generated on
+2026-11-16, 8 eventually wrote, several only after 3-5 attempts, and the Raenest-type offers never did.

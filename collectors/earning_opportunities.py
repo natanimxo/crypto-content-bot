@@ -177,12 +177,20 @@ def fetch_superteam(now: datetime):
             time.sleep(CALL_DELAY)
             det = get_json(SUPERTEAM_DETAIL.format(slug=slug), headers=HEADERS)
             region = det.get("region")
-            detail_text = _strip_html(det.get("description") or "")[:900]
+            full_detail = _strip_html(det.get("description") or "")
+            detail_text = full_detail[:900]
         except Exception as exc:                               # never fatal: the chapter name and the text still say something
+            full_detail = ""
             logger.warning("earning: superteam detail %s failed: %s", slug, exc)
         amount, token = it.get("rewardAmount"), (it.get("token") or "").strip()
         extra = {"structured": True, "deadline": _iso(deadline) if deadline else None, "geo": superteam_geo(region, sponsor, it.get("title")),
-                 "region": region, "steps_text": "", "winners": None}
+                 "region": region, "steps_text": "", "winners": None,
+                 # a bounty whose required work is promoting with the participant's OWN referral code is a recruitment campaign: judged on the FULL brief
+                 "referral_promotion": earning.has_referral_promotion(full_detail)}
+        if amount and earning.is_stablecoin(token):
+            top = max(earning.extract_amounts_usd(it.get("title") or "") or [0.0])
+            if top > 1.5 * float(amount):                      # a headline maximum that disagrees with the structured reward: the reward is the fact
+                extra["headline_max_usd"] = top
         kind = it.get("type") or "bounty"
         if amount and earning.is_stablecoin(token):
             subs = (it.get("_count") or {}).get("Submission") or 0
@@ -359,6 +367,8 @@ def build_payload(raw: dict, now: datetime) -> dict:
     # The payout is read from the text WITHOUT its referral clauses: "$25 for each friend you invite" is not the offer's own payout.
     base_text, _ = earning.split_referral(text)
     referral = earning.extract_referral(text)
+    if extra.get("referral_promotion"):        # decided on the platform's FULL brief (the stored text is cut)
+        referral = dict(referral, available=True, promotion=True)
     if payout is None and type_ != "hackathon" and not extra.get("structured"):
         stated, kind = earning.extract_reward(base_text, type_)
         if stated is not None and kind == "pool":
@@ -388,6 +398,7 @@ def build_payload(raw: dict, now: datetime) -> dict:
         "landing_url": landing_norm, "landing_domain": earning.registrable_domain(host), "referral_link": earning.is_referral_link(landing_raw or ""),
         "type": type_, "payout_usd": payout, "payout_kind": payout_kind, "pool_usd": pool_usd, "unclear_usd": unclear_usd,
         "referral": referral, "token_reward": extra.get("token_reward"), "kyc_known": bool(extra.get("kyc_known")),
+        "headline_max_usd": extra.get("headline_max_usd"),
         "other_amount_max": max([a for a in earning.extract_amounts_usd(base_text) if payout is None or abs(a - payout) > 0.5] or [0.0]),
         "deadline": _iso(deadline) if deadline else None, "capital_usd": capital, "effort_minutes": effort, "prereqs": prereqs, "geo": geo,
         "steps_text": extra.get("steps_text") or "",
@@ -687,7 +698,7 @@ def collect() -> int:
                         dropped_no_landing += 1
                         continue
                 payload = build_payload(raw, now)
-                reasons = earning.gate(raw["text"] + " " + " ".join(raw["links"] or []))
+                reasons = earning.gate(raw["text"] + " " + " ".join(raw["links"] or []), source_tier=payload["source_tier"])
                 if earning.is_roundup(raw["title"], raw["text"]):
                     reasons.append("not an offer: a digest / roundup of several projects")
                 income_reason = earning.not_income_reason(payload["type"])

@@ -120,7 +120,7 @@ def main():
     check("a referral code on the source's own link is NOT availability (an inference): reported, never scored",
           (E.referral_info(dict(base, referral_link=True))["available"], E.referral_info(dict(base, referral_link=True))["link_code"],
            E.score_earning(dict(base, referral_link=True)) == dict(nr, referral=E.referral_info(dict(base, referral_link=True)))), (False, True, True))
-    check("russian 'за каждого друга' is a referral clause", E.extract_referral("‼ ЗАБИРАЕМ ДО 15$ ЗА КАЖДОГО ДРУГА ОТ FOLK AI ‼"), {"available": True, "amount_usd": 15.0, "multi_level": False})
+    check("russian 'за каждого друга' is a referral clause", E.extract_referral("‼ ЗАБИРАЕМ ДО 15$ ЗА КАЖДОГО ДРУГА ОТ FOLK AI ‼"), {"available": True, "amount_usd": 15.0, "multi_level": False, "promotion": False})
     check("no referral -> no bonus", (nr["referral_bonus"], nr["referral"]["available"]), (0.0, False))
     rec = E.score_earning(dict(base, payout_usd=10.0, referral={"available": True, "amount_usd": 50.0}))
     plain = E.score_earning(dict(base, payout_usd=10.0))
@@ -131,18 +131,18 @@ def main():
           E.score_earning(dict(base, payout_usd=None, payout_kind=None, referral={"available": True, "amount_usd": 20.0}))["referral"]["recruitment_shape"], True)
     # ---- extraction: the referral clause is split from the base text so a referral bonus is never read as the offer's payout
     x = "Sign up and get a $50 bonus. Invite friends and earn $25 for each referral."
-    check("referral amount read from its clause", E.extract_referral(x), {"available": True, "amount_usd": 25.0, "multi_level": False})
+    check("referral amount read from its clause", E.extract_referral(x), {"available": True, "amount_usd": 25.0, "multi_level": False, "promotion": False})
     check("the payout is read from the text without the referral clause", E.extract_reward(E.split_referral(x)[0], "bank_bonus"), (50.0, "stated"))
-    check("same sentence: 'get $50 and refer a friend for $25'", E.extract_referral("Get a $50 bonus and refer a friend for $25"), {"available": True, "amount_usd": 25.0, "multi_level": False})
+    check("same sentence: 'get $50 and refer a friend for $25'", E.extract_referral("Get a $50 bonus and refer a friend for $25"), {"available": True, "amount_usd": 25.0, "multi_level": False, "promotion": False})
     check("same sentence: base kept", E.extract_reward(E.split_referral("Get a $50 bonus and refer a friend for $25")[0], "bank_bonus"), (50.0, "stated"))
-    check("no program in the text", E.extract_referral("Complete 3 quests to qualify for the airdrop"), {"available": False, "amount_usd": None, "multi_level": False})
+    check("no program in the text", E.extract_referral("Complete 3 quests to qualify for the airdrop"), {"available": False, "amount_usd": None, "multi_level": False, "promotion": False})
     check("'no referral needed' is not a program", E.extract_referral("Free to join, no referral needed")["available"], False)
     check("the poster's own code is not a program", E.extract_referral("Use my referral code ABC for a bonus")["available"], False)
-    check("a percentage program: available, no amount", E.extract_referral("Earn 20% of your referrals' rewards"), {"available": True, "amount_usd": None, "multi_level": False})
-    check("russian", E.extract_referral("Бонус $30. За каждого приглашённого друга +$5"), {"available": True, "amount_usd": 5.0, "multi_level": False})
+    check("a percentage program: available, no amount", E.extract_referral("Earn 20% of your referrals' rewards"), {"available": True, "amount_usd": None, "multi_level": False, "promotion": False})
+    check("russian", E.extract_referral("Бонус $30. За каждого приглашённого друга +$5"), {"available": True, "amount_usd": 5.0, "multi_level": False, "promotion": False})
     check("'50$ and 50$ per friend': the sign AFTER the number is read, and the base is kept (equal amounts are not recruitment-shaped)",
           (E.extract_referral("‼ ЗАБИРАЕМ 50$ И 50$ ЗА ДРУГА ОТ PumpFun ‼"), E.extract_reward(E.split_referral("‼ ЗАБИРАЕМ 50$ И 50$ ЗА ДРУГА ОТ PumpFun ‼")[0], "airdrop")),
-          ({"available": True, "amount_usd": 50.0, "multi_level": False}, (50.0, "stated")))
+          ({"available": True, "amount_usd": 50.0, "multi_level": False, "promotion": False}, (50.0, "stated")))
     check("'$25 per friend' after 'and' splits from the base", E.split_referral("Get $50 and $25 per friend you refer"), ("Get $50", ["$25 per friend you refer"]))
     # ---- multi-level wording: recruitment-shaped ON ITS OWN, whatever the amounts (operator 2026-11-16); no official-source exemption
     for label, text in (("downline", "Build your downline and earn on every signup"), ("multi-level", "Multi-level rewards program, $5 bonus"),
@@ -158,7 +158,7 @@ def main():
     check("no official-source exemption for the recruitment penalty", E.score_earning(dict(mlm, source_tier=1))["trust_components"]["referral_recruitment_penalty"], 30.0)
     check("a percentage-only referral stays ordinary", E.score_earning(dict(base, referral={"available": True, "amount_usd": None, "multi_level": False}))["referral"]["recruitment_shape"], False)
     check("french 'indique ... tiers' (indicates ... third parties) is not a referral or multi-level",
-          E.extract_referral("la fiche indique qu'aucune donnée n'est partagée avec des tiers"), {"available": False, "amount_usd": None, "multi_level": False})
+          E.extract_referral("la fiche indique qu'aucune donnée n'est partagée avec des tiers"), {"available": False, "amount_usd": None, "multi_level": False, "promotion": False})
     # ---- "50$" (sign after the number) in capital too
     check("capital: '500$' deposit read", E.extract_capital_usd("Deposit 500$ and get a bonus", "bank_bonus"), 500.0)
     check("capital: russian deposit word", E.extract_capital_usd("Нужен депозит 100$ для участия", "airdrop"), 100.0)
@@ -531,6 +531,66 @@ def main():
     check('facts: at most 3 steps, then a pointer to the page', (ff.count("\n  1. "), ff.count("\n  4. "), 'further steps' in ff), (1, 0, True))
     check('facts: a structured platform deadline beats the page text (the page shows the same instant in local time)', ('Deadline: Dec 13' in ff, '14 December' in ff), (True, False))
     check('facts: eligibility clauses about a referral code are dropped', 'must use a referral code' in ff, False)
+
+    # ---- the connect-wallet gate: claim-shaped wording only for a VETTED source; the broad rule stays for tier 3 / unknown (operator 2026-11-16)
+    step = "Go to the site, connect your wallet and grab your referral link from the Earn button"
+    check("gate: 'connect your wallet and grab your referral link' passes for a vetted platform (tier 2)", E.gate(step, 2), [])
+    check("gate: the same words from an open Telegram channel (tier 3) are still gated", E.gate(step, 3), ["connect-wallet-to-claim"])
+    check("gate: the same words with no tier are still gated", E.gate(step), ["connect-wallet-to-claim"])
+    check("gate: connect-to-CLAIM trips even for a vetted source", E.gate("Connect your wallet to claim your tokens", 2), ["connect-wallet-to-claim"])
+    check("gate: connect-to-RECEIVE trips even for a vetted source", E.gate("Connect your wallet in order to receive your reward", 1), ["connect-wallet-to-claim"])
+    check("gate: 'connect your wallet and sign a message' passes for a vetted platform", E.gate("Connect your wallet and sign a message with your X handle", 2), [])
+    check("gate: the seed-phrase rule is not tier-dependent", E.gate("Enter your seed phrase to continue", 1), ["asks for a seed phrase / private key / wallet import"])
+
+    # ---- required work = promoting with your OWN referral code is a recruitment campaign (operator 2026-11-16, the Raenest bounty)
+    raen = ("Sign up on Raenest using code: community\n Choose one track: Written Content, Video, or Animation\n"
+            "Track A: publish one long-form article on Medium or Substack\n Include your unique Raenest referral code or link with a clear CTA\n"
+            "Include hashtags #StablecoinsonRaenest")
+    check("referral promotion: sign up with a code + include your own referral code = recruitment campaign", E.has_referral_promotion(raen), True)
+    check("referral promotion: an OPTIONAL own code is not", E.has_referral_promotion("Sign up using code: x\n Include your referral link (optional)"), False)
+    check("referral promotion: the poster's own code, once, is not", E.has_referral_promotion("Register using my referral code ABC and deposit $50"), False)
+    check("referral promotion: one own-code line and nothing else is not 'substantially'", E.has_referral_promotion("Write a thread about Solana. Include your referral link if you like."), False)
+    check("referral promotion: a plain bounty is not", E.has_referral_promotion("Write a thread about Solana staking. Post it on X and tag us."), False)
+    pr = E.score_earning(dict(base, payout_usd=183.0, payout_kind="ev", pool_usd=13000.0, referral=E.extract_referral(raen)))
+    pn = E.score_earning(dict(base, payout_usd=183.0, payout_kind="ev", pool_usd=13000.0))
+    check("referral promotion: flagged recruitment-shaped, no value bonus, trust cut by the 30-point penalty",
+          (pr["referral"]["recruitment_shape"], pr["referral"]["promotion"], pr["referral_bonus"], pr["trust"] == pn["trust"] - 30.0), (True, True, 0.0, True))
+    pf = dict(base, payout_usd=183.0, payout_kind="ev", pool_usd=13000.0, referral=E.extract_referral(raen))
+    check("referral promotion: the 'recruitment-shaped' flag shows on the card", "recruitment-shaped" in N._score_text("earning_opportunities", {"score": 1, "score_breakdown": E.score_earning(pf)}), True)
+
+    # ---- a Superteam listing whose own brief requires promoting with a referral code is flagged AT COLLECTION (full brief, not the cut text)
+    RAEN = {"id": "r", "slug": "raenest", "title": "The Raenest Global Bounty", "type": "bounty", "status": "OPEN", "rewardAmount": 13000, "token": "USDC", "deadline": later,
+            "sponsor": {"name": "Raenest"}, "isWinnersAnnounced": False, "_count": {"Submission": 71}}
+    long_brief = "<p>" + "Background. " * 120 + "</p><p>Sign up on Raenest using code: community</p><p>Include your unique Raenest referral code or link with a clear CTA</p>"
+    C.get_json = lambda url, params=None, headers=None, **kw: ([RAEN] if "/details/" not in url else {"region": "Global", "description": long_brief})
+    try:
+        rr, _ = C.fetch_superteam(NOW)
+    finally:
+        C.get_json = real_get_json
+    pj = C.build_payload(rr[0], NOW)
+    sj = E.score_earning(pj)
+    check("superteam: a referral-promotion brief (beyond the 900-character cut) is flagged at collection", (pj["referral"]["promotion"], sj["referral"]["recruitment_shape"], sj["referral_bonus"]), (True, True, 0.0))
+    check("superteam: and the penalty lowers trust below a clean listing's", sj["trust"] < E.score_earning(dict(pj, referral={"available": False, "amount_usd": None})).get("trust"), True)
+
+    # ---- a headline maximum that disagrees with the structured reward: the structured figure is the fact (operator 2026-11-16)
+    MH = {"id": "m", "slug": "mh", "title": "MultiHopper Build & Route Challenge | Up to $50,000 + Revenue Share", "type": "bounty", "status": "OPEN", "rewardAmount": 5000, "token": "USDC",
+          "deadline": later, "sponsor": {"name": "MultiHopper"}, "isWinnersAnnounced": False, "_count": {"Submission": 78}}
+    C.get_json = lambda url, params=None, headers=None, **kw: ([MH] if "/details/" not in url else {"region": "Global", "description": "<p>Build it.</p>"})
+    try:
+        mm, _ = C.fetch_superteam(NOW)
+    finally:
+        C.get_json = real_get_json
+    pm = C.build_payload(mm[0], NOW)
+    check("headline: the structured reward is the pool and the headline maximum is recorded separately", (pm["pool_usd"], pm["headline_max_usd"]), (5000.0, 50000.0))
+    fm = PF.facts_earning_opportunities(pm)
+    check("headline: the facts lead with the structured reward and call the maximum a ceiling, not the reward",
+          ("prize pool of $5,000" in fm, "stated ceiling nobody is promised" in fm, "Reward: a prize pool of $5,000" in fm), (True, True, True))
+    check("headline: the 'What' line no longer carries 'up to $50,000'", "up to $50,000" in fm.split("- Kind:")[0].lower(), False)
+    from pipeline import write_post as WP
+    check("guard: a title that leads with the headline maximum is rejected",
+          any("headline maximum" in i for i in WP._find_earning_issues({"title": "Win up to $50,000 in the MultiHopper challenge", "paragraphs": ["x"]}, pm)), True)
+    check("guard: a title that leads with the structured reward is not rejected on that ground",
+          any("headline maximum" in i for i in WP._find_earning_issues({"title": "Compete for $5,000 in the MultiHopper challenge", "paragraphs": ["x"]}, pm)), False)
 
     # ---- the three exchange-announcement channels are corroboration only, never opportunity sources
     check("exchange channels are not candidate sources", [h for h in C.earning.CORROBORATION_ONLY_TELEGRAM if f"tg:{h}" in C.earning.SOURCES], [])

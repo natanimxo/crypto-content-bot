@@ -156,12 +156,23 @@ def not_income_reason(type_: str) -> str | None:
     return "not income: saves money, does not pay it (free game / freebie / credit)" if type_ in NON_INCOME_TYPES else None
 
 
-def gate(text: str) -> list[str]:
+# For a VETTED source (tier 1-2: a platform that hosts sponsors' bounties, a curated aggregator) only a connect-to-CLAIM / connect-to-RECEIVE
+# construction trips the gate (operator 2026-11-16): "connect your wallet and grab your referral link" or "connect your wallet and sign a
+# message" on a platform's own bounty is a step, not the drainer pattern. It is the COMBINATION of an unvetted source and connect-to-claim that is
+# dangerous, so tier 3 (open Telegram channels) and an unknown tier keep the broad rule above.
+_WALLET_CLAIM_NARROW_RE = re.compile(
+    r"(?:connect|link)\s+(?:your |a |the )?(?:crypto |web3 )?wallet\s+(?:to|and|in order to|so (?:you|that))\s+(?:\w+\s+){0,2}(?:claim|receive|collect|redeem|withdraw)|"
+    r"claim\s+(?:your |the )?(?:airdrop|tokens?|reward|drop|prize)s?[^.\n]{0,40}(?:connect|wallet)|"
+    r"(?:connect|wallet)[^.\n]{0,40}\b(?:to claim|to receive|to collect|to redeem|claim your|receive your|collect your)", re.IGNORECASE)
+
+
+def gate(text: str, source_tier: int | None = None) -> list[str]:
     """Reasons this item is excluded before any scoring; [] means it passes. Deterministic and boring on purpose."""
     reasons = []
     if _SEED_RE.search(text or ""):
         reasons.append("asks for a seed phrase / private key / wallet import")
-    if _WALLET_CLAIM_RE.search(text or ""):
+    wallet_re = _WALLET_CLAIM_NARROW_RE if source_tier in (1, 2) else _WALLET_CLAIM_RE
+    if wallet_re.search(text or ""):
         reasons.append("connect-wallet-to-claim")
     if _FEE_RE.search(text or ""):
         reasons.append("upfront payment to take part")
@@ -615,10 +626,11 @@ def extract_referral(text: str) -> dict:
     'multi_level': multi-level / downline wording present -- recruitment-shaped on its own}."""
     _, ref = split_referral(text)
     multi = has_multilevel(text)
-    if not ref and not multi:
-        return {"available": False, "amount_usd": None, "multi_level": False}
+    promo = has_referral_promotion(text)
+    if not ref and not multi and not promo:
+        return {"available": False, "amount_usd": None, "multi_level": False, "promotion": False}
     amounts = [a for c in ref for a in extract_amounts_usd(c) if a < 1_000_000]
-    return {"available": True, "amount_usd": max(amounts) if amounts else None, "multi_level": multi}
+    return {"available": True, "amount_usd": max(amounts) if amounts else None, "multi_level": multi, "promotion": promo}
 
 
 # Multi-level wording is the clearest TEXTUAL signal of a pyramid structure (operator, 2026-11-16): recruitment-shaped on its own, whatever
@@ -655,6 +667,26 @@ def is_stablecoin(token: str | None) -> bool:
     return (token or "").strip().lower() in STABLECOINS
 
 
+# A bounty whose required work is promoting the product with the participant's OWN referral code or link is a recruitment campaign
+# (operator 2026-11-16, after the Raenest bounty reached the top of the queue at value 77.9). Detected in the offer's text, clause by clause:
+# the participant must put their own referral code / link in their deliverable (not optional) AND the offer has at least two referral-code
+# lines in all (e.g. "sign up using code: X" plus "include your unique referral code"). The poster's own code ("use my code") is not this.
+_PROMO_OWN_RE = re.compile(
+    r"\b(?:include|attach|add|share|post|put|insert|embed|use|with)\b[^.\n]{0,40}\byour\b[^.\n]{0,25}\b(?:referral|affiliate|invite|ref)\b[^.\n]{0,12}\b(?:code|link|id)\b|"
+    r"\byour (?:own |unique |personal )?(?:\w+ ){0,2}(?:referral|affiliate)\s*(?:code|link)\b|"
+    r"(?:ваш\w*|свою|свой) реферальн\w+|\bsua (?:pr[oó]pria )?(?:ref\w+ )?(?:link|c[oó]digo) de (?:indica|afiliad)\w+", re.IGNORECASE)
+_PROMO_CODE_RE = re.compile(
+    r"\b(?:referral|affiliate|invite|ref)[- ]?(?:code|link|id)\b|\bpromo(?:tional)? code\b|\b(?:using|with|via|use|enter|apply)\s+(?:the |my |our |this )?(?:\w+ )?code\b|\bcode:\s*\w+|"
+    r"реф(?:еральн\w+)? (?:код|ссылк\w+)|промокод\w*", re.IGNORECASE)
+_PROMO_OPTIONAL_RE = re.compile(r"\boptional(?:ly)?\b|\bno (?:referral|code)\b|\bnot required\b|необязательно|не обязательно|\bbonus points?\b", re.IGNORECASE)
+
+
+def has_referral_promotion(text: str) -> bool:
+    clauses = [c for c in re.split(r"[\n;•·]+|(?<=[.!?])\s+", text or "") if c and c.strip()]
+    code_lines = [c for c in clauses if (_PROMO_CODE_RE.search(c) or _PROMO_OWN_RE.search(c)) and not _PROMO_OPTIONAL_RE.search(c)]
+    return len(code_lines) >= 2 and any(_PROMO_OWN_RE.search(c) for c in code_lines)
+
+
 REFERRAL_VALUE_MAX = 12.0           # points of the 100-point value score a referral program can ever add ("around 10-15%")
 REFERRAL_RECRUITMENT_PENALTY = 30.0  # trust points lost when referral earnings exceed the base payout OR the wording is multi-level (no official-source exemption, operator 2026-11-16)
 
@@ -669,8 +701,9 @@ def referral_info(payload: dict) -> dict:
     amount = ref.get("amount_usd")
     base = max([x for x in (payload.get("payout_usd"), payload.get("pool_usd"), payload.get("unclear_usd")) if x] or [0.0])
     multi = bool(ref.get("multi_level"))                             # multi-level wording: a pyramid structure by its own description
-    recruitment = bool(in_text and amount and amount > base) or multi   # referral earnings are the larger (or only) stated earnings
-    return {"available": in_text, "link_code": in_link, "amount_usd": amount, "multi_level": multi, "recruitment_shape": recruitment}
+    promo = bool(ref.get("promotion"))                               # the required work is promoting with the participant's own referral code
+    recruitment = bool(in_text and amount and amount > base) or multi or promo   # referral earnings are the larger (or only) stated earnings
+    return {"available": in_text, "link_code": in_link, "amount_usd": amount, "multi_level": multi, "promotion": promo, "recruitment_shape": recruitment}
 
 
 def referral_component(payload: dict) -> float:

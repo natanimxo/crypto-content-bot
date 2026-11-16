@@ -1062,6 +1062,9 @@ def _find_earning_issues(parsed: dict, payload: dict) -> list[str]:
         issues.append("it mentions a referral / invite / promo code -- the operator adds referral links by hand; remove it")
     if _EARN_URL_RE.search(text):
         issues.append("it contains a URL -- the link is added when the post is forwarded; say 'the link' instead")
+    headline = payload.get("headline_max_usd")
+    if headline and any(abs(a - headline) < 0.5 for a in earning.extract_amounts_usd(title)):
+        issues.append(f"the title leads with the listing's headline maximum (${headline:,.0f}); that is a ceiling, not the reward -- lead with the reward figure in the facts")
     allowed = set(earning.extract_amounts_usd(facts))
     for amount in earning.extract_amounts_usd(text):
         if not any(abs(amount - a) < 0.5 for a in allowed):
@@ -1866,6 +1869,23 @@ def _generate_voiced_write(conn, category: str, prompt: str, check, *, model_ove
     )
 
 
+def _record_earning_draft(conn, raw_item: dict, *, attempts: int | None, chars: int | None, ok: bool) -> None:
+    """One run_logs row per PRODUCTION earning draft (job `earning_draft`): how many attempts it took, and whether it gave up. Read by
+    `scripts/earning_report.py --drafts`. Purpose (operator 2026-11-16): if most cards need 4+ attempts the 400-650 band is too tight for offers
+    with real steps and prize ladders -- widen the band rather than keep paying for retries. Never raises into the write path."""
+    try:
+        from pipeline.run_log import run_log
+        p = raw_item.get("payload") or {}
+        with run_log(conn, "earning_draft") as state:
+            state["details"].update({"raw_item_id": raw_item.get("raw_item_id"), "source": p.get("source"), "attempts": attempts, "chars": chars, "ok": ok})
+    except Exception:
+        logger.exception("could not record the earning draft statistics")
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+
+
 def generate_post_with_report(conn, category: str, channel: str, raw_item: dict, *, profile=None) -> dict:
     """Channel-voice write. Returns {"text", "attempts", "retry_issues", "chars",
     "prompt", "channel"} -- generate_post() wraps this and returns just the text;
@@ -1879,6 +1899,7 @@ def generate_post_with_report(conn, category: str, channel: str, raw_item: dict,
         from pipeline import enrich_landing
         enrich_landing.enrich_item(conn, raw_item)
     cfg = load_category_config(conn, category)
+    production = profile is None        # a caller-supplied profile is a review / test run: not counted in the draft statistics
     profile = profile or channel_voice.load_profile(conn, channel)
     if profile is None:
         raise RuntimeError(f"channel '{channel}' has no voice profile")
@@ -1931,8 +1952,15 @@ def generate_post_with_report(conn, category: str, channel: str, raw_item: dict,
         chars = channel_voice.measure(assemble(str(parsed.get("title", "")), parsed["paragraphs"], final=False))
         return hits + channel_voice.find_voice_issues(profile, parsed, chars, facts_have_figures)
 
-    parsed, attempts, retry_issues = _generate_voiced_write(conn, category, prompt, check,
+    try:
+        parsed, attempts, retry_issues = _generate_voiced_write(conn, category, prompt, check,
                                                                  max_retries=VOICE_MAX_RETRIES_BY_CATEGORY.get(category, VOICE_MAX_RETRIES))
+    except RuntimeError:
+        if production and category == "earning_opportunities":
+            _record_earning_draft(conn, raw_item, attempts=None, chars=None, ok=False)
+        raise
+    if production and category == "earning_opportunities":
+        _record_earning_draft(conn, raw_item, attempts=attempts, chars=channel_voice.measure(assemble(parsed["title"], parsed["paragraphs"], final=False)), ok=True)
     text = assemble(parsed["title"], parsed["paragraphs"], final=True)
     return {
         "text": text, "attempts": attempts, "retry_issues": retry_issues, "prompt": prompt, "channel": channel,
