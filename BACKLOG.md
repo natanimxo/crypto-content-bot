@@ -2227,8 +2227,8 @@ the prize ladder is cut at 120 characters; (2) a step or an eligibility clause a
 guard rejects referral language and the operator adds referral links by hand, so a post built from such a step could only fail); (3) a structured
 platform's own deadline beats the page text (the page showed Dec 14 07:29 for Dec 13 23:59 UTC and the guard checks the structured date: Zindi
 Dis-Chem could never pass); (4) `VOICE_MAX_RETRIES_BY_CATEGORY["earning_opportunities"] = 9` (more draws, not a longer limit).
-**Result: 5 of 6 tested cards now write (Dis-Chem, GenAI for Good, MultiHopper, SSR.FUN, Underwater Vessel, AMD, AI Agents for RAN, Telco all pass at
-least once); the Raenest bounty still fails every time (664-694 characters).** It has three tracks, a 25-place prize ladder and steps that are
+**Result: 8 of the 9 distinct items tested now write (Dis-Chem, GenAI for Good, MultiHopper, SSR.FUN, Underwater Vessel, AMD, AI Agents for RAN and Telco
+pass; a few needed several tries and the draw is not deterministic); the Raenest bounty still fails every time (664-694 characters).** It has three tracks, a 25-place prize ladder and steps that are
 mostly about a referral code. If it is approved the draft fails and the operator writes it by hand with Edit.
 
 **Other things seen.** (a) The connect-wallet-to-claim gate matched a bounty STEP ("connect your wallet and grab your referral link", worm
