@@ -150,6 +150,10 @@ CREATE TABLE IF NOT EXISTS notifications (
     telegram_message_id BIGINT
 );
 
+-- 2026-11-16: 'candidate' (a normal card) or 'below_line' (the daily Earn Stack digest). Every pacing / cap query counts only 'candidate', so the digest never
+-- eats the daily cap; both kinds still count as "already notified".
+ALTER TABLE notifications ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'candidate';
+
 CREATE TABLE IF NOT EXISTS approvals (
     id SERIAL PRIMARY KEY,
     notification_id INT REFERENCES notifications(id),

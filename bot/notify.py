@@ -61,7 +61,7 @@ def _channel_notified_recent_count(conn, channel: str, window_hours: float = CAP
         cur.execute(
             """SELECT COALESCE(SUM(array_length(candidate_raw_item_ids, 1)), 0) AS n
                FROM notifications
-               WHERE channel = %s AND sent_at > now() - (%s || ' hours')::interval""",
+               WHERE channel = %s AND kind = 'candidate' AND sent_at > now() - (%s || ' hours')::interval""",
             (channel, window_hours),
         )
         return cur.fetchone()["n"] or 0

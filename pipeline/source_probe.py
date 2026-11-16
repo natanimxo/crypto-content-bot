@@ -182,6 +182,56 @@ def run_probe(p: dict) -> dict:
     return out
 
 
+# ---- Telegram channels the operator asked for (2026-11-16). Verified FROM RAILWAY before anything is built on them: does t.me/s/<handle> serve posts,
+# how fresh, how many a day, how engaged (median views), how much of it is an ad / price-bot / promotion. Handles were found by trying the plausible names
+# locally; several candidates are dead, hijacked or preview-less and are listed so the answer is on record.
+TELEGRAM_CANDIDATES = {
+    "whale_alert_io": "Whale Alert (official)", "wublockchainenglish": "Wu Blockchain (English)", "cointelegraph": "Cointelegraph",
+    "cryptopolitanofficial": "Cryptopolitan (official)", "CoinMarketCapNews": "CoinMarketCap News (candidate)", "toncoin": "TON (candidate)",
+    "tonblockchain": "TON Blockchain (candidate)", "investigations": "ZachXBT", "CertiKCommunity": "CertiK Community", "certikalert": "CertiK Alert (candidate)",
+    "binance_announcements": "Binance Announcements", "icodrops": "ICO Drops", "CryptoRankNews": "CryptoRank", "cryptoquant_official": "CryptoQuant",
+    "tech": "@tech Startups & Ventures",
+}
+_ADISH_RE = re.compile(r"join @|bitcoin_priceupdatebot|promo|sponsored|#ad\b|advertis|referral|use code|sign up (?:now|today)|trade (?:now|with)|signals?\b|vip\b", re.IGNORECASE)
+
+
+def probe_telegram(handle: str) -> dict:
+    """What t.me/s/<handle> actually serves from THIS machine. Read-only."""
+    import statistics
+    from collectors.earning_opportunities import parse_telegram_preview
+    out = {"id": f"tg:{handle}", "label": TELEGRAM_CANDIDATES.get(handle, handle)}
+    t0 = time.time()
+    try:
+        r = requests.get(f"https://t.me/s/{handle}", headers={"User-Agent": UA, "Accept-Language": "en"}, timeout=25)
+    except Exception as exc:
+        return {**out, "status": None, "error": str(exc)[:100]}
+    out["status"], out["secs"] = r.status_code, round(time.time() - t0, 1)
+    posts = parse_telegram_preview(r.text, handle) if r.status_code == 200 else []
+    title = re.search(r'<meta property="og:title" content="([^"]*)"', r.text)
+    out["page_title"] = (title.group(1) if title else "")[:50]
+    out["posts"] = len(posts)
+    if not posts:
+        out["note"] = "no public preview (a group, a private channel, or a different page)"
+        return out
+    ts = sorted(datetime.fromisoformat(p["time"]) for p in posts)
+    now = datetime.now(timezone.utc)
+    span = max((ts[-1] - ts[0]).total_seconds() / 86400, 0.05)
+    views = [p["views"] for p in posts if p["views"]]
+    out.update({"newest": ts[-1].isoformat(), "newest_age_h": round((now - ts[-1]).total_seconds() / 3600, 1), "oldest": ts[0].date().isoformat(),
+                "per_day": round(len(posts) / span, 1), "median_views": int(statistics.median(views)) if views else 0,
+                "adish_share": round(sum(1 for p in posts if _ADISH_RE.search(p["text"] or "")) / len(posts), 2),
+                "sample": [(p["text"] or "").replace("\n", " ")[:90] for p in posts[-3:]]})
+    return out
+
+
+def probe_telegram_all() -> list[dict]:
+    res = []
+    for h in TELEGRAM_CANDIDATES:
+        res.append(probe_telegram(h))
+        time.sleep(1.0)
+    return res
+
+
 def probe_all(only: list[str] | None = None) -> list[dict]:
     results = []
     for p in PROBES:

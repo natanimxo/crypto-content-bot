@@ -303,7 +303,7 @@ def _category_notified_recent_count(conn, channel: str, category: str,
             """SELECT COUNT(*) AS n
                FROM notifications nf
                JOIN raw_items r ON r.id = ANY(nf.candidate_raw_item_ids)
-               WHERE (%s OR nf.channel = %s) AND r.category = %s
+               WHERE (%s OR nf.channel = %s) AND r.category = %s AND nf.kind = 'candidate'
                  AND nf.sent_at > now() - (%s || ' hours')::interval""",
             (all_channels, channel, category, window_hours),
         )

@@ -595,6 +595,29 @@ def main():
     check("guard: a title that leads with the structured reward is not rejected on that ground",
           any("headline maximum" in i for i in WP._find_earning_issues({"title": "Compete for $5,000 in the MultiHopper challenge", "paragraphs": ["x"]}, pm)), False)
 
+    # ---- the daily "below the line" digest: every item that failed ONLY a soft floor, with the reasons (operator 2026-11-16)
+    from bot import below_line as BL
+    good = E.score_earning(dict(base, payout_usd=100.0))
+    check("digest: an item that clears every floor is not below the line", BL.reasons_for(good, {}), [])
+    lowt = E.score_earning(dict(base, payout_usd=100.0, source_tier=3, domain_age_days=5, terms={"deadline": False, "eligibility": False, "payout": False}))
+    check("digest: trust below 40 is listed with its number", [r for r in BL.reasons_for(lowt, {}) if r.startswith("trust")], [f"trust {lowt['trust']:.0f} < 40"])
+    cheap = E.score_earning(dict(base, payout_usd=0.9, payout_kind="ev"))
+    check("digest: expected payout under $10 is listed", [r for r in BL.reasons_for(cheap, {}) if "expected payout" in r], ["expected payout $0.90 < $10"])
+    tok = E.score_earning(dict(base, token_reward={"token": "BAOBAO", "amount": 1.0}, payout_usd=None, payout_kind=None))
+    check("digest: a token reward is a value failure with its own reason", any("BAOBAO" in r and "capped" in r for r in BL.reasons_for(tok, {})), True)
+    rec = E.score_earning(dict(base, payout_usd=10.0, referral={"available": True, "amount_usd": 50.0}))
+    check("digest: a recruitment-shaped offer is listed with why", any("recruitment-shaped (referral earnings exceed the base payout)" == r for r in BL.reasons_for(rec, {})), True)
+    promo = E.score_earning(dict(base, referral=E.extract_referral(raen)))
+    check("digest: referral promotion is named", any("referral promotion" in r for r in BL.reasons_for(promo, {})), True)
+    fake = [{"raw_item_id": i, "payload": {"title": "t" * 80, "source_name": "S", "type": "airdrop"}, "score_breakdown": lowt, "reasons": ["trust 18 < 40"]} for i in range(45)]
+    msgs = BL.build_messages(fake, "Earn Stack")
+    check("digest: 45 items split into messages under Telegram's limit, one Approve per item", (all(len(t) < 4096 for t, _ in msgs), sum(len(c) for _, c in msgs), max(len(c) for _, c in msgs) <= 20), (True, 45, True))
+    check("digest: the header names the channel's display name", "Earn Stack" in msgs[0][0], True)
+    check("digest: every item shows its scores and its reason", all(x in msgs[0][0] for x in ("value ", "trust ", "expected ", "referral ", "why: trust 18")), True)
+    check("digest: cap queries count only kind='candidate' (a digest never eats the cap of 8)",
+          ("kind = 'candidate'" in open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "bot", "notify.py"), encoding="utf-8").read(),
+           "nf.kind = 'candidate'" in open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "pipeline", "select_candidates.py"), encoding="utf-8").read()), (True, True))
+
     # ---- the three exchange-announcement channels are corroboration only, never opportunity sources
     check("exchange channels are not candidate sources", [h for h in C.earning.CORROBORATION_ONLY_TELEGRAM if f"tg:{h}" in C.earning.SOURCES], [])
     check("the dead / absent handles are not configured", [h for h in ("WWGiveaways", "freestuff_hub", "FREE_UDEMY_COURSES1", "bugbountyplzen", "officialairdropalert", "cryptosale_tg", "2top_airdrop")

@@ -83,7 +83,25 @@ def main():
     guarded("collect_earning_opportunities", collect)
     guarded("score_earning_opportunities", score)
     guarded("notify_earning", lambda: notify.run(only_channels=CHANNELS, job_name="notify_earning"))
-    guarded("source_probe", probe)         # after notify: a slow probe must never delay a card
+    def tg_probe():
+        """Telegram channels the operator asked for, probed FROM RAILWAY (see source_probe.TELEGRAM_CANDIDATES); re-runs when the candidate set changes."""
+        from pipeline import source_probe
+        conn = get_conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT details FROM run_logs WHERE job_name = 'telegram_probe' AND started_at > now() - interval '20 hours' ORDER BY started_at DESC LIMIT 1")
+                row = cur.fetchone()
+                if row and {r.get("id") for r in (row[0] or {}).get("results", [])} == {"tg:" + h for h in source_probe.TELEGRAM_CANDIDATES}:
+                    return
+            results = source_probe.probe_telegram_all()
+            with run_log(conn, "telegram_probe") as state:
+                state["details"]["results"] = results
+        finally:
+            conn.close()
+
+    guarded("below_line_digest", lambda: __import__("bot.below_line", fromlist=["run_daily"]).run_daily())   # at most once a day; see bot/below_line.py
+    guarded("source_probe", probe)
+    guarded("telegram_probe", tg_probe)         # after notify: a slow probe must never delay a card
     conn = get_conn()
     try:
         llm_usage.run_checks(conn)
