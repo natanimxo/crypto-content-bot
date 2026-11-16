@@ -41,6 +41,12 @@ PROBES = [
     {"id": "yeswehack_programs", "dir": "bug bounty", "url": "https://api.yeswehack.com/programs?page=1&resultsPerPage=20"},
     {"id": "intigriti_public", "dir": "bug bounty", "url": "https://app.intigriti.com/api/core/public/programs"},
     {"id": "immunefi_explore", "dir": "bug bounty", "url": "https://immunefi.com/bug-bounty/"},
+    # ---- Phase 6 startup_news candidates (2026-11-16): verified from Railway before build; crunchbase / eu-startups 403 locally, checked here for the record
+    {"id": "startup_techeu_rss", "dir": "startup news", "url": "https://tech.eu/feed"},
+    {"id": "startup_sifted_rss", "dir": "startup news", "url": "https://sifted.eu/feed"},
+    {"id": "startup_techcrunch_venture_rss", "dir": "startup news", "url": "https://techcrunch.com/category/venture/feed/"},
+    {"id": "startup_crunchbase_news_rss", "dir": "startup news", "url": "https://news.crunchbase.com/feed/"},
+    {"id": "startup_eu_startups_rss", "dir": "startup news", "url": "https://www.eu-startups.com/feed/"},
     {"id": "immunefi_public_json", "dir": "bug bounty", "url": "https://immunefi.com/public-api/bounties.json"},   # keyless JSON: 218 programs, launchDate / maxBounty / rewardsToken / endDate (audit competitions)
     {"id": "hackenproof", "dir": "bug bounty", "url": "https://hackenproof.com/programs"},
     {"id": "code4rena_contests", "dir": "audit contests", "url": f"{B}/code-423n4/code4rena-org/main/_data/contests/contests.json"},

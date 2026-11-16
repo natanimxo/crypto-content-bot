@@ -171,15 +171,22 @@ def render_earning_opportunities(raw_item: dict) -> str:
     anything (the two scores are printed by the notifier). Facts only -- the operator does the 'is this real' call."""
     p = raw_item["payload"]
     parts = [f"{p.get('type', 'other').replace('_', ' ')}: {(p.get('title') or '')[:90]}", f"{p.get('source_name')} (tier {p.get('source_tier')})"]
-    if p.get("payout_usd") is not None:
-        kind = {"ev": "expected ", "worth": "worth ", "stated": "stated "}.get(p.get("payout_kind"), "")
-        parts.append(f"{kind}${p['payout_usd']:,.0f}")
+    from pipeline import prizes
+    shown = lambda key, usd: p.get(key) or f"~${usd:,.0f} (dollar equivalent)"      # the ORIGINAL currency, never converted (operator 2026-11-16)
+    prize = prizes.prize_line(p)
+    if prize:                                      # a competition: prize structure and odds, no expected amount
+        parts.append(prize)
+    elif p.get("payout_usd") is not None:
+        kind = {"ev": "raffle, expected ", "worth": "worth ", "stated": "stated "}.get(p.get("payout_kind"), "")
+        parts.append(f"{kind}{shown('payout_display', p['payout_usd'])}")
     elif p.get("pool_usd"):
-        parts.append(f"shared pool ${p['pool_usd']:,.0f}")
+        parts.append(f"shared pool {shown('pool_display', p['pool_usd'])}")
     elif p.get("unclear_usd"):
-        parts.append(f"amount unclear (${p['unclear_usd']:,.0f}: per person or total?)")
+        parts.append(f"amount unclear ({shown('unclear_display', p['unclear_usd'])}: per person or total?)")
     else:
         parts.append("payout not stated")
+    if p.get("skill"):
+        parts.append("skill: " + ", ".join(p["skill"]))
     cap = p.get("capital_usd")
     parts.append("cost unknown" if cap is None else "no cost" if cap == 0 else f"needs ${cap:,.0f}")
     if p.get("deadline"):
@@ -192,6 +199,24 @@ def render_earning_opportunities(raw_item: dict) -> str:
         parts.append(f"landing domain only {age}d old")
     if p.get("prereqs"):
         parts.append("requires " + "/".join(x.replace("_", " ") for x in p["prereqs"]))
+    return " · ".join(parts)
+
+
+@register_template("startup_news")
+def render_startup_news(raw_item: dict) -> str:
+    """The digest line for a funding round / acquisition: who, what, the amount EXACTLY as the outlet stated it (its own currency, never converted), the outlet."""
+    p = raw_item["payload"]
+    kind = "acquisition" if p.get("story_type") == "acquisition" else "funding"
+    parts = [f"{kind}: {p.get('company') or (p.get('title') or '')[:60]}"]
+    if p.get("amount_display"):
+        parts.append(p["amount_display"])
+    if p.get("stage"):
+        parts.append(p["stage"])
+    if p.get("led_by"):
+        parts.append(f"led by {p['led_by'][:40]}")
+    parts.append(f"per {p.get('source_name') or p.get('source')}")
+    if p.get("hiring"):
+        parts.append("we sent a job card for them")
     return " · ".join(parts)
 
 

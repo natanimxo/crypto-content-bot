@@ -112,8 +112,29 @@ def _score_text(category: str, row: dict) -> str:
                                           else "unconfirmed (source link carried a code)" if ref.get("link_code") else "no")
             if b.get("kyc") is not None:                # a fact beside the scores (113 of 218 Immunefi programs require it): shown, never inferred
                 text += " · KYC required" if b["kyc"] else " · no KYC"
+            if b.get("skill"):                          # professional expertise needed (ML / engineering / security): a fact, shown beside the scores
+                text += " · skill: " + ", ".join(b["skill"])
             return text
     return f"score {row['score']}/100"
+
+
+def render_candidates(conn, channel: str, all_candidates: list) -> tuple[str, list]:
+    """The candidate message and its keyboard for [(category, row)]. Also used to re-render an already-sent card in place (editMessageText)."""
+    lines = [f"🆕 <b>{len(all_candidates)} new candidate(s)</b> cleared threshold for <b>{html.escape(get_channel_display_name(conn, channel))}</b>\n"]
+    keyboard_rows = []
+    for category, row in all_candidates:
+        cfg = load_category_config(conn, category)
+        triage_line = generate_triage(conn, category, row)
+        label = cfg.get("label") or category
+        lines.append(
+            f"<b>{html.escape(label)}</b> — {_score_text(category, row)}\n{html.escape(triage_line)}\n"
+        )
+        keyboard_rows.append([
+            {"text": "✅ Approve", "callback_data": f"approve:{row['raw_item_id']}"},
+            {"text": "✏️ Edit", "callback_data": f"edit:{row['raw_item_id']}"},
+            {"text": "❌ Reject", "callback_data": f"reject:{row['raw_item_id']}"},
+        ])
+    return "\n".join(lines), keyboard_rows
 
 
 def notify_channel(conn, channel: str, categories: list[str], soft_daily_cap: int | None = None) -> int | None:
@@ -169,24 +190,7 @@ def notify_channel(conn, channel: str, categories: list[str], soft_daily_cap: in
     # send fails (rate limit, chat-not-found, transient network), NOTHING is
     # persisted, so these candidates remain "new" and get retried next cycle
     # instead of being silently and permanently marked as already-notified.
-    lines = [f"🆕 <b>{len(all_candidates)} new candidate(s)</b> cleared threshold for <b>{html.escape(get_channel_display_name(conn, channel))}</b>\n"]
-    keyboard_rows = []
-
-    for category, row in all_candidates:
-        cfg = load_category_config(conn, category)
-        triage_line = generate_triage(conn, category, row)
-
-        label = cfg.get("label") or category
-        lines.append(
-            f"<b>{html.escape(label)}</b> — {_score_text(category, row)}\n{html.escape(triage_line)}\n"
-        )
-        keyboard_rows.append([
-            {"text": "✅ Approve", "callback_data": f"approve:{row['raw_item_id']}"},
-            {"text": "✏️ Edit", "callback_data": f"edit:{row['raw_item_id']}"},
-            {"text": "❌ Reject", "callback_data": f"reject:{row['raw_item_id']}"},
-        ])
-
-    text = "\n".join(lines)
+    text, keyboard_rows = render_candidates(conn, channel, all_candidates)
     operator_chat_id = os.environ.get("TELEGRAM_OPERATOR_CHAT_ID")
     if not operator_chat_id:
         raise RuntimeError("TELEGRAM_OPERATOR_CHAT_ID is not set")

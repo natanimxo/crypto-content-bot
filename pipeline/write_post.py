@@ -1667,6 +1667,13 @@ def compute_tool_launches_elements(conn, raw_item: dict, history: list) -> dict:
     return {"history_line": None, "risk_line": None, "source_name": source_name}
 
 
+@register_post_computer("startup_news")
+def compute_startup_news_elements(conn, raw_item: dict, history: list) -> dict:
+    """No history line, no risk line: each funding round or acquisition is its own event. The source line names the OUTLET that reported it."""
+    p = raw_item["payload"]
+    return {"history_line": None, "risk_line": None, "source_name": p.get("source_name") or p.get("source")}
+
+
 @register_prompt_builder("macro_news")
 def build_macro_news_prompt(cfg: dict, region_profile: str, raw_item: dict, history: list) -> str:
     """Hustle to Million's macro category -- reuses news.py's collection

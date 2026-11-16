@@ -206,8 +206,8 @@ def main():
     check("floor: expected payout exactly $10 passes", E.passes_floors({"value": 90.0, "trust": 90.0, "expected_payout_usd": 10.0}), True)
     check("floor: unknown expected payout passes", E.passes_floors({"value": 90.0, "trust": 90.0, "expected_payout_usd": None}), True)
     check("floor: unknown expected payout is not absent either (a row scored before the floor existed)", E.expected_payout_ok({"value": 90.0, "trust": 90.0}), True)
-    z = E.score_earning(dict(base, payout_usd=0.9, payout_kind="ev"))
-    check("a $0.90 expected payout scores 40+ on value yet never passes the floors (the weakness this floor exists for)", (z["value"] >= 40.0, z["expected_payout_usd"], E.passes_floors(z)), (True, 0.9, False))
+    z = E.score_earning(dict(base, type="giveaway", award_kind="raffle", payout_usd=0.9, payout_kind="ev"))
+    check("a RAFFLE with a $0.90 expected payout scores 40+ on value yet never passes the floors (the weakness this floor exists for)", (z["value"] >= 40.0, z["expected_payout_usd"], E.passes_floors(z)), (True, 0.9, False))
     u = E.score_earning(dict(base, payout_usd=None, payout_kind=None))
     check("unknown payout: expected payout is None, the payout component stays low (20-25)", (u["expected_payout_usd"], u["value_components"]["payout"]), (None, 20.0))
     check("probability-adjusted: a $20 airdrop (30% chance) is $6 expected and fails", (E.score_earning(dict(base, payout_usd=20.0))["expected_payout_usd"], E.passes_floors(E.score_earning(dict(base, payout_usd=20.0)))), (6.0, False))
@@ -470,9 +470,9 @@ def main():
     check("superteam: region GLOBAL from the detail endpoint -> worldwide", pa["geo"], "worldwide")
     check("superteam: a chapter sponsor (Superteam Ukraine) with no region is NOT global", pc["geo"], "single")
     check("superteam: a detail region other than GLOBAL is single", pg["geo"], "single")
-    check("superteam: a stablecoin competition is a pool with an expected value, never a per-person payout",
-          (pa["payout_kind"], pa["pool_usd"], pa["payout_usd"]), ("ev", 1000.0, 100.0))
-    check("superteam: a fixed-pay project's amount is stated", (pg["payout_kind"], pg["payout_usd"]), ("stated", 500.0))
+    check("superteam: a stablecoin bounty is a COMPETITION with a pool and structured prize tiers -- no expected amount, no pool / entrants",
+          (pa["award_kind"], pa["pool_usd"], pa["payout_usd"], pa["prize"]["entrants"]), ("competition", 1000.0, None, 5))
+    check("superteam: a project (one applicant chosen) is a competition of one winner", (pg["award_kind"], pg["prize"]["tiers"], pg["prize"]["winners"]), ("competition", [500.0], 1))
     check("superteam: a project-token reward is NOT priced (no payout, no pool) and is flagged", (pb["payout_usd"], pb["pool_usd"], pb["token_reward"]["token"]), (None, None, "BAOBAO"))
     sa, sb, sc_ = E.score_earning(pa), E.score_earning(pb), E.score_earning(pc)
     check("a token-denominated reward caps VALUE at 30 (below the 40 floor: it never reaches the operator)", (sb["value"] <= 30.0, E.passes_floors(sb)), (True, False))
@@ -495,8 +495,8 @@ def main():
         C.get_json = real_get_json
     check("zindi: only an open, public, prize-paying competition", [r["ext_id"] for r in z_raws], ["genai"])
     pz = C.build_payload(z_raws[0], NOW)
-    check("zindi: pool read from the reward text, expected value = pool / entrants, deadline = entries close",
-          (pz["pool_usd"], pz["payout_kind"], pz["payout_usd"], pz["deadline"][:10], pz["geo"]), (40000.0, "ev", 100.0, soon[:10], "worldwide"))
+    check("zindi: a competition: pool read from the reward text in its ORIGINAL currency, entrants kept, no expected amount, deadline = entries close",
+          (pz["pool_usd"], pz["award_kind"], pz["payout_usd"], pz["prize"]["entrants"], pz["prize"]["symbol"], pz["deadline"][:10], pz["geo"]), (40000.0, "competition", None, 100 if False else pz["prize"]["entrants"], "$", soon[:10], "worldwide"))
 
     IM = [
         {"project": "Audit Competition | Plether", "slug": "plether", "maxBounty": 80000, "rewardsToken": "USDC", "launchDate": past, "endDate": soon, "kyc": True},
@@ -517,8 +517,8 @@ def main():
     check("immunefi: a competition paid in a non-stablecoin token is capped like any token reward", E.score_earning(ip["tok"])["value"] <= 30.0, True)
     check("KYC unknown stays unknown (never 'no KYC')", E.score_earning(dict(base))["kyc"], None)
     from bot import notify as N
-    check("the card shows the KYC fact", N._score_text("earning_opportunities", {"score": 1, "score_breakdown": E.score_earning(ip["plether"])}).endswith("KYC required"), True)
-    check("the card shows 'no KYC' only when known", N._score_text("earning_opportunities", {"score": 1, "score_breakdown": E.score_earning(ip["nokyc"])}).endswith("no KYC"), True)
+    check("the card shows the KYC fact", N._score_text("earning_opportunities", {"score": 1, "score_breakdown": E.score_earning(ip["plether"])}).count("KYC required"), 1)
+    check("the card shows 'no KYC' only when known", N._score_text("earning_opportunities", {"score": 1, "score_breakdown": E.score_earning(ip["nokyc"])}).count("no KYC"), 1)
 
     # ---- facts handed to the writer for the platform sources (a 400-650 character post cannot carry a whole prize ladder and every step)
     from pipeline import post_facts as PF
@@ -587,7 +587,7 @@ def main():
     check("headline: the structured reward is the pool and the headline maximum is recorded separately", (pm["pool_usd"], pm["headline_max_usd"]), (5000.0, 50000.0))
     fm = PF.facts_earning_opportunities(pm)
     check("headline: the facts lead with the structured reward and call the maximum a ceiling, not the reward",
-          ("prize pool of $5,000" in fm, "stated ceiling nobody is promised" in fm, "Reward: a prize pool of $5,000" in fm), (True, True, True))
+          ("$5,000 USDC" in fm, "stated ceiling nobody is promised" in fm, "Reward: a competition" in fm), (True, True, True))
     check("headline: the 'What' line no longer carries 'up to $50,000'", "up to $50,000" in fm.split("- Kind:")[0].lower(), False)
     from pipeline import write_post as WP
     check("guard: a title that leads with the headline maximum is rejected",
@@ -601,7 +601,7 @@ def main():
     check("digest: an item that clears every floor is not below the line", BL.reasons_for(good, {}), [])
     lowt = E.score_earning(dict(base, payout_usd=100.0, source_tier=3, domain_age_days=5, terms={"deadline": False, "eligibility": False, "payout": False}))
     check("digest: trust below 40 is listed with its number", [r for r in BL.reasons_for(lowt, {}) if r.startswith("trust")], [f"trust {lowt['trust']:.0f} < 40"])
-    cheap = E.score_earning(dict(base, payout_usd=0.9, payout_kind="ev"))
+    cheap = E.score_earning(dict(base, type="giveaway", award_kind="raffle", payout_usd=0.9, payout_kind="ev"))
     check("digest: expected payout under $10 is listed", [r for r in BL.reasons_for(cheap, {}) if "expected payout" in r], ["expected payout $0.90 < $10"])
     tok = E.score_earning(dict(base, token_reward={"token": "BAOBAO", "amount": 1.0}, payout_usd=None, payout_kind=None))
     check("digest: a token reward is a value failure with its own reason", any("BAOBAO" in r and "capped" in r for r in BL.reasons_for(tok, {})), True)
@@ -617,6 +617,64 @@ def main():
     check("digest: cap queries count only kind='candidate' (a digest never eats the cap of 8)",
           ("kind = 'candidate'" in open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "bot", "notify.py"), encoding="utf-8").read(),
            "nf.kind = 'candidate'" in open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "pipeline", "select_candidates.py"), encoding="utf-8").read()), (True, True))
+
+    # ---- guaranteed / raffle / competition, prize structure and odds, original currency, skill (operator 2026-11-16)
+    from pipeline import prizes as PZ
+    eur = {"type": "hackathon", "award_kind": "competition", "pool_usd": 27000.0, "prize": {"pool": 25000.0, "symbol": "€", "suffix": "EUR", "tiers": [12000.0, 8000.0, 5000.0],
+           "winners": 3, "entrants": 142, "basis": "structured"}}
+    check("prize line: the operator's own example, in the ORIGINAL currency", PZ.prize_line(eur), "Top 3 share €25,000 (€12k / €8k / €5k) · ~142 entrants · 3 winners")
+    check("a euro pool is never relabelled or converted in the line", ("$" in PZ.prize_line(eur), "27" in PZ.prize_line(eur)), (False, False))
+    check("prize line: a ladder with a bonus tier", PZ.prize_line({"type": "hackathon", "award_kind": "competition", "prize": {"pool": 13000.0, "symbol": "$", "suffix": "USDC",
+          "tiers": [1500.0, 1400.0, 1300.0, 1200.0, 1000.0], "bonus": {"count": 20, "amount": 330.0}, "winners": 25, "entrants": 71}}),
+          "Top 5 share $13,000 USDC ($1.5k / $1.4k / $1.3k / $1.2k / $1k, plus 20 x $330) · ~71 entrants · 25 winners")
+    check("prize line: structure unknown -> says so, never guesses", PZ.prize_line({"type": "hackathon", "award_kind": "competition", "prize": {"pool": 5000.0, "symbol": "$", "suffix": "USDC", "tiers": [], "winners": None, "entrants": 78}}),
+          "$5,000 USDC shared among the winners (the number of winners is not stated) · ~78 entrants")
+    check("prize line: only competitions have one", PZ.prize_line({"type": "giveaway", "award_kind": "raffle", "prize": {"pool": 100.0}}), None)
+    check("a competition has NO expected payout and the $10 floor does not apply to it", (E.expected_payout_usd(eur), E.score_earning(eur)["expected_payout_usd"]), (None, None))
+    se = E.score_earning(dict(base, **eur))
+    check("a competition's value uses the size of the biggest prize, capped at 65 on the payout component", se["value_components"]["payout"] <= 65.0, True)
+    guar = E.score_earning(dict(base, award_kind="guaranteed", payout_usd=12000.0, payout_kind="stated"))
+    check("a competition never outscores a guaranteed payout of the same size on the payout component", se["value_components"]["payout"] < guar["value_components"]["payout"], True)
+    check("the breakdown carries the kind and the line", (se["award_kind"], se["prize_line"].startswith("Top 3 share")), ("competition", True))
+    check("kinds: giveaway = raffle, hackathon = competition, bank bonus = guaranteed", (PZ.award_kind({"type": "giveaway"}), PZ.award_kind({"type": "hackathon"}), PZ.award_kind({"type": "bank_bonus"})), ("raffle", "competition", "guaranteed"))
+    check("a structured award_kind wins over the type", PZ.award_kind({"type": "airdrop", "award_kind": "competition"}), "competition")
+    check("original amounts: '$40 000 USD' and '€20 000 EUR' are read as stated", (PZ.parse_original("$40 000 USD"), PZ.parse_original("€20 000 EUR")), ((40000.0, "$", "USD"), (20000.0, "€", "EUR")))
+    check("ladder from a page's own words", PZ.parse_ladder("1st place $2,500 USD, 2nd place $1,500 USD, 3rd place $1,000 USD"), [2500.0, 1500.0, 1000.0])
+    check("ladder: places must be consecutive from 1, else None", PZ.parse_ladder("1st $2,500, 3rd $1,000"), None)
+    check("skill: ML, engineering and security are detected; plain content work is not",
+          (PZ.skill_domains("Train a machine learning model on the dataset"), PZ.skill_domains("Audit the smart contracts for vulnerabilities"),
+           PZ.skill_domains("Deploy an autonomous agent and integrate the SDK"), PZ.skill_domains("Write an X thread about the product")),
+          (["machine learning"], ["software engineering", "security"], ["software engineering"], []))
+    check("skill: Zindi is machine learning, Immunefi is security, by source", (PZ.skill_domains("x", "zindi"), PZ.skill_domains("x", "immunefi")), (["machine learning"], ["security"]))
+    sk = E.score_earning(dict(base, payout_usd=100.0, effort_minutes=60, skill=["machine learning"]))
+    ns = E.score_earning(dict(base, payout_usd=100.0, effort_minutes=60))
+    check("skill required lowers the effort component (and nothing else in value_components)", (sk["value_components"]["effort"] < ns["value_components"]["effort"], sk["value_components"]["payout"] == ns["value_components"]["payout"], sk["skill"]), (True, True, ["machine learning"]))
+    check("the card shows the skill fact", N._score_text("earning_opportunities", {"score": 1, "score_breakdown": sk}).endswith("skill: machine learning"), True)
+    raffle = E.score_earning(dict(base, type="giveaway", award_kind="raffle", payout_usd=250.0, payout_kind="ev"))
+    check("a raffle keeps pool / entrants as its expected amount", raffle["expected_payout_usd"], 250.0)
+    check("facts: a competition shows structure and odds, never 'average per participant'",
+          ("average per participant" in PF.facts_earning_opportunities(dict(pz, enriched={}, title="t")), "~" in PF.facts_earning_opportunities(dict(pz, enriched={}, title="t"))), (False, True))
+
+    # ---- a competition's size floor (the assistant's choice, documented): without it a tiny hackathon cleared every floor on friction points alone
+    tiny = dict(base, type="hackathon", award_kind="competition", pool_usd=60.0, prize={"pool": 60.0, "symbol": "$", "suffix": "", "tiers": [], "winners": 1, "entrants": 40})
+    st_ = E.score_earning(tiny)
+    check("a $60 competition: value still computed, payout component 0, and it does NOT pass the floors", (st_["value_components"]["payout"], E.passes_floors(st_)), (0.0, False))
+    check("the digest names the size floor for it", any("largest prize is under" in r for r in BL.reasons_for(st_, {})), True)
+    check("a EUR 25,000 top-3 competition passes the floors and shows no expected amount", (E.passes_floors(se), se["expected_payout_usd"]), (True, None))
+    check("competition payout component: bigger top prize scores higher, none above 65",
+          (E.score_earning(dict(base, **dict(eur, prize=dict(eur["prize"], tiers=[1000.0], pool=1000.0))))["value_components"]["payout"]
+           < se["value_components"]["payout"] <= 65.0), True)
+
+    # ---- selection: competitions only fill slots nothing else wants, at most 2 a day (operator 2026-11-16)
+    from pipeline import select_candidates as SC
+    mk = lambda i, comp, v: {"raw_item_id": i, "score": v, "payload": {"type": "hackathon" if comp else "bank_bonus", "award_kind": "competition" if comp else "guaranteed"}}
+    pool = [mk(1, True, 90), mk(2, False, 55), mk(3, True, 80), mk(4, True, 70), mk(5, False, 45)]
+    check("selection: every non-competition comes first even at lower value, competitions follow best-first", [r["raw_item_id"] for r in SC.prioritise_earning(pool, 2)], [2, 5, 1, 3])
+    check("selection: at most the allowance of competitions", [r["raw_item_id"] for r in SC.prioritise_earning(pool, 1)], [2, 5, 1])
+    check("selection: no allowance left -> no competition at all", [r["raw_item_id"] for r in SC.prioritise_earning(pool, 0)], [2, 5])
+    check("selection: the cap is 2 a day", SC.EARNING_COMPETITIONS_PER_DAY, 2)
+    # with the per-cycle cap of 1, a competition is only ever sent when no non-competition is waiting
+    check("selection: with a slot of 1 the first candidate is a non-competition whenever one exists", SC.prioritise_earning(pool, 2)[0]["raw_item_id"], 2)
 
     # ---- the three exchange-announcement channels are corroboration only, never opportunity sources
     check("exchange channels are not candidate sources", [h for h in C.earning.CORROBORATION_ONLY_TELEGRAM if f"tg:{h}" in C.earning.SOURCES], [])

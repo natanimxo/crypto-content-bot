@@ -125,8 +125,8 @@ hustle_to_million:
   categories:
     - tool_launches
     - startup_jobs
-    - macro_news    # added 2026-09-12 -- see config/category_config.yaml's
-                     # macro_news section for the full editorial/neutrality design
+    - macro_news      # added 2026-09-12 -- see config/category_config.yaml's macro_news section for the full editorial/neutrality design
+    - startup_news    # Phase 6, 2026-11-16: funding rounds with a stated amount + acquisitions (Tech.eu / Sifted / TechCrunch Venture RSS)
     # grants deliberately out of scope (operator direction 2026-09-12,
     # live-verified) -- same "documented, not silently missing" treatment
     # as airdrops above: Grants.gov is real but US federal research grants,
@@ -137,5 +137,5 @@ hustle_to_million:
     # Million" section and intelligence-bot-spec-v2.md Section 3/16 for the
     # full reasoning.
   region_profile: default
-  soft_daily_cap: 6
+  soft_daily_cap: 6    # HUSTLE SHARES (operator 2026-11-16): tool_launches 2, startup_jobs 2, macro_news 1, startup_news 1 = 6, set as each category's own cap
   chat_id: "-1001897854375"

@@ -33,7 +33,7 @@ import feedparser
 import requests
 from dotenv import load_dotenv
 
-from pipeline import earning, llm_usage
+from pipeline import earning, llm_usage, prizes
 from pipeline.db import dict_cursor, get_conn
 from pipeline.http import get_json
 from pipeline.run_log import run_log
@@ -118,8 +118,10 @@ def fetch_devpost(now: datetime):
     raws = []
     for h in d.get("hackathons", []):
         prize_txt = _strip_html(h.get("prize_amount") or "")
-        pool = (earning.extract_amounts_usd(prize_txt) or [None])[0]
+        orig = prizes.parse_original(prize_txt)               # the prize pool in its ORIGINAL currency, never converted
         regs = h.get("registrations_count") or 0
+        # NOT the number of winners: Devpost's prizes_counts.cash counts prize CATEGORIES (Deck the Pixels: cash=1 for a $25,000 pool split into 1st / 2nd / ... places).
+        # Using it as "N winners" printed "one $25,000 prize" in a draft; the winner count is unknown from the API and is shown as unknown.
         dates = h.get("submission_period_dates") or ""
         end = earning.extract_deadline("until " + dates.split("-")[-1].strip(), now) if "-" in dates else None
         themes = [t["name"] for t in h.get("themes", [])]
@@ -128,7 +130,9 @@ def fetch_devpost(now: datetime):
             "source": "devpost", "ext_id": str(h["id"]), "title": f"{h.get('title')} hackathon: {prize_txt} in prizes",
             "text": f"{h.get('title')} hackathon by {h.get('organization_name') or 'the organizer'}. Prize pool {prize_txt}. Submissions {dates}. {', '.join(themes)}. {loc}.",
             "links": [h.get("url")] if h.get("url") else [], "url": h.get("url") or "", "published_at": _iso(now),
-            "extra": {"payout_usd": round(pool / max(regs, 10), 2) if pool else None, "payout_kind": "ev", "pool_usd": pool, "registrations": regs,
+            "extra": {"award_kind": "competition", "pool_usd": round(prizes.to_usd(orig[0], orig[1], orig[2]), 2) if orig else None, "registrations": regs,
+                      "prize": ({"pool": orig[0], "symbol": orig[1], "suffix": orig[2], "tiers": [], "winners": None, "entrants": regs, "basis": "stated"} if orig else None),
+                      "skill": prizes.skill_domains(h.get("title") or "", None),     # the TITLE only: a theme tag ("Machine Learning/AI") is the organiser's category, not a requirement (a Photoshop design contest carries it)
                       "deadline": _iso(end) if end else None, "geo": "worldwide" if loc.lower() == "online" else "unknown", "winners": None,
                       "steps_text": ""},
         })
@@ -172,15 +176,17 @@ def fetch_superteam(now: datetime):
         if not slug or it.get("status") != "OPEN" or it.get("isWinnersAnnounced") or (deadline and deadline <= now):
             continue
         sponsor = (it.get("sponsor") or {}).get("name") or ""
-        region, detail_text = None, ""
+        region, detail_text, rewards = None, "", {}
         try:                                                   # the list carries no region; the detail endpoint does
             time.sleep(CALL_DELAY)
             det = get_json(SUPERTEAM_DETAIL.format(slug=slug), headers=HEADERS)
             region = det.get("region")
+            rewards = det.get("rewards") or {}
+            bonus_spots = det.get("maxBonusSpots") or 0
             full_detail = _strip_html(det.get("description") or "")
             detail_text = full_detail[:900]
         except Exception as exc:                               # never fatal: the chapter name and the text still say something
-            full_detail = ""
+            full_detail, bonus_spots = "", 0
             logger.warning("earning: superteam detail %s failed: %s", slug, exc)
         amount, token = it.get("rewardAmount"), (it.get("token") or "").strip()
         extra = {"structured": True, "deadline": _iso(deadline) if deadline else None, "geo": superteam_geo(region, sponsor, it.get("title")),
@@ -194,16 +200,23 @@ def fetch_superteam(now: datetime):
         kind = it.get("type") or "bounty"
         if amount and earning.is_stablecoin(token):
             subs = (it.get("_count") or {}).get("Submission") or 0
-            if kind == "bounty":                               # a competition: the figure is the prize POOL, shared by position
-                extra.update(pool_usd=float(amount), payout_usd=round(float(amount) / max(subs, 10), 2), payout_kind="ev", registrations=subs)
-            else:                                              # a project / fixed-pay job: what the selected applicant is paid
-                extra.update(payout_usd=float(amount), payout_kind="stated")
+            # Position prizes are STRUCTURED: rewards = {"1": 1500, "2": 1400, ..., "99": 330 (a bonus prize for maxBonusSpots further entries)}.
+            # A bounty (and a project, where one applicant is chosen) is a COMPETITION: prize structure and odds are shown, never pool / entrants.
+            tiers = [float(v) for k, v in sorted(((int(k), v) for k, v in rewards.items() if str(k).isdigit() and int(k) < 99)) if v]
+            bonus = {"count": int(bonus_spots), "amount": float(rewards["99"])} if bonus_spots and rewards.get("99") else None
+            if kind != "bounty" and not tiers:
+                tiers = [float(amount)]
+            winners = (len(tiers) + (bonus["count"] if bonus else 0)) or None
+            extra.update(award_kind="competition", pool_usd=float(amount), registrations=subs,
+                         prize={"pool": float(amount), "symbol": "$", "suffix": token, "tiers": tiers, "bonus": bonus, "winners": winners, "entrants": subs,
+                                "basis": "structured" if tiers else "stated"})
             money = f"${float(amount):,.0f} {token}"
         elif amount:                                           # paid in a project's own token: an UNCLEAR amount, never priced
             extra["token_reward"] = {"token": token or "token", "amount": float(amount)}
             money = f"{float(amount):,.0f} {token or 'tokens'}"
         else:
             money = "reward not stated"
+        extra["skill"] = prizes.skill_domains(f"{it.get('title')} {full_detail[:1500]}", "superteam")
         title = f"{it.get('title')} ({sponsor}): {money}"
         raws.append({"source": "superteam", "ext_id": str(it.get("id") or slug), "title": title,
                      "text": f"{it.get('title')}. {kind} on Superteam Earn by {sponsor}. Reward {money}. Deadline {(deadline or now).date()}. {detail_text}",
@@ -227,17 +240,19 @@ def fetch_zindi(now: datetime):
         if (c.get("reward_type") or "").lower() != "prize":     # knowledge / points / jobs are not money
             continue
         reward_text = str(c.get("reward") or "")
-        amounts = earning.extract_amounts_usd(reward_text)
-        if not amounts:
+        orig = prizes.parse_original(reward_text)             # ORIGINAL currency ("EUR 20 000" stays EUR), never converted
+        if not orig:
             continue
-        pool, parts = max(amounts), c.get("participations_count") or 0
+        parts = c.get("participations_count") or 0
         org = (c.get("organization") or {}).get("name") if isinstance(c.get("organization"), dict) else c.get("organization")
         cid = str(c.get("id"))
         deadline = close or end
         raws.append({"source": "zindi", "ext_id": cid, "title": f"{c.get('title')} (Zindi competition): {reward_text} in prizes",
                      "text": f"{c.get('title')} data-science competition on Zindi{' by ' + org if org else ''}. Prize {reward_text}. Ends {(end or now).date()}.",
                      "links": [ZINDI_PAGE.format(id=cid)], "url": ZINDI_PAGE.format(id=cid), "published_at": _iso(_parse_dt(c.get("start_time")) or now),
-                     "extra": {"structured": True, "payout_usd": round(pool / max(parts, 10), 2), "payout_kind": "ev", "pool_usd": pool, "registrations": parts,
+                     "extra": {"structured": True, "award_kind": "competition", "pool_usd": round(prizes.to_usd(orig[0], orig[1], orig[2]), 2), "registrations": parts,
+                               "prize": {"pool": orig[0], "symbol": orig[1], "suffix": orig[2], "tiers": [], "winners": None, "entrants": parts, "basis": "stated"},
+                               "skill": prizes.skill_domains(c.get("title") or "", "zindi"),
                                "deadline": _iso(deadline) if deadline else None, "geo": "single" if c.get("is_access_restricted") else "worldwide",
                                "winners": None, "steps_text": ""}})
     return raws, now
@@ -265,8 +280,9 @@ def fetch_immunefi(now: datetime):
             continue
         kyc = bool(p.get("kyc"))
         extra = {"structured": True, "deadline": _iso(end), "geo": "worldwide", "winners": None, "steps_text": "", "kyc": kyc, "kyc_known": True}
+        extra.update(award_kind="competition", skill=prizes.skill_domains(p.get("project") or "", "immunefi"))
         if pool and earning.is_stablecoin(token):
-            extra.update(pool_usd=pool)                        # a pool shared by findings: never a per-person payout
+            extra.update(pool_usd=pool, prize={"pool": pool, "symbol": "$", "suffix": token, "tiers": [], "winners": None, "entrants": None, "basis": "stated"})
             money = f"${pool:,.0f} {token}"
         elif pool:
             extra["token_reward"] = {"token": token or "token", "amount": pool}
@@ -377,6 +393,9 @@ def build_payload(raw: dict, now: datetime) -> dict:
             unclear_usd = stated       # tied to N winners: per-person vs total cannot be told
         elif stated is not None:
             payout, payout_kind = stated, kind      # 'stated' (one reader) or 'max' ("up to": deliberately treated as the payout)
+    # The figures above are dollar EQUIVALENTS used for thresholds. What is SHOWN is the amount in its original currency, never converted (operator 2026-11-16).
+    displays = {"payout_display": prizes.display_for(base_text, payout), "pool_display": prizes.display_for(base_text, pool_usd) if not extra.get("prize") else None,
+                "unclear_display": prizes.display_for(base_text, unclear_usd)}
     deadline = None
     if extra.get("deadline"):
         try:
@@ -399,6 +418,8 @@ def build_payload(raw: dict, now: datetime) -> dict:
         "type": type_, "payout_usd": payout, "payout_kind": payout_kind, "pool_usd": pool_usd, "unclear_usd": unclear_usd,
         "referral": referral, "token_reward": extra.get("token_reward"), "kyc_known": bool(extra.get("kyc_known")),
         "headline_max_usd": extra.get("headline_max_usd"), "registrations": extra.get("registrations"),
+        "award_kind": extra.get("award_kind"), "prize": extra.get("prize"),
+        "skill": extra.get("skill") or (prizes.skill_domains(text[:1500], raw["source"]) if type_ in ("bounty", "hackathon") else []), **displays,
         "other_amount_max": max([a for a in earning.extract_amounts_usd(base_text) if payout is None or abs(a - payout) > 0.5] or [0.0]),
         "deadline": _iso(deadline) if deadline else None, "capital_usd": capital, "effort_minutes": effort, "prereqs": prereqs, "geo": geo,
         "steps_text": extra.get("steps_text") or "",
@@ -624,6 +645,28 @@ def _title_words(title: str) -> list[str]:
     return [w for w in re.findall(r"[a-z0-9]{3,}", (title or "").lower()) if w not in stop]
 
 
+def attach_prize_ladder(conn, payload: dict) -> bool:
+    """Fill `prize.tiers` / `winners` from the competition page's own wording when the API gave none. Never guessed: only a ladder with places 1..n all stated, in an
+    amount that does not exceed the pool. Failure is silent (the card then says the number of winners is not stated)."""
+    pr = payload.get("prize")
+    if not pr or pr.get("tiers"):
+        return False
+    try:
+        from pipeline import enrich_landing
+        res = enrich_landing.fetch_participation_steps(conn, payload.get("landing_url") or payload.get("url"), payload.get("title") or "")
+    except Exception:
+        logger.exception("earning: prize-ladder read failed")
+        return False
+    if not res:
+        return False
+    payload["enriched"] = {**res, "from": "landing_page"}
+    ladder = prizes.parse_ladder(res.get("reward") or "")
+    if ladder and ladder[0] <= pr["pool"] and sum(ladder) <= pr["pool"] * 1.02:
+        pr.update(tiers=ladder, winners=len(ladder), basis="page")
+        return True
+    return False
+
+
 # ---------------------------------------------------------------- collect
 
 def collect() -> int:
@@ -726,6 +769,11 @@ def collect() -> int:
                     else:
                         p["landing_url"], p["landing_domain"] = None, None
 
+            # A competition platform whose API has no prize ladder (Zindi): read the competition page ONCE, for new items only, so the card can show the prize structure
+            # ("Top 3 share EUR 25,000 (12k / 8k / 5k)"); the read is kept as payload['enriched'], so the draft later reuses it instead of paying for a second one.
+            for it in items:
+                if it["payload"].get("source") == "zindi":
+                    attach_prize_ladder(conn, it["payload"])
             # checkable trust facts, only for what survived the gate
             for it in items:
                 p = it["payload"]

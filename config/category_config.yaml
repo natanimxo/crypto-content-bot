@@ -348,7 +348,9 @@ tool_launches:
   # 8 -> 6, 2026-11-14: same one-from-a-batch pattern as news -- accepts came
   # from 20 of 67 multi-card batches, exactly one card each time, and it was
   # the top-scored in 18 of the 20. ceil(6/6) = 1 card per cycle.
-  soft_daily_cap: 6
+  # HUSTLE SHARES (operator 2026-11-16, Hustle to Million's channel cap of 6): tool_launches 2, startup_jobs 2, macro_news 1, startup_news 1. A category's own
+  # soft_daily_cap IS its share, so the channel cap of 6 never has to choose between categories.
+  soft_daily_cap: 2
 
   triage_model: template   # points/stars/comments are already structured facts
   write_model: deepseek-v4-flash
@@ -394,7 +396,9 @@ startup_jobs:
   review_threshold: 50
   cooldown_hours: 1        # same reasoning as web3_jobs -- topic_key is the listing's own
                             # id, two different postings are two different real opportunities
-  soft_daily_cap: 8
+  # HUSTLE SHARES (operator 2026-11-16, Hustle to Million's channel cap of 6): tool_launches 2, startup_jobs 2, macro_news 1, startup_news 1. A category's own
+  # soft_daily_cap IS its share, so the channel cap of 6 never has to choose between categories.
+  soft_daily_cap: 2       # was 8
 
   triage_model: template   # position/company/salary/location are fully structured facts
   write_model: deepseek-v4-flash
@@ -464,7 +468,9 @@ macro_news:
   # 12h -- macro stories (a Fed policy debate, a tariff dispute) genuinely
   # develop more slowly than a crypto news cycle.
   cooldown_hours: 24
-  soft_daily_cap: 4       # deliberately low -- the relevance gate already
+  # HUSTLE SHARES (operator 2026-11-16, Hustle to Million's channel cap of 6): tool_launches 2, startup_jobs 2, macro_news 1, startup_news 1. A category's own
+  # soft_daily_cap IS its share, so the channel cap of 6 never has to choose between categories.
+  soft_daily_cap: 1       # was 4 -- deliberately low: the relevance gate already
                             # does the real filtering (live-checked: ~10% of
                             # a real cycle's candidate feed items clear it);
                             # this is a second, tighter throttle on top,
@@ -499,6 +505,30 @@ macro_news:
     adopting either side's framing. No crypto framing, no financial-advice
     language, no price predictions. Measured tone: no hype, no manufactured
     urgency, no emoji beyond what the template itself adds.
+
+# Phase 6, 2026-11-16 -- startup_news -> Hustle to Million: funding rounds with a STATED AMOUNT and acquisitions, from Tech.eu / Sifted / TechCrunch Venture RSS
+# (collectors/startup_news.py). @tech (Telegram) was rejected as the source: 1 funding amount in 123 posts. Weights are priors (pipeline/score.py).
+startup_news:
+  score_weights:
+    impact: 0.50          # the stated amount, log scale 1M..500M (dollar equivalent, internal only)
+    novelty: 0.30         # age decay over the 48h window
+    actionability: 0.20   # an early round a builder can act on; +20 if we sent a job card for the company
+  review_threshold: 50
+  cooldown_hours: 24
+  # HUSTLE SHARES (operator 2026-11-16): tool_launches 2, startup_jobs 2, macro_news 1, startup_news 1 -- this category's cap IS its share of the channel's 6.
+  soft_daily_cap: 1
+  triage_model: template
+  write_model: deepseek-v4-flash
+  label: "💰 STARTUP NEWS"
+  emoji: "💰"
+  display_label: "Startup News"
+  hashtags:
+    - "#Startups"
+    - "#Funding"
+  voice: opportunity_framed
+  prompt_notes: >
+    Factual and direct: who raised or was acquired and the amount exactly as the outlet stated it, in the outlet's own currency -- never converted. Attribute it to
+    the outlet. Say what it plausibly means for a builder only if the facts support it. No investment advice, no predictions, no crypto framing, no hype.
 
 hacks_exploits:
   # Added 2026-09-30 (operator direction) -- confirmed post-hack incidents

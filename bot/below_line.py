@@ -56,6 +56,10 @@ def reasons_for(breakdown: dict, payload: dict) -> list[str]:
         out.append(f"reward paid in {capped.get('token') or 'a token'} (not a stablecoin): value capped at {capped.get('cap'):.0f}")
     elif value < earning.VALUE_FLOOR:
         out.append(f"value {value:.0f} < {earning.VALUE_FLOOR:.0f}")
+    if breakdown.get("award_kind") == "competition":
+        top = breakdown.get("top_prize_usd")
+        if top is not None and float(top) < earning.prizes.COMPETITION_MIN_TOP_PRIZE_USD:
+            out.append("competition: largest prize is under the 100 floor (dollar equivalent)")
     ep = breakdown.get("expected_payout_usd")
     if ep is not None and float(ep) < earning.EXPECTED_PAYOUT_FLOOR:
         out.append(f"expected payout ${float(ep):,.2f} < ${earning.EXPECTED_PAYOUT_FLOOR:.0f}")
@@ -100,8 +104,11 @@ def format_item(n: int, it: dict) -> str:
     b, p = it["score_breakdown"], it["payload"]
     ep = b.get("expected_payout_usd")
     kyc = b.get("kyc")
-    facts = [f"value {float(b['value']):.0f}", f"trust {float(b['trust']):.0f}",
-             f"expected {'$' + format(float(ep), ',.0f') if ep is not None else 'unknown'}", referral_text(b)]
+    # a COMPETITION shows its prize structure and odds, never an expected amount; amounts are in their ORIGINAL currency
+    money = b["prize_line"] if b.get("award_kind") == "competition" and b.get("prize_line") else f"expected {'$' + format(float(ep), ',.0f') if ep is not None else 'unknown'}"
+    facts = [f"value {float(b['value']):.0f}", f"trust {float(b['trust']):.0f}", money, referral_text(b)]
+    if b.get("skill"):
+        facts.append("skill: " + ", ".join(b["skill"]))
     if kyc is not None:
         facts.append("KYC required" if kyc else "no KYC")
     title = html.escape((p.get("title") or "")[:90])

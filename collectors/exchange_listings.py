@@ -41,7 +41,7 @@ from datetime import datetime, timezone
 
 from dotenv import load_dotenv
 
-from pipeline import llm_usage
+from pipeline import llm_usage, tg_preview
 from pipeline.db import dict_cursor, get_conn
 from pipeline.http import get_json
 from pipeline.run_log import run_log
@@ -360,8 +360,21 @@ def attach_prior_listings(candidates: list[dict], known: list[dict]) -> None:
         # ...and it must not count as a "prior listing" of itself on the same exchange for later comparisons either
 
 
+BINANCE_TELEGRAM = "binance_announcements"     # Binance's OFFICIAL announcements channel: CORROBORATION ONLY (operator 2026-11-16) -- it never creates a listing item
+
+
+def telegram_listing_posts(posts: list[dict]) -> dict[str, str]:
+    """{SYMBOL: https://t.me/<post>} for the channel's "Binance Will List ..." posts, parsed with the same strict spot-listing parser as the API titles."""
+    out: dict[str, str] = {}
+    for p in posts:
+        for tok in parse_listing("binance", (p.get("text") or "").split("\n")[0]):
+            out[tok["symbol"].upper()] = f"https://t.me/{p['post']}"
+    return out
+
+
 def _payload(c: dict, record_since: dict[str, str], trading_start: str | None) -> dict:
     return {
+        "telegram_corroborated": bool(c.get("telegram_url")), "telegram_url": c.get("telegram_url"),
         "title": f"{c['exchange']} lists {c['token_name']} ({c['symbol']})" if c["token_name"].upper() != c["symbol"].upper()
                  else f"{c['exchange']} lists {c['symbol']}",
         "topic_key": f"{c['symbol']}:{c['exchange_key']}".lower(),
@@ -447,6 +460,16 @@ def collect(backfill: bool = False) -> int:
             for ex, rows in raw_by_exchange.items():
                 candidates += build_candidates(ex, rows)
 
+            # Binance's official Telegram announcements channel confirms a Binance listing the API already gave us (corroboration only; a dead channel never fails the collector)
+            tg_listing_urls: dict[str, str] = {}
+            try:
+                tg_posts = tg_preview.fetch_posts(BINANCE_TELEGRAM)
+                tg_listing_urls = telegram_listing_posts(tg_posts)
+                state["details"]["telegram_binance"] = {"posts": len(tg_posts), "listing_posts": len(tg_listing_urls)}
+            except Exception as exc:
+                state["details"]["telegram_binance"] = {"error": str(exc)[:100]}
+                logger.warning("exchange_listings: Binance Telegram corroboration unavailable: %s", exc)
+
             known = _load_known(conn)
             known_ids = {k["external_id"] for k in known}
             new = [c for c in candidates if c["external_id"] not in known_ids]
@@ -460,6 +483,8 @@ def collect(backfill: bool = False) -> int:
             # announcements new this cycle (never during a backfill, never for old ones).
             items = []
             for c in new:
+                if c["exchange_key"] == "binance":
+                    c["telegram_url"] = tg_listing_urls.get((c.get("symbol") or "").upper())
                 start = None
                 if c["exchange_key"] == "kucoin":
                     start = _kucoin_trading_start(c["desc"])

@@ -915,6 +915,49 @@ def score_earning_opportunities(conn, raw_item_id: int, payload: dict) -> dict:
     return earning.score_earning(payload)
 
 
+# startup_news (Phase 6, 2026-11-16) -> Hustle to Million: funding rounds with a stated amount and acquisitions, from Tech.eu / Sifted / TechCrunch Venture RSS.
+# Every weight is a PRIOR (no decision history yet; re-fit with scripts/calibration_report.py after ~20 decisions):
+#   impact        -- the size of the stated amount on a log scale from 1M (0) to 500M (100), on the DOLLAR EQUIVALENT of the stated currency (internal only; the card
+#                    shows the amount in the outlet's own currency). An acquisition with no stated price is a neutral 45; a funding story always has an amount.
+#   novelty       -- age decay over the 48h freshness window, floored at 30 (anything still eligible is a first surfacing).
+#   actionability -- Hustle's reader builds things: an early round (pre-seed / seed / Series A) is the one a builder can act on (80); a later round 55; an acquisition 40;
+#                    +20 when we already sent a startup_jobs card for the company (the post can say they are hiring).
+STARTUP_NEWS_AMOUNT_FLOOR_USD = 1_000_000
+STARTUP_NEWS_AMOUNT_CEILING_USD = 500_000_000
+STARTUP_NEWS_MAX_AGE_HOURS = 48.0           # kept in sync with pipeline/select_candidates.py FRESHNESS_MAX_AGE_HOURS
+
+
+def _startup_news_impact(payload: dict) -> float:
+    usd = payload.get("amount_usd_equiv")
+    if usd:
+        return round(_log_scale(usd, STARTUP_NEWS_AMOUNT_FLOOR_USD, STARTUP_NEWS_AMOUNT_CEILING_USD), 1)
+    return 45.0 if payload.get("story_type") == "acquisition" else 20.0
+
+
+def _startup_news_novelty(payload: dict) -> float:
+    try:
+        age = max(0.0, (datetime.now(timezone.utc) - datetime.fromisoformat(payload["published_at"])).total_seconds() / 3600)
+    except (KeyError, ValueError, TypeError):
+        return 30.0
+    return round(max(30.0, 100.0 - age / STARTUP_NEWS_MAX_AGE_HOURS * 70.0), 1)
+
+
+def _startup_news_actionability(payload: dict) -> float:
+    stage = (payload.get("stage") or "").lower()
+    if payload.get("story_type") == "acquisition":
+        base = 40.0
+    elif stage in ("pre-seed", "preseed", "seed", "angel round") or stage == "series a":
+        base = 80.0
+    else:
+        base = 55.0
+    return min(100.0, base + (20.0 if payload.get("hiring") else 0.0))
+
+
+@register_scorer("startup_news")
+def score_startup_news(conn, raw_item_id: int, payload: dict) -> dict:
+    return {"impact": _startup_news_impact(payload), "novelty": _startup_news_novelty(payload), "actionability": _startup_news_actionability(payload)}
+
+
 def score_new_items(conn, category: str) -> int:
     """Score every raw_item in this category that doesn't have a score row yet.
     Returns the number scored."""

@@ -55,7 +55,7 @@ import feedparser
 from dotenv import load_dotenv
 
 from pipeline import entities as entity_lib
-from pipeline import llm_usage
+from pipeline import llm_usage, tg_preview
 from pipeline.channel_router import assign_channels_to_new_items
 from pipeline.db import get_conn
 from pipeline.run_log import run_log
@@ -79,6 +79,16 @@ FEEDS = {
     "unchained": "https://unchainedcrypto.com/feed/",
     "thedefiant": "https://thedefiant.io/feed",
     "protos": "https://protos.com/feed/",
+}
+
+# Telegram channels used as news sources (operator 2026-11-16), through the SAME pipeline as the RSS feeds: the cross-outlet dedup below, the
+# opinion / sponsored gate (text-based here: a Telegram post has no category tags), and the copyright guard at write time.
+# tier: Cointelegraph's channel is the OFFICIAL account of the outlet (2); Wu Blockchain is an individual's news brand (3).
+# COINTELEGRAPH REVERSES THE SEPTEMBER EXCLUSION -- a deliberate operator change (2026-09-11 "left out ... revisit once the gate has a track record" ->
+# 2026-11-16 "reverses my September exclusion"), recorded in BACKLOG.md. It enters through the Telegram channel, not its RSS feed.
+TELEGRAM_NEWS = {
+    "wublockchain": {"handle": "wublockchainenglish", "tier": 3},
+    "cointelegraph": {"handle": "cointelegraph", "tier": 2},
 }
 
 MAX_AGE_HOURS = 48  # no point surfacing news that's already two days stale
@@ -136,6 +146,34 @@ def _clean_description(raw: str) -> str:
 def _is_original_reporting(tags: list[str]) -> bool:
     lowered = {t.lower() for t in tags if t}
     return not (lowered & NOT_ORIGINAL_REPORTING_CATEGORIES)
+
+
+# A Telegram post has no category tags, so "is this original reporting" is decided on the TEXT: advertising, promotion, video clips and recurring
+# round-ups are not news. Deliberately conservative -- a wrongly dropped post is one story; a wrongly kept advert is on the channel.
+_TG_NOT_NEWS_RE = re.compile(
+    r"^\W*(?:highlight clip|sponsored|advertis|promoted|partner(?:ed)? content|#ad\b)|\bjoin (?:@|our|the) |\buse (?:my |our )?code\b|sign up (?:now|today)|click here|"
+    r"presented by|\bpromo code\b|\bgiveaway\b|bitcoin_priceupdatebot|\bsubscribe to\b|\bweekly top ?10\b", re.IGNORECASE)
+_TG_BANNER_RE = re.compile(r"^(?:[^\w$#]*)(?:(?:JUST IN|BREAKING|NEW|BIG|UPDATE|TODAY|REKT|ALERT|NEWS|DEVELOPING)\s*:?\s*)+", re.IGNORECASE)
+_TG_NAV_RE = re.compile(r"\s*(?:News\s*\|\s*Markets\s*\|\s*YouTube|Read more|Read Analysis)\s*$", re.IGNORECASE)
+
+
+def is_telegram_news(text: str) -> bool:
+    return bool(text and len(text) >= 40 and not _TG_NOT_NEWS_RE.search(text))
+
+
+def telegram_title_and_description(text: str) -> tuple[str, str]:
+    """(headline, description) from a post: a multi-line post's first line is its headline (Wu Blockchain); a one-paragraph post (Cointelegraph) uses its first
+    sentence with the 'JUST IN:' style banner removed. The description is the whole text without the channel's navigation links."""
+    clean = _TG_NAV_RE.sub("", (text or "").strip())
+    lines = [l.strip() for l in clean.split("\n") if l.strip()]
+    first = lines[0] if lines else ""
+    first = _TG_BANNER_RE.sub("", first).strip()
+    if len(lines) == 1 or len(first) > 160:
+        m = re.match(r"(.{20,160}?[.!?])(?:\s|$)", first)
+        title = (m.group(1) if m else first[:140]).strip()
+    else:
+        title = first
+    return title, _clean_description(re.sub(r"\s+", " ", clean))
 
 
 def _entry_datetime(entry) -> datetime | None:
@@ -225,6 +263,43 @@ def collect() -> int:
                         "published_at": published_at,
                         "entities": ent,
                     })
+
+            # ---- Telegram channels (same candidate shape as an RSS entry)
+            tg_stats = {}
+            for source_name, cfg in TELEGRAM_NEWS.items():
+                stats = tg_stats[source_name] = {"posts": 0, "not_news": 0, "too_old": 0, "kept": 0}
+                try:
+                    posts = tg_preview.fetch_posts(cfg["handle"])
+                except Exception as exc:
+                    logger.warning("news: telegram %s failed: %s", source_name, exc)
+                    stats["error"] = str(exc)[:100]
+                    continue
+                stats["posts"] = len(posts)
+                fetched_total += len(posts)
+                newest = posts[-1]["time"]
+                if (now - newest).days >= STALE_FEED_DAYS:
+                    stale_feeds[source_name] = (now - newest).days
+                    llm_usage._send_anomaly_alert(
+                        conn, "feed_stale", source_name,
+                        f"📰 <b>News channel gone quiet: {source_name}</b>\nIts newest post is {(now - newest).days} days old (alert at {STALE_FEED_DAYS}) -- "
+                        f"replace or remove it in collectors/news.py TELEGRAM_NEWS.", now, 7 * 24 * 60)
+                for post in posts:
+                    if (now - post["time"]).total_seconds() > MAX_AGE_HOURS * 3600:
+                        stats["too_old"] += 1
+                        continue
+                    if not is_telegram_news(post["text"]):
+                        stats["not_news"] += 1
+                        continue
+                    title, description = telegram_title_and_description(post["text"])
+                    if not title:
+                        continue
+                    stats["kept"] += 1
+                    candidates.append({
+                        "source_name": source_name, "external_id": str(post["id"]), "title": title, "description": description,
+                        "link": f"https://t.me/{post['post']}", "author": "", "tags": [], "published_at": post["time"],
+                        "entities": entity_lib.extract_entities(title, description), "tier": cfg["tier"],
+                    })
+            state["details"]["telegram"] = tg_stats
 
             state["details"]["fetched"] = fetched_total
             state["details"]["stale_feeds"] = stale_feeds
@@ -320,6 +395,8 @@ def collect() -> int:
                     "figures": sorted(ent["figures"]),
                     "also_covered_by": c["also_covered_by"],
                 }
+                if c.get("tier"):
+                    payload["source_tier"] = c["tier"]         # a Telegram channel: 2 = the outlet's own official account, 3 = anyone else (labelled, not scored)
                 external_id = f"{c['source_name']}:{c['external_id']}"
                 items.append((external_id, payload))
 

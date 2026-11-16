@@ -106,6 +106,25 @@ def facts_job_listing(p: dict) -> str:
 - Tags: {', '.join(p.get('tags') or [])}"""
 
 
+def facts_startup_news(p: dict) -> str:
+    """A reported funding round or acquisition. The outlet's report, not our verification: every figure is the outlet's, in the outlet's own currency and form."""
+    kind = "an acquisition" if p.get("story_type") == "acquisition" else "a funding round"
+    lines = [f"- Story: {p.get('title')}", f"- Type: {kind}", f"- Company: {p.get('company') or 'see the headline'}"]
+    if p.get("amount_display"):
+        lines.append(f"- Amount stated by the outlet: {p['amount_display']} (in the outlet's own currency; never convert it or restate it in another currency)")
+    elif p.get("story_type") == "acquisition":
+        lines.append("- Price: not stated -- do not guess one")
+    if p.get("stage"):
+        lines.append(f"- Round: {p['stage']}")
+    if p.get("led_by"):
+        lines.append(f"- Led by (per the outlet): {p['led_by']}")
+    if p.get("description"):
+        lines.append(f"- What the outlet's summary says: {p['description'][:300]}")
+    for h in (p.get("hiring") or [])[:1] if isinstance(p.get("hiring"), list) else ([p["hiring"]] if p.get("hiring") else []):
+        lines.append(f"- We already sent a job card for this company: a {h.get('position')} role at {h.get('company')} -- the post may say the company is hiring, nothing more about the job")
+    return "Facts about this story (REPORTED by " + str(p.get("source_name") or "the outlet") + "; not verified by us):\n" + "\n".join(lines)
+
+
 def facts_tool_launches(p: dict) -> str:
     if p.get("source") == "hackernews":
         facts = (
@@ -144,6 +163,15 @@ def facts_gems_security(p: dict) -> str:
 
 
 def facts_hacks_exploits(p: dict) -> str:
+    if p.get("source") == "zachxbt":
+        # An independent on-chain investigator's report, NOT a confirmed tracker entry: the claim is his, and the writer must say so.
+        lower = " (stated as a lower bound: 'X+')" if p.get("amount_is_lower_bound") else ""
+        return f"""Facts about this incident (REPORTED by the independent on-chain investigator ZachXBT -- his claim, not confirmed by DefiLlama or by the affected party):
+- Protocol/platform: {p.get('protocol_name') if p.get('named') else 'not named in the report (described only as an entity)'}
+- Amount reported lost: ${p.get('amount_usd', 0):,.0f}{lower}
+- What the report says: {p.get('claim_text') or p.get('title')}
+- Chain, technique and recovery status: not stated in the report -- do not guess any of them
+- Attribute everything to ZachXBT ("ZachXBT reports ..."); never state it as established fact, never name an attacker or a motive unless the report text does"""
     tvl = p.get("protocol_tvl_usd")
     tvl_note = f"${tvl:,.0f}" if tvl is not None else "not tracked by DefiLlama"
     returned = p.get("returned_funds")
@@ -173,6 +201,8 @@ def listing_record_window(p: dict) -> str | None:
 
 
 def facts_exchange_listings(p: dict) -> str:
+    # (a Binance listing also seen on Binance's own Telegram announcements channel carries p['telegram_corroborated'] -- stored for the record, deliberately not a post fact:
+    #  it is the same organisation saying the same thing twice, so it adds no independent confirmation)
     import datetime as _dt
 
     def day(iso: str | None) -> str:
@@ -264,19 +294,25 @@ def facts_earning_opportunities(p: dict) -> str:
     steps = [_shorten(x, 80).replace(" (more on the page)", "") for x in steps[:MAX_FACT_STEPS]]       # a 400-650 character post cannot carry a paragraph per step
     dropped_referral = len(enriched.get("steps") or []) - len(steps) - extra_steps > 0
     reward = _shorten(enriched.get("reward"), 120)
-    if not reward and p.get("payout_kind") == "ev" and p.get("pool_usd"):
-        reward = (f"a prize pool of ${p['pool_usd']:,.0f} shared among the winners only -- most participants win nothing "
-                  f"(average per participant: about ${p['payout_usd']:,.0f})")
+    def shown(display_key: str, usd: float | None) -> str:
+        """The amount in its ORIGINAL currency (never converted); only when the original could not be recovered is a dollar equivalent named as such."""
+        return p.get(display_key) or (f"about ${usd:,.0f} (a dollar equivalent; the original currency is not recorded)" if usd else "")
+
+    if not reward and p.get("payout_kind") == "ev" and p.get("pool_usd"):          # a RAFFLE: pool / entrants is meaningful
+        reward = (f"a random draw: a prize pool of {shown('pool_display', p['pool_usd'])} drawn among the entrants -- most entries win nothing "
+                  f"(average per entry: about {shown('payout_display', p['payout_usd'])})")
     elif not reward and p.get("payout_usd") is not None:
         kind = {"worth": "worth", "stated": "stated as"}.get(p.get("payout_kind"), "stated as")
-        reward = f"{kind} ${p['payout_usd']:,.0f}"
+        reward = f"{kind} {shown('payout_display', p['payout_usd'])}"
     elif not reward and p.get("pool_usd"):
-        reward = f"a pool of ${p['pool_usd']:,.0f} shared among participants; what one person receives is not stated"
+        reward = f"a pool of {shown('pool_display', p['pool_usd'])} shared among participants; what one person receives is not stated"
     elif not reward and p.get("unclear_usd"):
-        reward = f"an amount of ${p['unclear_usd']:,.0f} is mentioned, but it is not clear whether it is per person or a total shared among winners"
+        reward = f"an amount of {shown('unclear_display', p['unclear_usd'])} is mentioned, but it is not clear whether it is per person or a total shared among winners"
     what = p.get("title")
     headline = p.get("headline_max_usd")
-    if p.get("source") in STRUCTURED_SOURCES and (p.get("pool_usd") or p.get("payout_usd")):
+    from pipeline import prizes as _prizes
+    is_comp = _prizes.award_kind(p) == "competition" and _prizes.prize_info(p) is not None
+    if p.get("source") in STRUCTURED_SOURCES and (p.get("pool_usd") or p.get("payout_usd")) and not is_comp:
         # The platform's structured figure is the FACT; a headline maximum in the listing's own title is marketing (operator 2026-11-16: the same
         # principle as "up to $15,000" -- a nominal ceiling nobody is promised is not the payout). Lead with the structured figure; the page's own
         # breakdown (a prize ladder) is kept only when nothing in it exceeds the pool.
@@ -294,6 +330,17 @@ def facts_earning_opportunities(p: dict) -> str:
                        f"Never put it in the title or lead with it; if you mention it at all, say it is listed as up to that amount")
             what = re.sub(r"\s*\|?\s*\bup to\s*[$€£]?\s*[\d,.]+\s*[kKmM]?\b[^()|:]*", " ", what or "", flags=re.IGNORECASE)
             what = re.sub(r"\s{2,}", " ", what).replace("| (", "(").strip(" |")
+    if is_comp:
+        # A COMPETITION (operator 2026-11-16): ranked / judged prizes. Show the prize STRUCTURE and the ODDS in the ORIGINAL currency -- never an average per
+        # entrant (that only describes a raffle), never a converted amount. The page's own ladder fills in the tiers when the API had none.
+        ladder = None if (_prizes.prize_info(p).get("tiers")) else _prizes.parse_ladder(enriched.get("reward") or "")
+        reward = (f"a competition -- only the winners are paid, ranked on merit, not everyone who enters: {_prizes.prize_line(p, ladder=ladder)} "
+                  f"(this is the reward -- lead with it; give the prize structure and the number of entrants, never an average per entrant)")
+        if headline:
+            reward += (f". The listing's own title also says \"up to ${headline:,.0f}\": that is a stated ceiling nobody is promised, NOT the reward. "
+                       f"Never put it in the title or lead with it; if you mention it at all, say it is listed as up to that amount")
+            what = re.sub(r"\s*\|?\s*\bup to\s*[$€£]?\s*[\d,.]+\s*[kKmM]?\b[^()|:]*", " ", what or "", flags=re.IGNORECASE)
+            what = re.sub(r"\s{2,}", " ", what).replace("| (", "(").strip(" |")
     cap = p.get("capital_usd")
     cost = enriched.get("cost") or ("nothing is stated as required up front" if cap == 0 else
                                     (f"about ${cap:,.0f} of your own money is needed" if cap else "not stated"))
@@ -304,12 +351,14 @@ def facts_earning_opportunities(p: dict) -> str:
     geo = {"worldwide": "open worldwide", "multi": "open in several regions (check the page for which)", "single": "open in ONE country only"}.get(p.get("geo"), "countries not stated")
     where = _shorten("; ".join(c for c in re.split(r"\s*;\s*", enriched.get("eligibility") or "") if c and not _REFERRAL_STEP_RE.search(c)), 170) or geo
     reqs = ", ".join(x.replace("_", " ") for x in (p.get("prereqs") or [])) or "none stated"
+    if p.get("skill"):
+        reqs = ("" if reqs == "none stated" else reqs + "; ") + "professional skill needed: " + ", ".join(p["skill"])
     # WHY THIS ONE (operator 2026-11-16: the voice must read as a curated find, not a feed item). Built only from checkable fields, so the "reason it is
     # worth a look" can never be invented: the writer is told to use ONE or TWO of these and nothing else.
     stands = []                  # strongest reasons first; a weak one ("open anywhere") only when nothing stronger is true
     regs = p.get("registrations")
-    if p.get("payout_kind") == "ev" and regs is not None and regs < 30:
-        stands.append(f"only {regs} entrants so far, so the pool is shared among very few")
+    if _prizes.award_kind(p) in ("competition", "raffle") and regs is not None and regs < 30:
+        stands.append(f"only {regs} entrants so far, so the prizes are shared among very few")
     try:
         left = (_dt.datetime.fromisoformat(p["deadline"]) - _dt.datetime.now(_dt.timezone.utc)).days
         if left >= 14:
@@ -317,7 +366,7 @@ def facts_earning_opportunities(p: dict) -> str:
     except (KeyError, TypeError, ValueError):
         pass
     if p.get("payout_kind") in ("stated", "max") and p.get("payout_usd") and p["payout_usd"] >= 50:
-        stands.append(f"a stated payout of ${p['payout_usd']:,.0f}")
+        stands.append(f"a stated payout of {shown('payout_display', p['payout_usd'])}")
     if cap == 0:
         stands.append("nothing is stated as required up front")
     if p.get("geo") == "worldwide":
@@ -461,6 +510,22 @@ FACT_SPECS: dict[str, FactSpec] = {
             "Never inflate a launch beyond what the facts say: modest traction must read as "
             "modest. No crypto framing, no financial language. No hype language, no "
             "manufactured urgency. " + _NO_SCORES
+        ),
+    ),
+    "startup_news": FactSpec(
+        audience=("founders, indie hackers, people building or joining startups -- not a crypto "
+                  "audience"),
+        facts=facts_startup_news,
+        content_brief=(
+            "Say what happened in your own words: who raised or was acquired, the amount exactly as the facts state it, and what kind of company it is. Then one "
+            "plain sentence on what it means for a builder -- what the company is likely to do with the money or the deal, ONLY if the facts say so; otherwise "
+            "just the facts. Attribute the report to the outlet."
+        ),
+        guardrails=(
+            "Everything is REPORTED by the outlet, never established by you: say 'according to <outlet>' or 'reported'. Show every amount in the currency and form "
+            "the facts give; never convert, round into another currency or estimate a valuation. Never guess a price, a valuation, revenue, ownership or an investor "
+            "that is not in the facts. No investment advice, no predictions about the company's success. No crypto framing. No hype, no manufactured urgency. "
+            + _NO_SCORES
         ),
     ),
     "macro_news": FactSpec(

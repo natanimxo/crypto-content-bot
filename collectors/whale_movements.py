@@ -553,6 +553,16 @@ def collect() -> int:
             state["details"]["stale_skipped"] = stale_skipped
             state["details"]["notable"] = len(items)
 
+            # A transaction is ONE event however many sources report it: drop any move whose hash the Whale Alert channel collector
+            # (collectors/whale_alert.py) already stored. That collector skips hashes Etherscan stored, so the dedupe holds in both directions.
+            from pipeline.db import dict_cursor
+            with dict_cursor(conn) as cur:
+                cur.execute("SELECT DISTINCT lower(payload->>'tx_hash') h FROM raw_items WHERE category = %s AND payload->>'source' = 'whale_alert' AND collected_at > now() - interval '3 days'", (CATEGORY,))
+                wa_hashes = {r["h"] for r in cur.fetchall()}
+            before = len(items)
+            items = [it for it in items if (it[1].get("tx_hash") or "").lower() not in wa_hashes]
+            state["details"]["dropped_already_from_whale_alert"] = before - len(items)
+
             inserted = insert_raw_items_batch(conn, source_id, CATEGORY, items, held=HOLD_ALL_CANDIDATES)
             state["details"]["inserted"] = inserted
             logger.info("whale_movements: fetched=%d notable=%d inserted=%d",

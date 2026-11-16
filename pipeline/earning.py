@@ -37,6 +37,8 @@ import re
 from datetime import datetime, timedelta, timezone
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
+from pipeline import prizes  # noqa: E402  (award kinds, prize structure, skill -- pure functions)
+
 TRUST_FLOOR = 40.0
 VALUE_FLOOR = 40.0
 # A THIRD hard floor, not a weight (operator 2026-11-16): value 40 is reachable with ZERO payout, because a free, global, no-KYC offer earns ~50
@@ -727,10 +729,14 @@ def _log_scale(x: float, lo: float = 1.0, hi: float = 1000.0) -> float:
 
 def expected_payout_usd(payload: dict) -> float | None:
     """Probability-adjusted payout. None when no payout is stated -- unknown is never coded as high."""
+    # A COMPETITION (ranked / judged prizes) has no expected amount: pool / entrants only describes a raffle (operator 2026-11-16). Its odds and prize
+    # structure are SHOWN (prizes.prize_line); the expected-payout floor does not apply to it.
+    if prizes.award_kind(payload) == "competition":
+        return None
     nominal = payload.get("payout_usd")
     if nominal is None:
         return None
-    if payload.get("payout_kind") == "ev":          # already an expected value (hackathon: pool / registrants)
+    if payload.get("payout_kind") == "ev":          # a RAFFLE's expected value (pool / entrants)
         return nominal
     return nominal * payout_probability(payload.get("type") or "other", payload)
 
@@ -738,7 +744,9 @@ def expected_payout_usd(payload: dict) -> float | None:
 def value_components(payload: dict) -> dict:
     t = payload.get("type") or "other"
     ev = expected_payout_usd(payload)
-    if ev is None:
+    if prizes.award_kind(payload) == "competition":
+        payout = prizes.competition_payout_component(payload)    # size of the biggest prize, capped at 65: you have to WIN it
+    elif ev is None:
         payout = 20.0 if t in ("airdrop", "giveaway") else 25.0   # unknown payout: capped low, never coded as high
     else:
         payout = _log_scale(ev)
@@ -757,6 +765,8 @@ def value_components(payload: dict) -> dict:
         capital = 5.0
     minutes = payload.get("effort_minutes") or _EFFORT_DEFAULT_MIN.get(t, 20)
     effort = 100.0 if minutes <= 2 else 80.0 if minutes <= 10 else 55.0 if minutes <= 30 else 30.0 if minutes <= 120 else 10.0
+    if payload.get("skill"):                       # professional expertise (ML, engineering, security) needed: the effort is worth less to most readers
+        effort = round(effort * 0.5, 1)
     prereq = 100.0
     for p in payload.get("prereqs") or []:
         prereq -= {"kyc": 25, "hard_credit_pull": 35, "soft_credit_pull": 10, "direct_deposit": 20}.get(p, 10)
@@ -833,8 +843,11 @@ def score_earning(payload: dict) -> dict:
     trust = round(max(0.0, min(100.0, sum(v for k, v in tc.items() if not k.endswith("penalty")) - sum(v for k, v in tc.items() if k.endswith("penalty")))), 1)
     kyc = True if "kyc" in (payload.get("prereqs") or []) else (False if payload.get("kyc_known") else None)    # None = unknown, never "no"
     ep = expected_payout_usd(payload)
+    top = prizes.top_prize_usd(payload) if prizes.award_kind(payload) == "competition" else None
     out = {"value": value, "trust": trust, "value_base": base, "referral_bonus": bonus, "referral": referral_info(payload), "kyc": kyc,
-           "expected_payout_usd": round(ep, 2) if ep is not None else None, "value_components": vc, "trust_components": tc}
+           "expected_payout_usd": round(ep, 2) if ep is not None else None, "award_kind": prizes.award_kind(payload),
+           "prize_line": prizes.prize_line(payload), "top_prize_usd": round(top, 2) if top else None, "skill": list(payload.get("skill") or []),
+           "value_components": vc, "trust_components": tc}
     if payload.get("token_reward"):
         out["value_capped_by"] = {"reason": "token-denominated reward (not a stablecoin): unclear amount, never priced", "cap": TOKEN_REWARD_VALUE_CAP,
                                   "value_uncapped": uncapped, "token": payload["token_reward"].get("token")}
@@ -844,6 +857,9 @@ def score_earning(payload: dict) -> dict:
 def expected_payout_ok(breakdown: dict) -> bool:
     """The third hard floor (operator 2026-11-16): the probability-adjusted payout must be at least EXPECTED_PAYOUT_FLOOR. UNKNOWN passes (no
     figure is not a fail) -- its payout component is already scored low (20-25), so it has to earn its way through on other merits."""
+    if breakdown.get("award_kind") == "competition":       # no expected amount for a competition; its own size floor instead (prizes.COMPETITION_MIN_TOP_PRIZE_USD)
+        top = breakdown.get("top_prize_usd")
+        return top is None or float(top) >= prizes.COMPETITION_MIN_TOP_PRIZE_USD
     ep = breakdown.get("expected_payout_usd")
     return ep is None or float(ep) >= EXPECTED_PAYOUT_FLOOR
 

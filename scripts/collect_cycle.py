@@ -20,8 +20,8 @@ from dotenv import load_dotenv  # noqa: E402
 
 from bot import notify  # noqa: E402
 from collectors import (  # noqa: E402
-    defi_yields, earning_opportunities, exchange_listings, gems_security, hacks_exploits, macro_news, news, startup_jobs,
-    tool_launches, whale_movements,
+    defi_yields, earning_opportunities, exchange_listings, gems_security, hacks_exploits, macro_news, news, startup_jobs, startup_news,
+    tool_launches, whale_alert, whale_movements, zachxbt,
 )
 from pipeline import llm_usage  # noqa: E402
 from pipeline.alerts import check_and_alert  # noqa: E402
@@ -32,9 +32,15 @@ from pipeline.score import score_new_items  # noqa: E402
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
+# A collector that feeds ANOTHER category's items (a second source for the same category) is scored as that category.
+SCORED_AS = {"whale_alert": "whale_movements", "zachxbt": "hacks_exploits"}
+
 COLLECTORS = {
     "defi_yields": defi_yields.collect,
     "whale_movements": whale_movements.collect,
+    # Whale Alert's official Telegram channel -> whale_movements (2026-11-16): BTC and other chains, transfers only, deduped by tx hash against the
+    # Etherscan collector above (each skips the other's hashes). After whale_movements so the Etherscan side has stored first.
+    "whale_alert": whale_alert.collect,
     # web3_jobs RETIRED 2026-11-14 (operator direction, Phase 2): its RemoteOK feed had been dry for two
     # months (3 notified cards in 60 days). The collector, scorer, prompt builder and category_config row
     # are left in place for history; to revive it, re-add it here and to channel_config.yaml.
@@ -54,6 +60,10 @@ COLLECTORS = {
     # hacks_exploits, added 2026-09-30 -- DefiLlama /hacks + /protocols, no
     # GoPlus/rate-limit interaction with anything above, appended last.
     "hacks_exploits": hacks_exploits.collect,
+    # ZachXBT's investigations channel -> hacks_exploits (2026-11-16): reports an incident hours-to-days before DefiLlama; deduped by protocol name.
+    "zachxbt": zachxbt.collect,
+    # startup_news (Phase 6, 2026-11-16) -> Hustle to Million: Tech.eu / Sifted / TechCrunch Venture RSS, funding with a stated amount and acquisitions.
+    "startup_news": startup_news.collect,
     # exchange_listings, added 2026-11-15 (Phase 4) -- four keyless exchange announcement APIs, no GoPlus/rate-limit
     # interaction with anything above; per-exchange isolation lives inside the collector.
     "exchange_listings": exchange_listings.collect,
@@ -112,13 +122,14 @@ def main():
         finally:
             conn.close()
 
-    for category, collect_fn in COLLECTORS.items():
-        logger.info("Collecting %s...", category)
-        inserted = guarded(f"collect_{category}", collect_fn)
+    for collector_key, collect_fn in COLLECTORS.items():
+        category = SCORED_AS.get(collector_key, collector_key)
+        logger.info("Collecting %s...", collector_key)
+        inserted = guarded(f"collect_{collector_key}", collect_fn)
         if inserted is None:
-            alert_if_repeating(f"collect_{category}")  # collect_X's own run_logs row is the failure record
+            alert_if_repeating(f"collect_{collector_key}")  # collect_X's own run_logs row is the failure record
         else:
-            logger.info("Collected %d new %s raw items", inserted, category)
+            logger.info("Collected %d new %s raw items", inserted, collector_key)
 
         # Score even after a failed collect: items from earlier cycles may still be unscored, and
         # scoring a category with nothing new is a no-op.

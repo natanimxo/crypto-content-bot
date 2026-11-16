@@ -195,7 +195,7 @@ NO_AGE_BONUS_CATEGORIES = {"news", "macro_news", "whale_movements", "hacks_explo
 # CROSS_CYCLE_DEDUP_THRESHOLD is -- collectors import from pipeline, not the
 # reverse.
 FRESHNESS_MAX_AGE_HOURS = {
-    "news": 48.0, "macro_news": 48.0, "whale_movements": 24.0,
+    "news": 48.0, "macro_news": 48.0, "startup_news": 48.0, "whale_movements": 24.0,
     # exchange_listings (2026-11-15): an announcement is a market event; a day-old one is history. Same line as
     # whale_movements, and the same number as EXCHANGE_LISTINGS_MAX_AGE_HOURS in pipeline/score.py.
     "exchange_listings": 24.0,
@@ -308,6 +308,29 @@ def _category_notified_recent_count(conn, channel: str, category: str,
             (all_channels, channel, category, window_hours),
         )
         return cur.fetchone()["n"] or 0
+
+
+EARNING_COMPETITIONS_PER_DAY = 2
+
+
+def prioritise_earning(candidates: list[dict], competitions_allowed: int) -> list[dict]:
+    """Every non-competition first (the caller's value order kept), then at most `competitions_allowed` competitions, best first."""
+    from pipeline import prizes
+    flags = [prizes.award_kind(r["payload"] or {}) == "competition" for r in candidates]
+    return [r for r, c in zip(candidates, flags) if not c] + [r for r, c in zip(candidates, flags) if c][:max(0, competitions_allowed)]
+
+
+def _earning_competitions_notified_recent(conn, channel: str, window_hours: float = CAP_WINDOW_HOURS) -> int:
+    """Competition cards sent to this channel as normal candidates in the trailing window (the below-the-line digest never counts: kind = 'candidate')."""
+    from pipeline import prizes
+    with dict_cursor(conn) as cur:
+        cur.execute(
+            """SELECT r.payload
+               FROM notifications nf JOIN raw_items r ON r.id = ANY(nf.candidate_raw_item_ids)
+               WHERE nf.channel = %s AND nf.kind = 'candidate' AND r.category = 'earning_opportunities'
+                 AND nf.sent_at > now() - (%s || ' hours')::interval""",
+            (channel, window_hours))
+        return sum(1 for row in cur.fetchall() if prizes.award_kind(row["payload"] or {}) == "competition")
 
 
 def _earning_still_valid(payload: dict, now: datetime) -> bool:
@@ -444,6 +467,12 @@ def get_new_candidates(conn, category: str, channel: str) -> list[dict]:
                 seen_subjects.add(subject)
             capped.append(row)
         candidates = capped
+
+    if category == "earning_opportunities":
+        # COMPETITIONS (ranked / judged prizes: hackathons, position-prize bounties, audit contests) are the lowest priority on Earn Stack (operator 2026-11-16):
+        # every non-competition item is offered first, in value order, and competitions only fill the slots nothing else wants -- at most
+        # EARNING_COMPETITIONS_PER_DAY in any rolling 24 hours.
+        candidates = prioritise_earning(candidates, max(0, EARNING_COMPETITIONS_PER_DAY - _earning_competitions_notified_recent(conn, channel)))
 
     soft_cap = cfg.get("soft_daily_cap")
     if soft_cap is not None:
