@@ -2299,3 +2299,16 @@ Raenest bounty is expired / recruitment-shaped and the Plether competition ended
 
 **Scheduled:** one-time task `earn-stack-draft-attempts-nov23` (2026-11-23 09:00 local): runs `python scripts/earning_report.py --drafts --days 7` and reports mean attempts, the
 share needing 4+, and any source that keeps failing; recommends, never edits. Runs only while the desktop app is open (otherwise at next launch).
+
+### Earn Stack: the daily "below the line" digest (built 2026-11-16, operator request)
+
+The operator does not trust the ratings yet and does not want to miss anything, referral offers above all. `bot/below_line.py`: once a day (the 2-hour earning cycle calls
+`run_daily()`, which sends at most once per 20h and not before 06:00 UTC = 09:00 local) it sends the earning_opportunities items that failed ONLY a SOFT floor -- trust < 40,
+value < 40 (a token-denominated reward is a value failure), expected payout < $10, or recruitment-shaped -- each with value / trust / expected payout / referral / KYC, the reason
+("why: trust 33 < 40; recruitment-shaped (referral earnings exceed the base payout)") and an **Approve** button that goes through the normal write flow (the approval row is created
+exactly as notify.py creates it, against the same channel, so approval_poller needs no change). Selection: not held (a HELD row is a hard-gate exclusion -- seed phrase,
+connect-wallet-to-claim, upfront fee, roundup, not income -- and is never read), not expired, still valid, never notified, collected since the previous digest (26h on the first run).
+**The cap of 8 is untouched:** these notifications carry `notifications.kind = 'below_line'` (new column, default 'candidate') and every pacing / cap query now counts only
+`kind = 'candidate'`; they still count as "already notified" (never re-sent) and their topic enters cooldown. Telegram limits a message to 4096 characters, so "one message" is
+one message when it fits and "(1/3)" parts when it does not (45 items = 3 messages of up to 20 buttons). Preview without sending: `python -m bot.below_line --dry-run --hours 72`.
+**Known gap:** there is no forgery / KYC-evasion gate rule (the operator handles such posts by hand), so such an item can appear in a digest.
