@@ -14,19 +14,17 @@ The session was cut short by the operator's usage limit. Nothing was left half-r
 - Earn Stack: guaranteed / raffle / competition classification with prize structure + odds in the ORIGINAL currency; skill fact; competitions lowest priority and at most 2 a day; the third floor (expected payout >= $10,
   or for competitions a largest-prize floor of $100); referral counts in value; recruitment-shaped offers get a trust penalty; the daily below-the-line digest with an Approve button per item; Superteam / Zindi / Immunefi / Devpost / Doctor of Credit / 4 airdrop channels.
 - Earn Stack display name (key `coincraft`, chat_id unchanged). Hustle shares 2 / 2 / 1 / 1 seeded into the DB (the cap change is already in effect).
-- New collectors wired into `scripts/collect_cycle.py` (they first run at the next `0 */4` cycle, 16:00 UTC): Whale Alert (`collect_whale_alert`), ZachXBT (`collect_zachxbt`), Wu Blockchain + Cointelegraph inside `collect_news`,
-  Binance Announcements corroboration inside `collect_exchange_listings`, `collect_startup_news` (+ scorer, facts, template, config, channel wiring). Verified LOCALLY against live data with no database writes; **NOT yet verified from Railway**.
+- New collectors wired into `scripts/collect_cycle.py` (they ran from the 2026-11-17 04:00 UTC cycle on): Whale Alert (`collect_whale_alert`), ZachXBT (`collect_zachxbt`), Wu Blockchain + Cointelegraph inside `collect_news`,
+  Binance Announcements corroboration inside `collect_exchange_listings`, `collect_startup_news` (+ scorer, facts, template, config, channel wiring). Verified locally and then from Railway (see below).
 
-### HALF-DONE / UNVERIFIED (where it stopped)
-- **Railway verification of the new sources** was the step in progress. The Telegram-channel probe (`run_logs` job `telegram_probe`, 15 handles) and the startup RSS probes (`startup_*` in `source_probe`) were pushed; their first Railway rows
-  had not appeared when the session ended (the 12:30 UTC `collect-earning` run had not logged yet). Next step: read `run_logs` for `telegram_probe`, `source_probe`, then the 16:00 UTC `collect_whale_alert`, `collect_zachxbt`,
-  `collect_news` (details.telegram), `collect_exchange_listings` (details.telegram_binance), `collect_startup_news` (details.feeds), and compare with the local numbers in BACKLOG. Do NOT call a source verified before that.
+### HALF-DONE (where it stopped)
+- **Railway verification: DONE (2026-11-17 04:05 UTC cycle).** All five new channel sources serve from Railway with the same freshness and posts-per-day as locally, and every new collector ran and stored scored items
+  (whale_alert 14, wublockchain 10, cointelegraph 13, zachxbt 1, startup_news 5). Hustle sent exactly 2 / 2 / 1 / 1 in its first 24 hours. The `collect-earning` service is healthy (every 2 hours, last 04:33 UTC).
 - **Cards the operator already received in the old competition format**: regenerated in place where possible (two Zindi candidate cards were edited; two Devpost drafts were regenerated and re-sent, one header message was sent twice).
   Two drafts first went out with WRONG claims and were corrected: "one $25,000 prize" (Devpost's `prizes_counts.cash` is prize categories, not winners) and "needs machine learning skill" for a Photoshop design contest (a theme tag is not a
   requirement). The Meta VR Start draft was already published, so it could not be regenerated and still carries the OLD wording ("average per participant" style): check it before forwarding.
-- Uncommitted before this handoff: the `skill` fallback fix in `collectors/earning_opportunities.py` (a Devpost theme tag must not become a skill). Committed with this file.
-- `BACKLOG.md` has NOT yet been given the "Channels and Phase 6" section (what was built, the local channel facts, the Cointelegraph reversal note). The Cointelegraph reversal IS recorded in the `collectors/news.py` module comment and in
-  this file; copy it into BACKLOG next session.
+- The `skill` fallback fix (a Devpost theme tag must not become a skill) is committed.
+- `BACKLOG.md` now has the section "Channels as sources and Phase 6 startup_news" (the Railway table, what was not built and why, the Cointelegraph reversal).
 
 ### STILL TO DO (the operator's open asks, in the order he gave them)
 1. **Earn Stack "full control" spec -- NOT STARTED.** The operator's words (relayed at the end of the session): remove the floors, caps and gates; a money-only score; everything else becomes a LABEL; a digest with Approve / Skip; and a
@@ -34,14 +32,14 @@ The session was cut short by the operator's usage limit. Nothing was left half-r
    payout $10 / competition $100), the cap of 8, the 2-a-day competition cap, the hard gate and the recruitment penalty are all still in force. Hard gates he has said stay out: seed phrase / upfront fee (forgery and KYC-evasion he handles by hand).
 2. **Referral / recruitment-shaped offers: the operator's latest statement is that he does NOT want to cut referral offers or ANY recruitment-shaped offer.** This reverses the 2026-11-16 ruling that gave recruitment-shaped offers a 30-point trust
    penalty (the Raenest bounty was expired for it). NOT implemented: the penalty is still in `pipeline/earning.py`. Under the full-control spec these become labels ("recruitment-shaped", "referral promotion") on the card, not penalties and not exclusions.
-3. **Phase 6 + the channel builds: BUILT and committed, not verified from Railway** (see above). Still outstanding there: the startup_jobs name link is built strictly but unproven (expected 0-1 a month); `startup_news` "notable launches" were deliberately not built.
+3. **Phase 6 + the channel builds: BUILT, committed and VERIFIED from Railway.** Still outstanding there: the startup_jobs name link is built strictly but unproven (expected 0-1 a month); `startup_news` "notable launches" were deliberately not built.
 4. Nov 23 report (scheduled task `earn-stack-draft-attempts-nov23`), Discord (waits on the operator's server and bot), the Bybit-from-Railway decision.
 
 ### The operator's decisions this session, for the record
 - Competitions: show prize structure and odds, never pool / entrants; pool / entrants only for raffles; never convert currency; "skill required" fact; fewer competitions (priority + 2 a day) -- DONE.
 - Channels: build Whale Alert (transfers only, tx-hash dedupe), Wu Blockchain, Cointelegraph (reverses his September exclusion: deliberate), ZachXBT, Binance Announcements (corroboration only); skip Cryptopolitan, ICO Drops, CryptoRank, CryptoQuant,
-  CoinMarketCap News, TON Community, CertiK -- DONE (built; unverified on Railway).
-- Phase 6: startup_news from Tech.eu / Sifted / TechCrunch Venture RSS, skip @tech, Hustle shares 2 / 2 / 1 / 1, startup_jobs name link at low priority -- DONE (built; unverified on Railway).
+  CoinMarketCap News, TON Community, CertiK -- DONE (built and verified on Railway).
+- Phase 6: startup_news from Tech.eu / Sifted / TechCrunch Venture RSS, skip @tech, Hustle shares 2 / 2 / 1 / 1, startup_jobs name link at low priority -- DONE (built and verified on Railway).
 - Skip the forgery / KYC-evasion gate (he handles those by hand) -- honoured.
 - Full-control spec and "keep every referral / recruitment-shaped offer" -- recorded above, NOT done.
 
@@ -78,7 +76,7 @@ twice doing nothing because its `DATABASE_URL` was the placeholder `db.xxxxxxxxx
 Voices: `config/channel_voices.yaml` (one profile per channel; the category supplies facts + guardrails, the channel supplies voice; guardrails beat voice). Config is YAML in git, upserted
 into the DB by `scripts/seed_config.py` (`seed_categories`, `seed_channels`, `seed_voices`); the DB row is what runs.
 
-## Sources by category (the Telegram / RSS sources added 2026-11-16 are verified LOCALLY only -- see the status block above)
+## Sources by category (the Telegram / RSS sources added 2026-11-16 were verified from Railway on 2026-11-17)
 
 - **news**: CoinDesk, The Block, Decrypt, Unchained, The Defiant, Protos (RSS) + **Wu Blockchain** (`@wublockchainenglish`, tier 3) + **Cointelegraph** (`@cointelegraph`, tier 2). Cointelegraph reverses the
   operator's 2026-09-11 exclusion (deliberate, 2026-11-16). Telegram posts go through the same dedup, a text-based opinion / sponsored / promo gate, and the copyright guard.

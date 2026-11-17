@@ -2312,3 +2312,37 @@ connect-wallet-to-claim, upfront fee, roundup, not income -- and is never read),
 `kind = 'candidate'`; they still count as "already notified" (never re-sent) and their topic enters cooldown. Telegram limits a message to 4096 characters, so "one message" is
 one message when it fits and "(1/3)" parts when it does not (45 items = 3 messages of up to 20 buttons). Preview without sending: `python -m bot.below_line --dry-run --hours 72`.
 **Known gap:** there is no forgery / KYC-evasion gate rule (the operator handles such posts by hand), so such an item can appear in a digest.
+
+### Channels as sources and Phase 6 startup_news (built 2026-11-16, verified from Railway 2026-11-17)
+
+**Competitions on Earn Stack (operator 2026-11-16).** Three award kinds (`pipeline/prizes.py`): guaranteed, raffle, competition. pool / entrants ("expected 176") describes only a raffle: a competition shows its
+prize STRUCTURE and ODDS instead ("Top 5 share $13,000 USDC ($1.5k / $1.4k / ..., plus 20 x $330) · ~73 entrants · 25 winners"), has no expected amount, and the $10 expected-payout floor does not apply to it. Structured prize
+fields are used where they exist: Superteam `rewards` (position -> amount, `99` = bonus prizes x `maxBonusSpots`), Devpost `prize_amount` + entrants, Zindi `reward` + `participations_count`, and for Zindi the prize ladder is read once from the
+competition page for new items. **Devpost's `prizes_counts.cash` is NOT a winner count** (it counts prize categories; "Deck the Pixels" has cash=1 for a $25,000 pool split by place): using it printed "one $25,000 prize" in a draft that
+reached the operator; fixed, winners are shown as unknown. Amounts are shown in the ORIGINAL currency, never converted (the dollar equivalents are internal thresholds only). A competition's value uses the biggest prize on a log scale
+from $100 to $100,000 (capped at 65) and a competition with a largest prize under $100 fails a size floor (the assistant's choice, `prizes.COMPETITION_MIN_TOP_PRIZE_USD`); without it a $125 hackathon cleared every floor on friction
+points alone. "Skill required" (ML / software engineering / security) is a card fact and halves the effort component (small effect: competitions already sat at the lowest effort band); Zindi = ML and Immunefi = security by source,
+Superteam from the brief; Devpost from the TITLE only (a theme tag is not a requirement: a Photoshop contest carries "Machine Learning/AI"). Selection: non-competitions first, competitions only fill leftover slots, at most 2 per 24h.
+Consequence to know: with no expected-payout floor on competitions, small crowded content bounties (a $250 pool, 279 entrants) can pass again; they rank low and the daily cap handles them, and the card now shows the odds.
+Regenerated cards: 2 pending Zindi cards edited in place, 2 Devpost drafts regenerated (a third was already published, a fourth expired).
+
+**Sources (Telegram channels via t.me/s, all verified from Railway: same posts-per-day and freshness as locally).**
+| Channel | Handle | Railway | Built as |
+|---|---|---|---|
+| Whale Alert | whale_alert_io | 200, 20 posts, newest 0.4h, ~30/day | whale_movements: transfers only (mints, burns, news posts, no-exchange transfers skipped), parsed deterministically, deduped by tx hash both ways; tier 2 |
+| Wu Blockchain | wublockchainenglish | 200, newest 0.7h, ~17/day | news (tier 3); 'Highlight Clip' videos, promos, price-bot posts dropped by a text gate |
+| Cointelegraph | cointelegraph | 200, newest 1.4h, ~21/day, ~7,300 views | news (tier 2, the outlet's own account). **Reverses the operator's 2026-09-11 exclusion: a deliberate change (2026-11-16)** |
+| ZachXBT | investigations | 200, ~0.2/day | hacks_exploits: only a post stating a loss with an amount >= $500k; attributed to him, never confirmed; tier 3; deduped against DefiLlama by name |
+| Binance Announcements | binance_announcements | 200, ~2/day | exchange_listings, CORROBORATION ONLY (a flag, never an item) |
+| NOT built | cryptopolitanofficial (half price-bot posts, ~32 views from Railway), icodrops (news, not offers), CryptoRankNews and cryptoquant_official (analysis, no category), CoinMarketCapNews (hijacked, newest post 7 years old), toncoin / tonblockchain (4-30 months quiet), CertiKCommunity (no public preview), certikalert (unofficial) | | |
+First Railway cycle (2026-11-17 04:05 UTC): whale_alert 2 inserted (9 skipped as already stored), zachxbt 1 candidate, news 14 inserted (Wu Blockchain 17 kept of 20, Cointelegraph 14 of 14), startup_news 4 qualifying. Stored and scored from these
+sources: whale_alert 14 (scores up to 80), wublockchain 10, cointelegraph 13, zachxbt 1, startup_news 5. Railway differs from local in one place: Crunchbase News RSS answers 200 from Railway (10 items) but 403 locally; EU-Startups is 403 from both.
+
+**Phase 6: startup_news -> Hustle to Million.** Tech.eu / Sifted / TechCrunch Venture RSS (Railway 200 each). Funding rounds with a STATED amount and acquisitions only (acquisition price only when the text calls it a price: "WeRoad
+acquires Swiss TravelTribe as it targets EUR 70M" is not a price); a VC raising its own fund, sponsored content, events and amount-less stories are excluded; the same raise from two outlets is one story (equal dollar equivalent and
+overlapping company name). Amounts are shown exactly as the outlet wrote them ("EUR 6M", "$1.1B"); the dollar equivalent is internal. @tech was rejected (1 funding amount in 123 posts). "Notable launches" is NOT built (nothing in these feeds says what
+is notable). Scoring priors in `pipeline/score.py` (impact 0.5 = amount on a log scale 1M..500M, novelty 0.3, actionability 0.2 = an early round for a builder, +20 if we sent a job card). **Hustle shares of its cap of 6: tool_launches 2,
+startup_jobs 2, macro_news 1, startup_news 1, set as each category's own cap; in the first 24 hours Hustle sent exactly 2 / 2 / 1 / 1.** The startup_jobs name link (exact company name, 4+ letters, never a common word) is built; 0 of
+164 stories matched when tested, and 0 of this cycle's did, so expect almost none.
+
+**Daily below-the-line digest:** first one sent 2026-11-16 14:31 UTC (3 messages). Built and described in the section above.
