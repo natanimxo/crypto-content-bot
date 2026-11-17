@@ -120,45 +120,47 @@ def main():
     check("a referral code on the source's own link is NOT availability (an inference): reported, never scored",
           (E.referral_info(dict(base, referral_link=True))["available"], E.referral_info(dict(base, referral_link=True))["link_code"],
            E.score_earning(dict(base, referral_link=True)) == dict(nr, referral=E.referral_info(dict(base, referral_link=True)))), (False, True, True))
-    check("russian 'за каждого друга' is a referral clause", E.extract_referral("‼ ЗАБИРАЕМ ДО 15$ ЗА КАЖДОГО ДРУГА ОТ FOLK AI ‼"), {"available": True, "amount_usd": 15.0, "multi_level": False, "promotion": False})
+    check("russian 'за каждого друга' is a referral clause", E.extract_referral("‼ ЗАБИРАЕМ ДО 15$ ЗА КАЖДОГО ДРУГА ОТ FOLK AI ‼"), {"available": True, "amount_usd": 15.0, "multi_level": False})
     check("no referral -> no bonus", (nr["referral_bonus"], nr["referral"]["available"]), (0.0, False))
     rec = E.score_earning(dict(base, payout_usd=10.0, referral={"available": True, "amount_usd": 50.0}))
     plain = E.score_earning(dict(base, payout_usd=10.0))
-    check("referral earnings above the base payout: no value bonus, trust cut by the recruitment penalty",
-          (rec["referral_bonus"], rec["trust_components"]["referral_recruitment_penalty"], rec["trust"] < plain["trust"], rec["referral"]["recruitment_shape"]), (0.0, 30.0, True, True))
-    check("referral earnings BELOW the base payout are not recruitment-shaped", E.score_earning(dict(base, payout_usd=100.0, referral={"available": True, "amount_usd": 10.0}))["referral"]["recruitment_shape"], False)
-    check("a referral-only offer (no base payout, a stated referral amount) is recruitment-shaped",
-          E.score_earning(dict(base, payout_usd=None, payout_kind=None, referral={"available": True, "amount_usd": 20.0}))["referral"]["recruitment_shape"], True)
+    check("NO recruitment penalty (operator 2026-11-17): referral earnings above the base payout change trust by nothing", (rec["trust"] == plain["trust"], "referral_recruitment_penalty" in rec["trust_components"], "recruitment_shape" in rec["referral"]), (True, False, False))
+    check("referral earnings above the base payout still get the ordinary referral bonus", rec["referral_bonus"] > 0, True)
+    check("a referral-only offer (no base payout) keeps its ordinary scoring: no trust cut", E.score_earning(dict(base, payout_usd=None, payout_kind=None, referral={"available": True, "amount_usd": 20.0}))["trust"] == E.score_earning(dict(base, payout_usd=None, payout_kind=None))["trust"], True)
+    # a stated per-referral earning counts as the PAYOUT when the offer states no other (collector level)
+    check("referral_payout: \"$15 per friend\" is a stated payout", E.referral_payout("Invite a friend and earn $15 per friend")[:2], (15.0, "stated"))
+    check("referral_payout: \"up to $15 for each friend\" is a MAXIMUM", E.referral_payout("Get up to $15 for each friend you invite")[:2], (15.0, "max"))
+    check("referral_payout: none when no referral clause states an amount", E.referral_payout("Complete 3 quests to qualify"), None)
     # ---- extraction: the referral clause is split from the base text so a referral bonus is never read as the offer's payout
     x = "Sign up and get a $50 bonus. Invite friends and earn $25 for each referral."
-    check("referral amount read from its clause", E.extract_referral(x), {"available": True, "amount_usd": 25.0, "multi_level": False, "promotion": False})
+    check("referral amount read from its clause", E.extract_referral(x), {"available": True, "amount_usd": 25.0, "multi_level": False})
     check("the payout is read from the text without the referral clause", E.extract_reward(E.split_referral(x)[0], "bank_bonus"), (50.0, "stated"))
-    check("same sentence: 'get $50 and refer a friend for $25'", E.extract_referral("Get a $50 bonus and refer a friend for $25"), {"available": True, "amount_usd": 25.0, "multi_level": False, "promotion": False})
+    check("same sentence: 'get $50 and refer a friend for $25'", E.extract_referral("Get a $50 bonus and refer a friend for $25"), {"available": True, "amount_usd": 25.0, "multi_level": False})
     check("same sentence: base kept", E.extract_reward(E.split_referral("Get a $50 bonus and refer a friend for $25")[0], "bank_bonus"), (50.0, "stated"))
-    check("no program in the text", E.extract_referral("Complete 3 quests to qualify for the airdrop"), {"available": False, "amount_usd": None, "multi_level": False, "promotion": False})
+    check("no program in the text", E.extract_referral("Complete 3 quests to qualify for the airdrop"), {"available": False, "amount_usd": None, "multi_level": False})
     check("'no referral needed' is not a program", E.extract_referral("Free to join, no referral needed")["available"], False)
     check("the poster's own code is not a program", E.extract_referral("Use my referral code ABC for a bonus")["available"], False)
-    check("a percentage program: available, no amount", E.extract_referral("Earn 20% of your referrals' rewards"), {"available": True, "amount_usd": None, "multi_level": False, "promotion": False})
-    check("russian", E.extract_referral("Бонус $30. За каждого приглашённого друга +$5"), {"available": True, "amount_usd": 5.0, "multi_level": False, "promotion": False})
+    check("a percentage program: available, no amount", E.extract_referral("Earn 20% of your referrals' rewards"), {"available": True, "amount_usd": None, "multi_level": False})
+    check("russian", E.extract_referral("Бонус $30. За каждого приглашённого друга +$5"), {"available": True, "amount_usd": 5.0, "multi_level": False})
     check("'50$ and 50$ per friend': the sign AFTER the number is read, and the base is kept (equal amounts are not recruitment-shaped)",
           (E.extract_referral("‼ ЗАБИРАЕМ 50$ И 50$ ЗА ДРУГА ОТ PumpFun ‼"), E.extract_reward(E.split_referral("‼ ЗАБИРАЕМ 50$ И 50$ ЗА ДРУГА ОТ PumpFun ‼")[0], "airdrop")),
-          ({"available": True, "amount_usd": 50.0, "multi_level": False, "promotion": False}, (50.0, "stated")))
+          ({"available": True, "amount_usd": 50.0, "multi_level": False}, (50.0, "stated")))
     check("'$25 per friend' after 'and' splits from the base", E.split_referral("Get $50 and $25 per friend you refer"), ("Get $50", ["$25 per friend you refer"]))
-    # ---- multi-level wording: recruitment-shaped ON ITS OWN, whatever the amounts (operator 2026-11-16); no official-source exemption
+    # ---- multi-level wording: detected, shown as a warning label, NO score effect (operator 2026-11-17)
     for label, text in (("downline", "Build your downline and earn on every signup"), ("multi-level", "Multi-level rewards program, $5 bonus"),
                         ("3 levels of referrals", "Earn from 3 levels of referrals"), ("referral levels", "Invite friends: level 1 pays 10%, level 2 pays 5%"),
                         ("russian", "Многоуровневая реферальная программа"), ("portuguese", "Ganhe com 3 níveis de indicação")):
-        check(f"multi-level wording ({label}) is recruitment-shaped", E.extract_referral(text)["multi_level"], True)
+        check(f"multi-level wording ({label}) is detected", E.extract_referral(text)["multi_level"], True)
     for label, text in (("game levels", "Complete 3 levels in the game to qualify for the airdrop"), ("level up", "Level up your account for a $20 bonus"),
                         ("percentage only", "Earn 20% of your referrals' rewards"), ("plain referral", "Invite friends and earn $5 each")):
         check(f"not multi-level: {label}", E.extract_referral(text)["multi_level"], False)
     mlm = dict(base, payout_usd=100.0, referral={"available": True, "amount_usd": None, "multi_level": True})
-    sm = E.score_earning(mlm)
-    check("multi-level wording: recruitment-shaped even with a small referral amount, no bonus, trust cut", (sm["referral"]["recruitment_shape"], sm["referral_bonus"], sm["trust_components"]["referral_recruitment_penalty"]), (True, 0.0, 30.0))
-    check("no official-source exemption for the recruitment penalty", E.score_earning(dict(mlm, source_tier=1))["trust_components"]["referral_recruitment_penalty"], 30.0)
-    check("a percentage-only referral stays ordinary", E.score_earning(dict(base, referral={"available": True, "amount_usd": None, "multi_level": False}))["referral"]["recruitment_shape"], False)
+    plain_ref = dict(base, payout_usd=100.0, referral={"available": True, "amount_usd": None, "multi_level": False})
+    check("multi-level wording is a WARNING LABEL with NO score effect (value, trust and bonus are identical)", (E.score_earning(mlm)["value"], E.score_earning(mlm)["trust"], E.score_earning(mlm)["referral_bonus"]), (E.score_earning(plain_ref)["value"], E.score_earning(plain_ref)["trust"], E.score_earning(plain_ref)["referral_bonus"]))
+    check("multi-level wording is exposed for the card label", E.score_earning(mlm)["referral"]["multi_level"], True)
+    check("a percentage-only referral stays ordinary", E.score_earning(dict(base, referral={"available": True, "amount_usd": None, "multi_level": False}))["referral"]["multi_level"], False)
     check("french 'indique ... tiers' (indicates ... third parties) is not a referral or multi-level",
-          E.extract_referral("la fiche indique qu'aucune donnée n'est partagée avec des tiers"), {"available": False, "amount_usd": None, "multi_level": False, "promotion": False})
+          E.extract_referral("la fiche indique qu'aucune donnée n'est partagée avec des tiers"), {"available": False, "amount_usd": None, "multi_level": False})
     # ---- "50$" (sign after the number) in capital too
     check("capital: '500$' deposit read", E.extract_capital_usd("Deposit 500$ and get a bonus", "bank_bonus"), 500.0)
     check("capital: russian deposit word", E.extract_capital_usd("Нужен депозит 100$ для участия", "airdrop"), 100.0)
@@ -202,15 +204,16 @@ def main():
     check("floors: high value, low trust fails", E.passes_floors({"value": 95.0, "trust": 39.9}), False)
     check("floors: high trust, low value fails", E.passes_floors({"value": 39.9, "trust": 95.0}), False)
     # ---- the THIRD hard floor: expected payout >= $10; unknown passes (operator 2026-11-16)
-    check("floor: expected payout $9.99 fails even with value 90 and trust 90", E.passes_floors({"value": 90.0, "trust": 90.0, "expected_payout_usd": 9.99}), False)
-    check("floor: expected payout exactly $10 passes", E.passes_floors({"value": 90.0, "trust": 90.0, "expected_payout_usd": 10.0}), True)
-    check("floor: unknown expected payout passes", E.passes_floors({"value": 90.0, "trust": 90.0, "expected_payout_usd": None}), True)
-    check("floor: unknown expected payout is not absent either (a row scored before the floor existed)", E.expected_payout_ok({"value": 90.0, "trust": 90.0}), True)
+    check("floor: a RAFFLE with expected payout $9.99 fails even with value 90 and trust 90", E.passes_floors({"value": 90.0, "trust": 90.0, "expected_payout_usd": 9.99, "award_kind": "raffle"}), False)
+    check("floor: a RAFFLE with expected payout exactly $10 passes", E.passes_floors({"value": 90.0, "trust": 90.0, "expected_payout_usd": 10.0, "award_kind": "raffle"}), True)
+    check("floor: a RAFFLE with unknown expected payout passes", E.passes_floors({"value": 90.0, "trust": 90.0, "expected_payout_usd": None, "award_kind": "raffle"}), True)
+    check("floor: a GUARANTEED $2 deposit bonus passes (the expected-payout floor is for raffles only, operator 2026-11-17)", E.passes_floors({"value": 90.0, "trust": 90.0, "expected_payout_usd": 1.6, "award_kind": "guaranteed"}), True)
+    check("floor: a row scored before the floor existed (no award_kind) passes", E.expected_payout_ok({"value": 90.0, "trust": 90.0}), True)
     z = E.score_earning(dict(base, type="giveaway", award_kind="raffle", payout_usd=0.9, payout_kind="ev"))
     check("a RAFFLE with a $0.90 expected payout scores 40+ on value yet never passes the floors (the weakness this floor exists for)", (z["value"] >= 40.0, z["expected_payout_usd"], E.passes_floors(z)), (True, 0.9, False))
     u = E.score_earning(dict(base, payout_usd=None, payout_kind=None))
     check("unknown payout: expected payout is None, the payout component stays low (20-25)", (u["expected_payout_usd"], u["value_components"]["payout"]), (None, 20.0))
-    check("probability-adjusted: a $20 airdrop (30% chance) is $6 expected and fails", (E.score_earning(dict(base, payout_usd=20.0))["expected_payout_usd"], E.passes_floors(E.score_earning(dict(base, payout_usd=20.0)))), (6.0, False))
+    check("probability-adjusted: a $20 airdrop (30% chance) is $6 expected and STILL passes (guaranteed-kind payouts have no expected-payout floor)", (E.score_earning(dict(base, payout_usd=20.0))["expected_payout_usd"], E.passes_floors(E.score_earning(dict(base, payout_usd=20.0)))), (6.0, True))
 
     # ---- the post guard: actionable means no invented steps, no invented amounts, the deadline stated, no referral / URL
     from pipeline.write_post import _find_earning_issues as G
@@ -430,8 +433,9 @@ def main():
     check("removed sources have no collector functions", [n for n in ("fetch_epic", "fetch_gamerpower") if hasattr(C, n)], [])
     check("only Doctor of Credit is left as an RSS feed", sorted(C.RSS_FEEDS), ["doctorofcredit"])
     check("the registry is exactly the income sources", sorted(C.earning.SOURCES),
-          ["devpost", "doctorofcredit", "immunefi", "superteam", "tg:airdropfind", "tg:airdrops_io", "tg:criptinho", "tg:incrypted_airdrops", "zindi"])
-    check("Galxe and the bounty-platform feeds are not built (operator)", [s for s in ("galxe", "yeswehack", "intigriti", "bugcrowd", "hackerone", "kucoin", "binance") if s in C.earning.SOURCES], [])
+          sorted(["binance_campaigns", "devpost", "doctorofcredit", "galxe", "immunefi", "kucoin_campaigns", "superteam", "tg:OKXAnnouncements", "tg:Bybit_Announcements",
+                  "tg:airdropfind", "tg:airdrops_io", "tg:criptinho", "tg:incrypted_airdrops", "zindi"] + []))
+    check("the bounty-platform feeds, the micro-task sites and the affiliate networks are not built (operator)", [s for s in ("yeswehack", "intigriti", "bugcrowd", "hackerone", "taskon", "questn", "partnerstack", "impact", "firstpromoter") if s in C.earning.SOURCES], [])
     for t, gated in [("free_game", True), ("freebie", True), ("credits", True), ("airdrop", False), ("hackathon", False),
                      ("bank_bonus", False), ("bounty", False), ("giveaway", False), ("cashback", False)]:
         check(f"not-income gate for type {t}", bool(C.earning.not_income_reason(t)), gated)
@@ -545,35 +549,8 @@ def main():
         check(f"gate: {relayed} keeps the BROAD wallet rule (it relays someone else's text)", E.gate(step, relayed), ["connect-wallet-to-claim"])
     check("gate: the seed-phrase rule is not tier-dependent", E.gate("Enter your seed phrase to continue", "superteam"), ["asks for a seed phrase / private key / wallet import"])
 
-    # ---- required work = promoting with your OWN referral code is a recruitment campaign (operator 2026-11-16, the Raenest bounty)
-    raen = ("Sign up on Raenest using code: community\n Choose one track: Written Content, Video, or Animation\n"
-            "Track A: publish one long-form article on Medium or Substack\n Include your unique Raenest referral code or link with a clear CTA\n"
-            "Include hashtags #StablecoinsonRaenest")
-    check("referral promotion: sign up with a code + include your own referral code = recruitment campaign", E.has_referral_promotion(raen), True)
-    check("referral promotion: an OPTIONAL own code is not", E.has_referral_promotion("Sign up using code: x\n Include your referral link (optional)"), False)
-    check("referral promotion: the poster's own code, once, is not", E.has_referral_promotion("Register using my referral code ABC and deposit $50"), False)
-    check("referral promotion: one own-code line and nothing else is not 'substantially'", E.has_referral_promotion("Write a thread about Solana. Include your referral link if you like."), False)
-    check("referral promotion: a plain bounty is not", E.has_referral_promotion("Write a thread about Solana staking. Post it on X and tag us."), False)
-    pr = E.score_earning(dict(base, payout_usd=183.0, payout_kind="ev", pool_usd=13000.0, referral=E.extract_referral(raen)))
-    pn = E.score_earning(dict(base, payout_usd=183.0, payout_kind="ev", pool_usd=13000.0))
-    check("referral promotion: flagged recruitment-shaped, no value bonus, trust cut by the 30-point penalty",
-          (pr["referral"]["recruitment_shape"], pr["referral"]["promotion"], pr["referral_bonus"], pr["trust"] == pn["trust"] - 30.0), (True, True, 0.0, True))
-    pf = dict(base, payout_usd=183.0, payout_kind="ev", pool_usd=13000.0, referral=E.extract_referral(raen))
-    check("referral promotion: the 'recruitment-shaped' flag shows on the card", "recruitment-shaped" in N._score_text("earning_opportunities", {"score": 1, "score_breakdown": E.score_earning(pf)}), True)
-
-    # ---- a Superteam listing whose own brief requires promoting with a referral code is flagged AT COLLECTION (full brief, not the cut text)
-    RAEN = {"id": "r", "slug": "raenest", "title": "The Raenest Global Bounty", "type": "bounty", "status": "OPEN", "rewardAmount": 13000, "token": "USDC", "deadline": later,
-            "sponsor": {"name": "Raenest"}, "isWinnersAnnounced": False, "_count": {"Submission": 71}}
-    long_brief = "<p>" + "Background. " * 120 + "</p><p>Sign up on Raenest using code: community</p><p>Include your unique Raenest referral code or link with a clear CTA</p>"
-    C.get_json = lambda url, params=None, headers=None, **kw: ([RAEN] if "/details/" not in url else {"region": "Global", "description": long_brief})
-    try:
-        rr, _ = C.fetch_superteam(NOW)
-    finally:
-        C.get_json = real_get_json
-    pj = C.build_payload(rr[0], NOW)
-    sj = E.score_earning(pj)
-    check("superteam: a referral-promotion brief (beyond the 900-character cut) is flagged at collection", (pj["referral"]["promotion"], sj["referral"]["recruitment_shape"], sj["referral_bonus"]), (True, True, 0.0))
-    check("superteam: and the penalty lowers trust below a clean listing's", sj["trust"] < E.score_earning(dict(pj, referral={"available": False, "amount_usd": None})).get("trust"), True)
+    # ---- NO referral-promotion / recruitment detection (the Raenest-style bounty is an ordinary bounty now; operator 2026-11-17)
+    check("the removed detection stays removed", (hasattr(E, "has_referral_promotion"), hasattr(E, "REFERRAL_RECRUITMENT_PENALTY")), (False, False))
 
     # ---- a headline maximum that disagrees with the structured reward: the structured figure is the fact (operator 2026-11-16)
     MH = {"id": "m", "slug": "mh", "title": "MultiHopper Build & Route Challenge | Up to $50,000 + Revenue Share", "type": "bounty", "status": "OPEN", "rewardAmount": 5000, "token": "USDC",
@@ -602,13 +579,18 @@ def main():
     lowt = E.score_earning(dict(base, payout_usd=100.0, source_tier=3, domain_age_days=5, terms={"deadline": False, "eligibility": False, "payout": False}))
     check("digest: trust below 40 is listed with its number", [r for r in BL.reasons_for(lowt, {}) if r.startswith("trust")], [f"trust {lowt['trust']:.0f} < 40"])
     cheap = E.score_earning(dict(base, type="giveaway", award_kind="raffle", payout_usd=0.9, payout_kind="ev"))
-    check("digest: expected payout under $10 is listed", [r for r in BL.reasons_for(cheap, {}) if "expected payout" in r], ["expected payout $0.90 < $10"])
+    check("digest: a RAFFLE's expected payout under $10 is listed", [r for r in BL.reasons_for(cheap, {}) if "expected payout" in r], ["raffle: expected payout $0.90 < $10"])
     tok = E.score_earning(dict(base, token_reward={"token": "BAOBAO", "amount": 1.0}, payout_usd=None, payout_kind=None))
     check("digest: a token reward is a value failure with its own reason", any("BAOBAO" in r and "capped" in r for r in BL.reasons_for(tok, {})), True)
     rec = E.score_earning(dict(base, payout_usd=10.0, referral={"available": True, "amount_usd": 50.0}))
-    check("digest: a recruitment-shaped offer is listed with why", any("recruitment-shaped (referral earnings exceed the base payout)" == r for r in BL.reasons_for(rec, {})), True)
-    promo = E.score_earning(dict(base, referral=E.extract_referral(raen)))
-    check("digest: referral promotion is named", any("referral promotion" in r for r in BL.reasons_for(promo, {})), True)
+    check("digest: a guaranteed small payout is NOT listed for its expected payout", [r for r in BL.reasons_for(E.score_earning(dict(base, award_kind="guaranteed", payout_usd=2.0, payout_kind="stated")), {}) if "expected payout" in r], [])
+    check("digest: gate reasons that are security-flavoured are visible, roundup / not-income are not",
+          (BL.visible_gate_reasons({"gate": {"reasons": ["connect-wallet-to-claim"]}}), BL.visible_gate_reasons({"gate": {"reasons": ["not an offer: a digest / roundup of several projects"]}}),
+           BL.visible_gate_reasons({"gate": {"reasons": ["connect-wallet-to-claim", "not an offer: a digest / roundup of several projects"]}}), BL.visible_gate_reasons({"gate": {"reasons": ["not income: saves money"]}})),
+          (["connect-wallet-to-claim"], [], [], []))
+    gi = [{"raw_item_id": 1, "payload": {"title": "Connect your wallet to claim", "source_name": "S", "type": "airdrop"}, "score_breakdown": E.score_earning(base), "reasons": ["connect-wallet-to-claim"], "gated": True}]
+    check("digest: a gated item carries a RED label and the gate reason", ("🔴" in BL.build_messages(gi, "Earn Stack")[0][0], "gate: connect-wallet-to-claim" in BL.build_messages(gi, "Earn Stack")[0][0]), (True, True))
+    check("digest: multi-level wording shows as a warning label on the line", "multi-level" in BL.format_item(1, dict(gi[0], gated=False, reasons=["x"], score_breakdown=E.score_earning(mlm))), True)
     fake = [{"raw_item_id": i, "payload": {"title": "t" * 80, "source_name": "S", "type": "airdrop"}, "score_breakdown": lowt, "reasons": ["trust 18 < 40"]} for i in range(45)]
     msgs = BL.build_messages(fake, "Earn Stack")
     check("digest: 45 items split into messages under Telegram's limit, one Approve per item", (all(len(t) < 4096 for t, _ in msgs), sum(len(c) for _, c in msgs), max(len(c) for _, c in msgs) <= 20), (True, 45, True))
@@ -665,6 +647,51 @@ def main():
           (E.score_earning(dict(base, **dict(eur, prize=dict(eur["prize"], tiers=[1000.0], pool=1000.0))))["value_components"]["payout"]
            < se["value_components"]["payout"] <= 65.0), True)
 
+    # ---- the writer fallback: a plain FACTS card (no model) when a draft fails its guards after the retries; an Edit button on every preview (operator 2026-11-17)
+    from pipeline import fallback_card as FB
+    from bot import approval_poller as AP
+    fc = FB.plain_facts_card(dict(pz, enriched={"steps": ["Join the challenge", "Submit predictions"]}, gate={"reasons": []}), E.score_earning(pz), "Earn Stack")
+    check("fallback card: title, reward, deadline, who, cost, steps and the facts-card note", all(k in fc for k in ("<b>Reward:</b>", "<b>Deadline:</b>", "<b>Who can take part:</b>", "<b>Cost:</b>", "1. Join the challenge", "Plain facts card")), True)
+    check("fallback card: no URL and no referral wording (the operator adds his own link)", ("http" in fc, "referral" in fc.lower()), (False, False))
+    check("fallback card: a competition shows its prize structure in the ORIGINAL currency", "40,000" in fc and "$" in fc, True)
+    gc = FB.plain_facts_card(dict(pz), E.score_earning(dict(pz, referral={"available": True, "amount_usd": None, "multi_level": True})), "Earn Stack", ["connect-wallet-to-claim"])
+    check("fallback card: a gated item carries the red label and the multi-level warning", ("🔴 connect-wallet-to-claim" in gc, "multi-level wording" in gc), (True, True))
+    check("poller: only a guard failure after the retries triggers the fallback (an outage or missing key still retries and alerts)",
+          (AP._is_guard_failure(RuntimeError("write_post: category=earning_opportunities still failed the voice/guard checks after 9 retries")), AP._is_guard_failure(RuntimeError("DEEPSEEK_API_KEY is not set")), AP._is_guard_failure(ConnectionError("timeout"))), (True, False, False))
+    check("poller: every preview carries the Edit button", 'edit_preview:{preview_id}' in open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "bot", "approval_poller.py"), encoding="utf-8").read(), True)
+
+    # ---- Earn Stack sources added 2026-11-17: campaigns pay or they are dropped; roundups are EXPANDED; nothing silently excluded
+    check("campaign: a prize pool is kept", C._campaign_ok("Binance Alpha Trading Competition: Trade LAB and Share $200K Worth of Rewards"), True)
+    check("campaign: a quiz reward is kept", C._campaign_ok("Binance Academy Bitcoin Page: Complete Quiz to Earn BTC Rewards This November 2026!"), True)
+    check("campaign: an APR promotion is NOT income", C._campaign_ok("Binance P2P LATAM Exclusive: Earn Up to 25% APR on USDC!"), False)
+    check("campaign: a fee discount is NOT income (no discounts, operator rule)", C._campaign_ok("Lite Loan Promotion Extended: Enjoy Simple Borrowing with 50% Off Service Fee!"), False)
+    check("campaign: a maintenance notice is not an offer", C._campaign_ok("Binance Wallet to Discontinue Support for Blast; reward notice"), False)
+    check("campaign: a trading competition is a COMPETITION with its pool in the original currency",
+          (C._campaign_extra("Trade LAB and Share $200K Worth of Rewards: Trading Competition", "")["award_kind"], C._campaign_extra("Trade LAB and Share $200K Worth of Rewards: Trading Competition", "")["prize"]["pool"]), ("competition", 200000.0))
+    check("campaign: a new-user bonus is GUARANTEED (never a raffle: pool / entrants would have cut a $26 bonus)", C._campaign_extra("New User Campaign: Earn Up to 26 USDT", "")["award_kind"], "guaranteed")
+    check("campaign: a raffle says so", C._campaign_extra("Win $25 in Raffle", "")["award_kind"], "raffle")
+    check("campaign: official exchange channels pass only campaign posts", (bool(C._TG_CAMPAIGN_RE.search("OKX Learn and Earn: complete the quiz and share 10,000 USDT")), bool(C._TG_CAMPAIGN_RE.search("OKX will delist FOO/USDT spot trading pair"))), (True, False))
+    check("galxe: a testnet credit and a free badge are not rewards", (bool(C._GALXE_NOT_REAL_RE.search("2,000 TestUSDC test credit, test funds")), bool(C._GALXE_NOT_REAL_RE.search("a free commemorative badge with no monetary value"))), (True, True))
+    check("galxe: tier 3, text_api", (C.earning.SOURCES["galxe"]["tier"], C.earning.SOURCES["galxe"]["kind"]), (3, "text_api"))
+    check("binance / kucoin campaigns: tier 1 (the exchange's own API)", (C.earning.SOURCES["binance_campaigns"]["tier"], C.earning.SOURCES["kucoin_campaigns"]["tier"]), (1, 1))
+    rd = {"post": "airdrops_io/8036", "time": "2026-11-16T07:00:00+00:00", "views": 100, "reactions": 0, "links": [], "text": "x",
+          "html": ("📡 Airdrop Radar — Daily Roundup (November 16, 2026)<br/><br/>🚨 Lighter paused withdrawals after a trader's API key leaked (~$15.5M lost). Follow @Lighter_xyz only:<br/>"
+                   '<a href="https://airdrops.io/lighter/">https://airdrops.io/lighter/</a><br/><br/>🪂 infiniFi INFI TGE is Nov 17 at 15:30 UTC. The airdrop is landing frozen now and unlocks at TGE:<br/>'
+                   '<a href="https://airdrops.io/infinifi/">https://airdrops.io/infinifi/</a><br/><br/>no link here but long enough to be a sentence about something<br/><br/>short')}
+    kids = C.extract_roundup_offers(rd)
+    check("roundup: each block WITH a link and real text becomes its own offer (the header, a block with no link, and a stub are skipped)", [(k["post"], k["links"]) for k in kids],
+          [("airdrops_io/8036-2", ["https://airdrops.io/lighter/"]), ("airdrops_io/8036-3", ["https://airdrops.io/infinifi/"])])
+    check("roundup: an offer keeps the post's channel and time so it flows through the ordinary gate and scoring", (kids[0]["time"], kids[0]["views"]), ("2026-11-16T07:00:00+00:00", 100))
+    check("roundup: a roundup with no linked block yields nothing (and stays excluded)", C.extract_roundup_offers(dict(rd, html="Weekly roundup<br/><br/>just words with no links at all in this block of text here")), [])
+    # a guaranteed small payout is never cut, a deposit is never a block, a monetizable offer gets a little more value
+    dep = dict(base, type="bank_bonus", payout_usd=2.0, payout_kind="stated", capital_usd=50.0, award_kind="guaranteed")
+    sd = E.score_earning(dep)
+    check("a guaranteed $2 deposit bonus passes the floors (deposit asked, tiny payout)", E.passes_floors(sd) or sd["value"] < 40, True)
+    check("an offer that asks for a deposit is labelled monetizable and scores a little higher than the same offer without one",
+          (sd["monetizable"], E.score_earning(dict(dep, capital_usd=0.0, type="airdrop"))["monetizable"]), (True, False))
+    check("the monetizable bonus is small", E.MONETIZABLE_BONUS <= 6.0, True)
+    check("the gate does not block a plain deposit", E.gate("Deposit $50 with a card and keep it: you get a $20 bonus after 3 days", "tg:criptinho"), [])
+
     # ---- selection: competitions only fill slots nothing else wants, at most 2 a day (operator 2026-11-16)
     from pipeline import select_candidates as SC
     mk = lambda i, comp, v: {"raw_item_id": i, "score": v, "payload": {"type": "hackathon" if comp else "bank_bonus", "award_kind": "competition" if comp else "guaranteed"}}
@@ -677,7 +704,7 @@ def main():
     check("selection: with a slot of 1 the first candidate is a non-competition whenever one exists", SC.prioritise_earning(pool, 2)[0]["raw_item_id"], 2)
 
     # ---- the three exchange-announcement channels are corroboration only, never opportunity sources
-    check("exchange channels are not candidate sources", [h for h in C.earning.CORROBORATION_ONLY_TELEGRAM if f"tg:{h}" in C.earning.SOURCES], [])
+    check("CoinMarketCap announcements stay corroboration-only; OKX and Bybit announcements are campaign sources, filtered to campaign posts", ([h for h in ("CoinMarketCapAnnouncements",) if f"tg:{h}" in C.earning.SOURCES], sorted(C.CAMPAIGN_ONLY_SOURCES)), ([], ["tg:Bybit_Announcements", "tg:OKXAnnouncements"]))
     check("the dead / absent handles are not configured", [h for h in ("WWGiveaways", "freestuff_hub", "FREE_UDEMY_COURSES1", "bugbountyplzen", "officialairdropalert", "cryptosale_tg", "2top_airdrop")
                                                          if h in C.earning.TELEGRAM_HANDLES], [])
 

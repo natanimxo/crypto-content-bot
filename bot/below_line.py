@@ -4,10 +4,13 @@ The operator does not trust the ratings yet and does not want to miss anything -
 messages listing every earning_opportunities item that failed only a SOFT floor, with its scores and the reason, each with an Approve button that
 goes through the normal write flow (the approval row is created exactly as notify.py creates it, against the same channel).
 
-SOFT floors (what lands here):  trust < 40, value < 40, expected payout < $10, or recruitment-shaped (referral promotion / multi-level / referral earnings
-above the base payout). A token-denominated reward (value capped at 30) is a value failure.
-HARD gates stay out entirely: a gated item is stored HELD (seed phrase, connect-wallet-to-claim, upfront fee, roundup, not income) and this module never
-reads held rows. NOTE: there is no forgery / KYC-evasion gate rule yet (the operator said he handles those posts by hand), so such an item CAN appear here.
+NOTHING DISAPPEARS SILENTLY (operator 2026-11-17). Two kinds of item land here, each with its reason:
+  * a SOFT-floor failure: trust < 40, value < 40, a RAFFLE's expected payout < $10 (never a guaranteed payout: a $2 deposit bonus must pass), a competition's largest prize under the
+    size floor, or a token-denominated reward (value capped at 30);
+  * a HARD-GATED item (seed-phrase wording, connect-wallet-to-claim, upfront-fee wording, a GoPlus-flagged token contract): carried with a RED label and the gate's reason. The
+    operator handles security himself; the gate keeps such an item out of the normal cards, the digest keeps it in sight.
+STILL EXCLUDED (the operator's own rules): not income (discounts, free games, freebies, credits), roundup posts (their individual offers are extracted and processed instead), spam.
+There is NO recruitment filter: multi-level wording is a warning label on the line, nothing more.
 
 Why it does not touch the cap of 8: these notifications are stored with notifications.kind = 'below_line', and every pacing / cap query counts only
 kind = 'candidate'. They DO count as "already notified" (never re-sent) and their topic enters cooldown, like any card.
@@ -61,41 +64,50 @@ def reasons_for(breakdown: dict, payload: dict) -> list[str]:
         if top is not None and float(top) < earning.prizes.COMPETITION_MIN_TOP_PRIZE_USD:
             out.append("competition: largest prize is under the 100 floor (dollar equivalent)")
     ep = breakdown.get("expected_payout_usd")
-    if ep is not None and float(ep) < earning.EXPECTED_PAYOUT_FLOOR:
-        out.append(f"expected payout ${float(ep):,.2f} < ${earning.EXPECTED_PAYOUT_FLOOR:.0f}")
-    ref = breakdown.get("referral") or {}
-    if ref.get("recruitment_shape"):
-        why = ("referral promotion is the required work" if ref.get("promotion") else "multi-level wording" if ref.get("multi_level")
-               else "referral earnings exceed the base payout")
-        out.append(f"recruitment-shaped ({why})")
+    if breakdown.get("award_kind") == "raffle" and ep is not None and float(ep) < earning.EXPECTED_PAYOUT_FLOOR:
+        out.append(f"raffle: expected payout ${float(ep):,.2f} < ${earning.EXPECTED_PAYOUT_FLOOR:.0f}")
     return out
 
 
 def referral_text(breakdown: dict) -> str:
     ref = breakdown.get("referral") or {}
-    if ref.get("recruitment_shape"):
-        return "referral yes ⚠"
     return "referral yes" if ref.get("available") else "referral unconfirmed" if ref.get("link_code") else "referral no"
 
 
+# gate reasons the digest SHOWS (a security-flavoured exclusion the operator reviews himself); every other gate reason (roundup, not income) stays out
+_VISIBLE_GATE_MARKERS = ("seed phrase", "connect-wallet-to-claim", "upfront payment", "GoPlus")
+
+
+def visible_gate_reasons(payload: dict) -> list[str]:
+    reasons = ((payload or {}).get("gate") or {}).get("reasons") or []
+    if reasons and all(any(m in r for m in _VISIBLE_GATE_MARKERS) for r in reasons):
+        return list(reasons)
+    return []
+
+
 def select_items(conn, now: datetime, since: datetime) -> list[dict]:
-    """Live, scored, NOT held (a held row is a hard-gate exclusion), still valid, never notified, collected since `since`, failing at least one soft floor.
-    Ordered best value first."""
+    """Live, scored, still valid, never notified, collected since `since`: every item that failed a SOFT floor, plus every HARD-GATED item whose reasons are all security-flavoured
+    (marked `gated`). Ordered best value first."""
     notified = _already_notified_ids(conn, CATEGORY)
     with dict_cursor(conn) as cur:
         cur.execute(
-            """SELECT r.id AS raw_item_id, r.payload, r.collected_at, s.score, s.score_breakdown
+            """SELECT r.id AS raw_item_id, r.payload, r.collected_at, r.held, s.score, s.score_breakdown
                FROM raw_items r JOIN scores s ON s.raw_item_id = r.id
-               WHERE r.category = %s AND r.held = FALSE AND r.expired_at IS NULL AND r.collected_at > %s""",
+               WHERE r.category = %s AND r.expired_at IS NULL AND r.collected_at > %s""",
             (CATEGORY, since))
         rows = cur.fetchall()
     items = []
     for r in rows:
         if r["raw_item_id"] in notified or not _earning_still_valid(r["payload"], now):
             continue
+        if r["held"]:
+            gate = visible_gate_reasons(r["payload"] or {})
+            if gate:
+                items.append({**r, "reasons": gate, "gated": True})
+            continue
         why = reasons_for(r["score_breakdown"] or {}, r["payload"] or {})
         if why:
-            items.append({**r, "reasons": why})
+            items.append({**r, "reasons": why, "gated": False})
     items.sort(key=lambda r: -float(r["score_breakdown"].get("value", 0)))
     return items
 
@@ -111,10 +123,15 @@ def format_item(n: int, it: dict) -> str:
         facts.append("skill: " + ", ".join(b["skill"]))
     if kyc is not None:
         facts.append("KYC required" if kyc else "no KYC")
+    if (b.get("referral") or {}).get("multi_level"):
+        facts.append("⚠ multi-level wording")
+    if b.get("monetizable"):
+        facts.append("💸 monetizable")
     title = html.escape((p.get("title") or "")[:90])
-    return (f"<b>{n}.</b> {title}\n"
+    red = "🔴 <b>GATED</b> " if it.get("gated") else ""
+    return (f"<b>{n}.</b> {red}{title}\n"
             f"   {html.escape(str(p.get('source_name') or p.get('source')))} · {html.escape(str(p.get('type') or ''))} · " + " · ".join(facts) + "\n"
-            f"   <i>why: {html.escape('; '.join(it['reasons']))}</i>")
+            f"   <i>{'gate' if it.get('gated') else 'why'}: {html.escape('; '.join(it['reasons']))}</i>")
 
 
 def build_messages(items: list[dict], display_name: str) -> list[tuple[str, list[dict]]]:
@@ -130,7 +147,7 @@ def build_messages(items: list[dict], display_name: str) -> list[tuple[str, list
     out = []
     for i, chunk in enumerate(chunks, 1):
         head = (f"📉 <b>Below the line — {html.escape(display_name)}</b> ({i}/{len(chunks)})\n"
-                f"{len(items)} item(s) failed only a soft floor; each has an Approve button that goes through the normal write flow.\n")
+                f"{len(items)} item(s) failed a soft floor or were hard-gated (🔴); each has an Approve button that goes through the normal write flow.\n")
         out.append((head + "\n" + "\n".join(format_item(n, it) for n, it in enumerate(chunk, 1)), chunk))
     return out
 

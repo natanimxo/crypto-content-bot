@@ -23,13 +23,9 @@ THE RULES (operator-approved 2026-11-15):
      it" and "scam reports found" -- were dropped on purpose; see BACKLOG.)
   4. Cross-link: an absurd payout-for-nothing ratio PENALISES TRUST, it does not just look attractive -- the same
      lesson as the 462% APY pools.
-  5. Referral (CHANGED 2026-11-16 -- operator override; see BACKLOG). The original rule was "a referral program is never an input";
-     that was the assistant's recommendation, not the operator's decision, and the operator overrode it. Now: a referral program the
-     reader can earn from adds up to REFERRAL_VALUE_MAX (12) points to VALUE -- a real factor that cannot override payout, capital and
-     effort. Availability is also a plain fact on the card, separate from both scores. UNCHANGED: referral parameters are still stripped
-     from every stored link (the operator adds his own at forward time; nobody else's code goes out under his name).
-     THE ONE CASE WHERE A REFERRAL IS A WARNING: when the referral earnings exceed the base payout the offer is shaped like a recruitment
-     scheme (MLM / pyramid). Then the referral adds NO value and costs TRUST (referral_recruitment_penalty).
+  5. Referral (operator overrides 2026-11-16 and 2026-11-17): a referral program the reader can earn from adds up to REFERRAL_VALUE_MAX (12) points to VALUE; a stated per-referral earning ("$15 per friend")
+     is read as the offer's PAYOUT when the offer states no other; multi-level wording (downline, MLM) is a WARNING LABEL on the card with no score effect. There is NO recruitment penalty and NO referral-promotion
+     detection: they were the assistant's recommendation, the operator overrode them, and they must not be restored. Referral parameters are still stripped from every stored link (the operator adds his own).
 """
 
 import math
@@ -57,6 +53,14 @@ SOURCES = {
     "superteam": {"name": "Superteam Earn", "tier": 2, "kind": "api", "default_type": "bounty"},
     "zindi": {"name": "Zindi", "tier": 2, "kind": "api", "default_type": "hackathon"},
     "immunefi": {"name": "Immunefi audit competitions", "tier": 2, "kind": "api", "default_type": "bounty"},
+    # Exchange campaigns and Galxe (operator 2026-11-17; KYC is not a blocker). Tier 1 = the exchange's own official API; Galxe is tier 3 (anyone can create a campaign) and keeps only
+    # campaigns with a STATED reward. Earn Stack candidates, separate from exchange_listings.
+    "binance_campaigns": {"name": "Binance campaigns", "tier": 1, "kind": "text_api", "default_type": "giveaway"},
+    "kucoin_campaigns": {"name": "KuCoin campaigns", "tier": 1, "kind": "text_api", "default_type": "giveaway"},
+    "galxe": {"name": "Galxe", "tier": 3, "kind": "text_api", "default_type": "airdrop"},
+    # Official exchange Telegram channels (tier 2: the organisation's own account), campaign posts only (collectors.earning_opportunities.CAMPAIGN_ONLY_SOURCES)
+    "tg:OKXAnnouncements": {"name": "OKX Announcements (Telegram)", "tier": 2, "kind": "telegram", "default_type": "giveaway"},
+    "tg:Bybit_Announcements": {"name": "Bybit Announcements (Telegram)", "tier": 2, "kind": "telegram", "default_type": "giveaway"},
     "tg:airdropfind": {"name": "Airdrop Finder (Telegram)", "tier": 3, "kind": "telegram", "default_type": "airdrop"},
     "tg:airdrops_io": {"name": "AIRDROPS.IO (Telegram)", "tier": 3, "kind": "telegram", "default_type": "airdrop"},
     "tg:incrypted_airdrops": {"name": "Incrypted Airdrops (Telegram)", "tier": 3, "kind": "telegram", "default_type": "airdrop"},
@@ -627,14 +631,13 @@ def split_referral(text: str) -> tuple[str, list[str]]:
 
 def extract_referral(text: str) -> dict:
     """{'available': bool, 'amount_usd': what one referral pays the reader (None when no figure is stated: a percentage or nothing),
-    'multi_level': multi-level / downline wording present -- recruitment-shaped on its own}."""
+    'multi_level': multi-level / downline wording present -- a WARNING LABEL on the card, no score effect}."""
     _, ref = split_referral(text)
     multi = has_multilevel(text)
-    promo = has_referral_promotion(text)
-    if not ref and not multi and not promo:
-        return {"available": False, "amount_usd": None, "multi_level": False, "promotion": False}
+    if not ref and not multi:
+        return {"available": False, "amount_usd": None, "multi_level": False}
     amounts = [a for c in ref for a in extract_amounts_usd(c) if a < 1_000_000]
-    return {"available": True, "amount_usd": max(amounts) if amounts else None, "multi_level": multi, "promotion": promo}
+    return {"available": True, "amount_usd": max(amounts) if amounts else None, "multi_level": multi}
 
 
 # Multi-level wording is the clearest TEXTUAL signal of a pyramid structure (operator, 2026-11-16): recruitment-shaped on its own, whatever
@@ -671,50 +674,47 @@ def is_stablecoin(token: str | None) -> bool:
     return (token or "").strip().lower() in STABLECOINS
 
 
-# A bounty whose required work is promoting the product with the participant's OWN referral code or link is a recruitment campaign
-# (operator 2026-11-16, after the Raenest bounty reached the top of the queue at value 77.9). Detected in the offer's text, clause by clause:
-# the participant must put their own referral code / link in their deliverable (not optional) AND the offer has at least two referral-code
-# lines in all (e.g. "sign up using code: X" plus "include your unique referral code"). The poster's own code ("use my code") is not this.
-_PROMO_OWN_RE = re.compile(
-    r"\b(?:include|attach|add|share|post|put|insert|embed|use|with)\b[^.\n]{0,40}\byour\b[^.\n]{0,25}\b(?:referral|affiliate|invite|ref)\b[^.\n]{0,12}\b(?:code|link|id)\b|"
-    r"\byour (?:own |unique |personal )?(?:\w+ ){0,2}(?:referral|affiliate)\s*(?:code|link)\b|"
-    r"(?:ваш\w*|свою|свой) реферальн\w+|\bsua (?:pr[oó]pria )?(?:ref\w+ )?(?:link|c[oó]digo) de (?:indica|afiliad)\w+", re.IGNORECASE)
-_PROMO_CODE_RE = re.compile(
-    r"\b(?:referral|affiliate|invite|ref)[- ]?(?:code|link|id)\b|\bpromo(?:tional)? code\b|\b(?:using|with|via|use|enter|apply)\s+(?:the |my |our |this )?(?:\w+ )?code\b|\bcode:\s*\w+|"
-    r"реф(?:еральн\w+)? (?:код|ссылк\w+)|промокод\w*", re.IGNORECASE)
-_PROMO_OPTIONAL_RE = re.compile(r"\boptional(?:ly)?\b|\bno (?:referral|code)\b|\bnot required\b|необязательно|не обязательно|\bbonus points?\b", re.IGNORECASE)
-
-
-def has_referral_promotion(text: str) -> bool:
-    clauses = [c for c in re.split(r"[\n;•·]+|(?<=[.!?])\s+", text or "") if c and c.strip()]
-    code_lines = [c for c in clauses if (_PROMO_CODE_RE.search(c) or _PROMO_OWN_RE.search(c)) and not _PROMO_OPTIONAL_RE.search(c)]
-    return len(code_lines) >= 2 and any(_PROMO_OWN_RE.search(c) for c in code_lines)
-
-
 REFERRAL_VALUE_MAX = 12.0           # points of the 100-point value score a referral program can ever add ("around 10-15%")
-REFERRAL_RECRUITMENT_PENALTY = 30.0  # trust points lost when referral earnings exceed the base payout OR the wording is multi-level (no official-source exemption, operator 2026-11-16)
+# (There is NO recruitment penalty: it was the assistant's recommendation, the operator overrode it 2026-11-17 and it must not be restored. See BACKLOG.)
+
+
+_REFERRAL_MAX_RE = re.compile(r"(?:up to|upto|до|até|ate|hasta)\W{0,3}[^\w$€£]{0,6}[$€£\d]", re.IGNORECASE)
+
+
+def referral_payout(text: str) -> tuple[float, str, str] | None:
+    """(amount in dollar equivalent, 'stated' | 'max', the clause) for the first referral clause that states an amount ("$15 per friend", "up to $15 for each invited friend"). Operator
+    2026-11-17: a stated per-referral earning counts as PAYOUT, scored like any other -- used by the collector only when the offer states no other payout."""
+    _, clauses = split_referral(text)
+    for c in clauses:
+        amounts = extract_amounts_usd(c)
+        if amounts and amounts[0] < 1_000_000:
+            return amounts[0], ("max" if _REFERRAL_MAX_RE.search(c) else "stated"), c
+    return None
+
+
+# ---- "could potentially make the channel owner money" (operator 2026-11-17): a little extra VALUE when the reader is asked to bring money to a platform (a deposit), the offer is an
+# exchange / broker / bank sign-up, or it has a referral program -- the channel owner can earn from those, so they are worth surfacing a bit sooner. A deposit is NEVER a reason to block.
+MONETIZABLE_BONUS = 5.0
+_MONETIZABLE_TYPES = {"bank_bonus", "cashback"}
+
+
+def monetizable(payload: dict) -> bool:
+    cap = payload.get("capital_usd")
+    return bool((cap and cap > 0) or (payload.get("type") in _MONETIZABLE_TYPES) or referral_info(payload)["available"])
 
 
 def referral_info(payload: dict) -> dict:
-    """Availability, the stated per-referral amount, and whether the offer is recruitment-shaped. `available` means the TEXT describes a
-    program the reader can earn from. A referral code on the source's own link (`link_code`) is only an inference -- the poster has a code,
-    so a program probably exists -- and a fact on a card must not be an inference, so it is reported separately and never scored."""
+    """Availability (the TEXT describes a program the reader can earn from), the stated per-referral amount, and `multi_level` (a WARNING LABEL on the card only: no score effect).
+    A referral code on the source's own link (`link_code`) is only an inference and is never scored."""
     ref = payload.get("referral") or {}
-    in_text = bool(ref.get("available"))
-    in_link = bool(payload.get("referral_link"))
-    amount = ref.get("amount_usd")
-    base = max([x for x in (payload.get("payout_usd"), payload.get("pool_usd"), payload.get("unclear_usd")) if x] or [0.0])
-    multi = bool(ref.get("multi_level"))                             # multi-level wording: a pyramid structure by its own description
-    promo = bool(ref.get("promotion"))                               # the required work is promoting with the participant's own referral code
-    recruitment = bool(in_text and amount and amount > base) or multi or promo   # referral earnings are the larger (or only) stated earnings
-    return {"available": in_text, "link_code": in_link, "amount_usd": amount, "multi_level": multi, "promotion": promo, "recruitment_shape": recruitment}
+    return {"available": bool(ref.get("available")), "link_code": bool(payload.get("referral_link")), "amount_usd": ref.get("amount_usd"), "multi_level": bool(ref.get("multi_level"))}
 
 
 def referral_component(payload: dict) -> float:
     """0-100: how much a referral program is worth to the reader. Nothing for no program, nothing for a recruitment-shaped one (a
     warning, not a feature), a modest 50 for a program with no stated figure, up to 100 for a large stated per-referral payout."""
     info = referral_info(payload)
-    if not info["available"] or info["recruitment_shape"]:
+    if not info["available"]:
         return 0.0
     return max(50.0, _log_scale(info["amount_usd"])) if info["amount_usd"] else 50.0
 
@@ -824,9 +824,8 @@ def trust_components(payload: dict) -> dict:
     if gp == "unchecked":
         reputation -= 10.0                      # a token contract we could not check: unknown is never coded as clear
     penalty = payout_for_nothing_penalty(payload)
-    recruit = REFERRAL_RECRUITMENT_PENALTY if referral_info(payload)["recruitment_shape"] else 0.0
     return {"source_tier": tier, "corroboration": corro, "terms_stated": stated, "domain_age": domain,
-            "reputation": reputation, "payout_for_nothing_penalty": penalty, "referral_recruitment_penalty": recruit}
+            "reputation": reputation, "payout_for_nothing_penalty": penalty}
 
 
 def score_earning(payload: dict) -> dict:
@@ -835,7 +834,8 @@ def score_earning(payload: dict) -> dict:
     vc = value_components(payload)
     base = round(sum(VALUE_WEIGHTS[k] * vc[k] for k in VALUE_WEIGHTS), 1)
     bonus = round(REFERRAL_VALUE_MAX / 100.0 * referral_component(payload), 1)      # 0 .. REFERRAL_VALUE_MAX points, added on top
-    value = round(min(100.0, base + bonus), 1)
+    mon_bonus = MONETIZABLE_BONUS if monetizable(payload) else 0.0
+    value = round(min(100.0, base + bonus + mon_bonus), 1)
     uncapped = value
     if payload.get("token_reward"):
         value = min(value, TOKEN_REWARD_VALUE_CAP)        # a non-stablecoin token reward is an unclear amount, never priced (operator 2026-11-16)
@@ -845,7 +845,7 @@ def score_earning(payload: dict) -> dict:
     ep = expected_payout_usd(payload)
     top = prizes.top_prize_usd(payload) if prizes.award_kind(payload) == "competition" else None
     out = {"value": value, "trust": trust, "value_base": base, "referral_bonus": bonus, "referral": referral_info(payload), "kyc": kyc,
-           "expected_payout_usd": round(ep, 2) if ep is not None else None, "award_kind": prizes.award_kind(payload),
+           "monetizable": mon_bonus > 0, "expected_payout_usd": round(ep, 2) if ep is not None else None, "award_kind": prizes.award_kind(payload),
            "prize_line": prizes.prize_line(payload), "top_prize_usd": round(top, 2) if top else None, "skill": list(payload.get("skill") or []),
            "value_components": vc, "trust_components": tc}
     if payload.get("token_reward"):
@@ -860,6 +860,8 @@ def expected_payout_ok(breakdown: dict) -> bool:
     if breakdown.get("award_kind") == "competition":       # no expected amount for a competition; its own size floor instead (prizes.COMPETITION_MIN_TOP_PRIZE_USD)
         top = breakdown.get("top_prize_usd")
         return top is None or float(top) >= prizes.COMPETITION_MIN_TOP_PRIZE_USD
+    if breakdown.get("award_kind") != "raffle":            # guaranteed payouts (a $2 deposit bonus) are never cut by an expected-payout floor (operator 2026-11-17)
+        return True
     ep = breakdown.get("expected_payout_usd")
     return ep is None or float(ep) >= EXPECTED_PAYOUT_FLOOR
 

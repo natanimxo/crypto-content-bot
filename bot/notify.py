@@ -108,10 +108,13 @@ def _score_text(category: str, row: dict) -> str:
             text = f"value {float(b['value']):.0f} · trust {float(b['trust']):.0f}"
             ref = b.get("referral")
             if ref is not None:        # a fact beside the two scores, not part of either: can the reader invite others and earn
-                text += " · referral " + ("yes ⚠ recruitment-shaped" if ref.get("recruitment_shape") else "yes" if ref.get("available")
-                                          else "unconfirmed (source link carried a code)" if ref.get("link_code") else "no")
+                text += " · referral " + ("yes" if ref.get("available") else "unconfirmed (source link carried a code)" if ref.get("link_code") else "no")
+                if ref.get("multi_level"):                  # a WARNING LABEL only (operator 2026-11-17): multi-level / downline wording, no score effect
+                    text += " · ⚠ multi-level wording"
             if b.get("kyc") is not None:                # a fact beside the scores (113 of 218 Immunefi programs require it): shown, never inferred
                 text += " · KYC required" if b["kyc"] else " · no KYC"
+            if b.get("monetizable"):                    # a deposit is asked / an exchange or bank sign-up / a referral program: the channel owner can earn from it
+                text += " · 💸 monetizable"
             if b.get("skill"):                          # professional expertise needed (ML / engineering / security): a fact, shown beside the scores
                 text += " · skill: " + ", ".join(b["skill"])
             return text

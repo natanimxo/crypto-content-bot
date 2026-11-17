@@ -190,9 +190,7 @@ def fetch_superteam(now: datetime):
             logger.warning("earning: superteam detail %s failed: %s", slug, exc)
         amount, token = it.get("rewardAmount"), (it.get("token") or "").strip()
         extra = {"structured": True, "deadline": _iso(deadline) if deadline else None, "geo": superteam_geo(region, sponsor, it.get("title")),
-                 "region": region, "steps_text": "", "winners": None,
-                 # a bounty whose required work is promoting with the participant's OWN referral code is a recruitment campaign: judged on the FULL brief
-                 "referral_promotion": earning.has_referral_promotion(full_detail)}
+                 "region": region, "steps_text": "", "winners": None,}
         if amount and earning.is_stablecoin(token):
             top = max(earning.extract_amounts_usd(it.get("title") or "") or [0.0])
             if top > 1.5 * float(amount):                      # a headline maximum that disagrees with the structured reward: the reward is the fact
@@ -221,6 +219,105 @@ def fetch_superteam(now: datetime):
         raws.append({"source": "superteam", "ext_id": str(it.get("id") or slug), "title": title,
                      "text": f"{it.get('title')}. {kind} on Superteam Earn by {sponsor}. Reward {money}. Deadline {(deadline or now).date()}. {detail_text}",
                      "links": [SUPERTEAM_PAGE.format(slug=slug)], "url": SUPERTEAM_PAGE.format(slug=slug), "published_at": _iso(now), "extra": extra})
+    return raws, now
+
+
+# ---- Exchange campaigns and Galxe (operator 2026-11-17): Earn Stack CANDIDATES, separate from exchange_listings. They were skipped on 2026-11-16 for KYC / trading requirements; the
+# operator ruled KYC is not a blocker. kind 'text_api' = an API whose text is read like a post (type, payout, deadline, capital from the words). Only a campaign that PAYS (a prize
+# pool, rewards, a quiz or cashback reward, a new-user bonus) is kept; APR / yield promotions, fee discounts and "% off" are not income and are dropped here.
+_CAMPAIGN_PAYS_RE = re.compile(
+    r"\bwin\b|\bshare\b[^.]{0,40}(?:rewards?|prizes?|usdt|usdc|bnb|btc|\$)|\brewards?\b|\bgiveaway\b|\bprize|\bairdrop|\blaunchpool\b|\btoken splash\b|\bquiz\b|\blearn (?:and|&) earn\b|"
+    r"\bcashback\b|\bnew user\b|\bbonus\b|\bearn (?:up to )?[\d.,]+ ?(?:usdt|usdc|bnb|btc|eth)\b|\bword of the day\b", re.IGNORECASE)
+_CAMPAIGN_NOT_INCOME_RE = re.compile(r"\bAPR\b|\bAPY\b|\bloan\b|\bfee (?:discount|rebate|waiver)\b|\b\d+% off\b|\bdiscount\b|\bmargin\b|\bdelist|\bmaintenance\b|\bnotice\b|\bsupports?\b", re.IGNORECASE)
+_COMPETITION_RE = re.compile(r"competition|leaderboard|\btop \d+\b|trade\b[^.]{0,50}\bshare\b|play to win|tournament", re.IGNORECASE)
+# official exchange Telegram channels are campaign sources ONLY for posts like these (their listing / maintenance / delisting notices are not offers)
+CAMPAIGN_ONLY_SOURCES = {"tg:OKXAnnouncements", "tg:Bybit_Announcements"}
+_TG_CAMPAIGN_RE = re.compile(r"learn (?:and|&) earn|launchpool|token splash|giveaway|airdrop|win\b|share\b[^.]{0,40}(?:rewards?|prizes?|usdt|usdc|\$)|\bquiz\b|\bprize|trading (?:competition|tournament)", re.IGNORECASE)
+
+BINANCE_CAMPAIGN_URL = "https://www.binance.com/bapi/composite/v1/public/cms/article/list/query"
+BINANCE_CAMPAIGN_PAGE = "https://www.binance.com/en/support/announcement/detail/{code}"
+KUCOIN_CAMPAIGN_URL = "https://api.kucoin.com/api/v3/announcements"
+
+
+def _campaign_ok(title: str, desc: str = "") -> bool:
+    t = f"{title} {desc}"
+    return bool(_CAMPAIGN_PAYS_RE.search(t)) and not _CAMPAIGN_NOT_INCOME_RE.search(title)
+
+
+_RAFFLE_RE = re.compile(r"raffle|lucky draw|random(?:ly)? (?:draw|selected)|sweepstake", re.IGNORECASE)
+
+
+def _campaign_extra(title: str, text: str) -> dict:
+    """award kind for a campaign: a RAFFLE (random draw) only when it says so, a COMPETITION when ranked / shared by leaderboard, otherwise GUARANTEED (a new-user bonus, a quiz reward, cashback):
+    the default type 'giveaway' would have made every one a raffle and cut a $26 bonus on a pool / entrants expected value."""
+    extra = {"geo": None, "steps_text": "", "award_kind": "raffle" if _RAFFLE_RE.search(f"{title} {text}") else "guaranteed"}
+    if _COMPETITION_RE.search(title):
+        orig = prizes.parse_original(title)
+        extra["award_kind"] = "competition"
+        if orig:
+            extra["prize"] = {"pool": orig[0], "symbol": orig[1], "suffix": orig[2], "tiers": [], "winners": None, "entrants": None, "basis": "stated"}
+            extra["pool_usd"] = round(prizes.to_usd(orig[0], orig[1], orig[2]), 2)
+    return extra
+
+
+def fetch_binance_campaigns(now: datetime):
+    d = get_json(BINANCE_CAMPAIGN_URL, params={"type": 1, "catalogId": 93, "pageNo": 1, "pageSize": 20}, headers=HEADERS)
+    arts = [a for c in (d.get("data") or {}).get("catalogs", []) for a in c.get("articles", [])]
+    raws, newest = [], None
+    for a in arts:
+        ts = datetime.fromtimestamp(a["releaseDate"] / 1000, tz=timezone.utc)
+        newest = max(newest, ts) if newest else ts
+        title = html.unescape(a.get("title") or "")
+        if not _campaign_ok(title) or (now - ts).total_seconds() > 72 * 3600:
+            continue
+        url = BINANCE_CAMPAIGN_PAGE.format(code=a["code"])
+        raws.append({"source": "binance_campaigns", "ext_id": a["code"], "title": title, "text": title, "links": [url], "url": url, "published_at": _iso(ts),
+                     "extra": _campaign_extra(title, title)})
+    return raws, newest
+
+
+def fetch_kucoin_campaigns(now: datetime):
+    d = get_json(KUCOIN_CAMPAIGN_URL, params={"currentPage": 1, "pageSize": 20, "annType": "activities", "lang": "en_US"}, headers=HEADERS)
+    items = (d.get("data") or {}).get("items", [])
+    raws, newest = [], None
+    for a in items:
+        ts = datetime.fromtimestamp(a["cTime"] / 1000, tz=timezone.utc)
+        newest = max(newest, ts) if newest else ts
+        title, desc = html.unescape(a.get("annTitle") or ""), html.unescape(a.get("annDesc") or "")
+        if not _campaign_ok(title, desc) or (now - ts).total_seconds() > 72 * 3600:
+            continue
+        url = a.get("annUrl") or ""
+        raws.append({"source": "kucoin_campaigns", "ext_id": str(a.get("annId") or hashlib.sha1(title.encode()).hexdigest()[:12]), "title": title, "text": f"{title}. {desc}",
+                     "links": [url] if url else [], "url": url, "published_at": _iso(ts), "extra": _campaign_extra(title, desc)})
+    return raws, newest
+
+
+GALXE_URL = "https://graphigo.prd.galaxy.eco/query"
+_GALXE_QUERY = "query { campaigns(input: {first: 40, listType: %s, statuses: [Active]}) { list { id name description endTime space { alias name } } } }"
+_GALXE_NOT_REAL_RE = re.compile(r"\btest ?(?:net|usdc|funds?|credits?)\b|\btestnet\b|\bsepolia\b|no monetary value|\bnot real money\b|\bOAT\b|commemorative", re.IGNORECASE)
+
+
+def fetch_galxe(now: datetime):
+    """Galxe's public GraphQL. A campaign is kept ONLY with a STATED REWARD (operator 2026-11-17: the volume would swamp the digest): a money amount in the name or description,
+    not a testnet credit and not a free commemorative badge. Tier 3: anyone can create a campaign."""
+    raws, seen = [], set()
+    for listing in ("Trending", "Newest"):
+        d = requests.post(GALXE_URL, json={"query": _GALXE_QUERY % listing}, headers={**HEADERS, "Content-Type": "application/json"}, timeout=30).json()
+        for c in ((d.get("data") or {}).get("campaigns") or {}).get("list", []):
+            if c["id"] in seen:
+                continue
+            seen.add(c["id"])
+            text = re.sub(r"!\[[^\]]*\]\([^)]*\)", " ", f"{c.get('name') or ''}. {c.get('description') or ''}")
+            text = re.sub(r"\s+", " ", text).strip()
+            if _GALXE_NOT_REAL_RE.search(text) or earning.extract_reward_usd(text, "giveaway") is None:
+                continue
+            end = datetime.fromtimestamp(c["endTime"], tz=timezone.utc) if c.get("endTime") else None
+            if end and end <= now:
+                continue
+            sp = (c.get("space") or {}).get("alias") or ""
+            url = f"https://app.galxe.com/quest/{sp}/{c['id']}" if sp else f"https://app.galxe.com/quest/{c['id']}"
+            raws.append({"source": "galxe", "ext_id": c["id"], "title": (c.get("name") or "")[:110], "text": text, "links": [url], "url": url, "published_at": _iso(now),
+                         "extra": {**_campaign_extra(c.get("name") or "", text), "deadline": _iso(end) if end else None}})
     return raws, now
 
 
@@ -342,7 +439,26 @@ def parse_telegram_preview(page: str, handle: str) -> list[dict]:
         if not reactions:
             reactions = sum(_num(c) for c in re.findall(r'</(?:i|span|b)>\s*(\d[\d.,KkMm]*)\s*</span>', chunk.split("tgme_widget_message_reactions", 1)[-1][:800])) if "tgme_widget_message_reactions" in chunk else 0
         out.append({"post": post.group(1), "time": when.group(1), "text": _strip_html(text_html), "links": links,
-                    "views": _num(views.group(1)) if views else 0, "reactions": reactions})
+                    "views": _num(views.group(1)) if views else 0, "reactions": reactions, "html": text_html})
+    return out
+
+
+_BLOCK_SPLIT_RE = re.compile(r"(?:<br\s*/?>\s*){2,}|</p>\s*<p[^>]*>", re.IGNORECASE)
+
+
+def extract_roundup_offers(m: dict) -> list[dict]:
+    """The INDIVIDUAL offers a roundup post links to (operator 2026-11-17: process them, do not exclude the roundup). A roundup is a series of blocks, each a sentence about one
+    project followed by that project's link ("Lighter paused withdrawals ...: https://airdrops.io/lighter/"). Each block with a link and real text becomes its own post (same
+    channel, same time, id '<post>-<n>'), which then goes through the ordinary gate, scoring and dedup. A block with no link, or too short to be an offer, is skipped; a
+    roundup with no linked block yields nothing and stays excluded."""
+    out = []
+    for n, block in enumerate(_BLOCK_SPLIT_RE.split(m.get("html") or ""), 1):
+        links = [l for l in (html.unescape(x) for x in _HREF_RE.findall(block))
+                 if (earning.domain_of(l) or "") not in earning._SOCIAL_AGGREGATOR_HOSTS and not (earning.domain_of(l) or "").endswith("t.me")]
+        text = _strip_html(block)
+        if not links or len(text) < 40 or earning.is_roundup(text.split("\n")[0], ""):
+            continue
+        out.append({**m, "text": text, "links": links, "post": f"{m['post']}-{n}", "html": block})
     return out
 
 
@@ -355,10 +471,18 @@ def fetch_telegram(handle: str, now: datetime):
     median = statistics.median(views) if views else 0
     newest = max(datetime.fromisoformat(m["time"]) for m in msgs)
     raws = []
+    expanded = []
     for m in msgs:
+        if earning.is_roundup((m["text"].split("\n")[0] or "")[:110], m["text"]):
+            children = extract_roundup_offers(m)
+            if children:                              # the roundup itself is replaced by the offers it links to
+                expanded += children
+                continue
+        expanded.append(m)
+    for m in expanded:
         raws.append({
             "source": f"tg:{handle}", "ext_id": m["post"].split("/")[-1], "title": (m["text"].split("\n")[0] or "")[:110],
-            "text": m["text"], "links": m["links"], "url": f"https://t.me/{m['post']}", "published_at": _iso(datetime.fromisoformat(m["time"])),
+            "text": m["text"], "links": m["links"], "url": f"https://t.me/{m['post'].split('-')[0]}", "published_at": _iso(datetime.fromisoformat(m["time"])),
             "extra": {"views": m["views"], "reactions": m["reactions"], "channel_median_views": median,
                       "engagement_ratio": round(m["views"] / median, 2) if median else None, "geo": None},
         })
@@ -376,15 +500,13 @@ def build_payload(raw: dict, now: datetime) -> dict:
     # trusted structured sources link out through their own redirect (GamerPower); the landing for trust purposes is that link
     landing_norm = earning.normalize_url(landing_raw) if landing_raw else None
     host = earning.domain_of(landing_raw) if landing_raw else None
-    type_ = earning.classify_type(text, src["default_type"]) if src["kind"] in ("telegram", "rss") else src["default_type"]
+    type_ = earning.classify_type(text, src["default_type"]) if src["kind"] in ("telegram", "rss", "text_api") else src["default_type"]
     payout = extra.get("payout_usd")
     payout_kind = extra.get("payout_kind")
     pool_usd, unclear_usd = extra.get("pool_usd"), None
     # The payout is read from the text WITHOUT its referral clauses: "$25 for each friend you invite" is not the offer's own payout.
     base_text, _ = earning.split_referral(text)
     referral = earning.extract_referral(text)
-    if extra.get("referral_promotion"):        # decided on the platform's FULL brief (the stored text is cut)
-        referral = dict(referral, available=True, promotion=True)
     if payout is None and type_ != "hackathon" and not extra.get("structured"):
         stated, kind = earning.extract_reward(base_text, type_)
         if stated is not None and kind == "pool":
@@ -394,7 +516,12 @@ def build_payload(raw: dict, now: datetime) -> dict:
         elif stated is not None:
             payout, payout_kind = stated, kind      # 'stated' (one reader) or 'max' ("up to": deliberately treated as the payout)
     # The figures above are dollar EQUIVALENTS used for thresholds. What is SHOWN is the amount in its original currency, never converted (operator 2026-11-16).
-    displays = {"payout_display": prizes.display_for(base_text, payout), "pool_display": prizes.display_for(base_text, pool_usd) if not extra.get("prize") else None,
+    referral_clause = None
+    if payout is None and referral.get("amount_usd") and not extra.get("structured") and pool_usd is None and unclear_usd is None:
+        rp = earning.referral_payout(text)           # "$15 per friend" is the offer's payout when it states no other (operator 2026-11-17)
+        if rp:
+            payout, payout_kind, referral_clause = rp
+    displays = {"payout_display": prizes.display_for(base_text, payout) or (prizes.display_for(referral_clause, payout) if referral_clause else None), "pool_display": prizes.display_for(base_text, pool_usd) if not extra.get("prize") else None,
                 "unclear_display": prizes.display_for(base_text, unclear_usd)}
     deadline = None
     if extra.get("deadline"):
@@ -702,6 +829,9 @@ def collect() -> int:
             raws += run("superteam", lambda: fetch_superteam(now), None)
             raws += run("zindi", lambda: fetch_zindi(now), None)
             raws += run("immunefi", lambda: fetch_immunefi(now), None)
+            raws += run("binance_campaigns", lambda: fetch_binance_campaigns(now), None)
+            raws += run("kucoin_campaigns", lambda: fetch_kucoin_campaigns(now), None)
+            raws += run("galxe", lambda: fetch_galxe(now), None)
             for sid in RSS_FEEDS:
                 raws += run(sid, lambda sid=sid: fetch_rss(sid, now), STALE_DAYS[sid])
             for h in earning.TELEGRAM_HANDLES:
@@ -732,6 +862,9 @@ def collect() -> int:
                 if ext in have:
                     continue
                 kind = earning.SOURCES[raw["source"]]["kind"]
+                if raw["source"] in CAMPAIGN_ONLY_SOURCES and not _TG_CAMPAIGN_RE.search(raw["text"]):
+                    dropped_spam += 1                     # an official exchange channel's listing / maintenance / delisting notice is not an offer
+                    continue
                 if kind == "telegram":
                     eng = (raw.get("extra") or {}).get("engagement_ratio")
                     if _AD_RE.search(raw["text"]) or _NOT_AN_OFFER_RE.search(raw["title"] or "") or (eng is not None and eng < MIN_ENGAGEMENT_RATIO):

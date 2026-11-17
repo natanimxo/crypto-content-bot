@@ -35,7 +35,7 @@ from pipeline.http import _redact  # noqa: E402
 from pipeline.publish import get_channel_display_name, mark_as_sent  # noqa: E402
 from pipeline.run_log import run_log  # noqa: E402
 from pipeline.score import load_category_config  # noqa: E402
-from pipeline.telegram_api import answer_callback_query, get_updates, send_message  # noqa: E402
+from pipeline.telegram_api import answer_callback_query, edit_message_text, get_updates, send_message  # noqa: E402
 from pipeline.write_post import generate_post  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -238,6 +238,8 @@ def _send_preview_and_store(conn, approval_id: int, channel: str, category: str,
     keyboard = [[
         {"text": "✅ Mark as sent", "callback_data": f"mark_sent_a:{preview_id}"},
         {"text": "❌ Discard", "callback_data": f"discard:{preview_id}"},
+    ], [
+        {"text": "✏️ Edit", "callback_data": f"edit_preview:{preview_id}"},        # reply with the final text; the preview below is replaced in place
     ]]
 
     header_result = send_message(_operator_chat_id(), header_text, reply_markup={"inline_keyboard": keyboard})
@@ -321,6 +323,21 @@ def _record_write_failure(conn, approval: dict, exc: Exception) -> None:
         _alert_write_failed(conn, approval, attempts, error)
 
 
+def _is_guard_failure(exc: Exception) -> bool:
+    """The writer gave up after its retries because the draft kept failing a voice / guard check (invented fact, copied text, length ...). A model outage or a missing
+    key is NOT this: those still retry and alert as before."""
+    return isinstance(exc, RuntimeError) and "still failed the voice/guard checks" in str(exc)
+
+
+def _send_fallback_card(conn, approval: dict, exc: Exception) -> None:
+    """earning_opportunities only (operator 2026-11-17): the guards stay, but a draft that cannot pass them must not leave the operator with nothing -- send a PLAIN FACTS card built
+    from the stored facts (pipeline/fallback_card.py, no model) as an ordinary preview, with the Edit button, so he can always post it."""
+    from pipeline.fallback_card import plain_facts_card
+    text = plain_facts_card(approval["payload"], approval.get("score_breakdown"), get_channel_display_name(conn, approval["channel"]))
+    _send_preview_and_store(conn, approval["approval_id"], approval["channel"], approval["category"], approval["score"], "plain_facts_card", text)
+    logger.warning("poll: approval_id=%s draft failed its guards after the retries -- sent the plain facts card instead: %s", approval["approval_id"], str(exc)[-200:])
+
+
 def _attempt_write(conn, approval: dict) -> bool:
     """The one place a write is attempted, for both a fresh tap and the
     recovery sweep, so failure handling can't diverge between them."""
@@ -329,6 +346,12 @@ def _attempt_write(conn, approval: dict) -> bool:
         return True
     except Exception as exc:
         logger.exception("poll: write failed for approval_id=%s", approval["approval_id"])
+        if approval.get("category") == "earning_opportunities" and _is_guard_failure(exc):
+            try:
+                _send_fallback_card(conn, approval, exc)
+                return True
+            except Exception:
+                logger.exception("poll: the plain facts card could not be sent for approval_id=%s", approval["approval_id"])
         _record_write_failure(conn, approval, exc)
         return False
 
@@ -427,6 +450,40 @@ def _handle_edit_prompt(conn, raw_item_id: int, cq_id: str):
     _safe_ack(cq_id, "Send your edit as a reply to my message.")
 
 
+def _handle_edit_preview_prompt(conn, preview_id: int, cq_id: str):
+    preview = _fetch_preview(conn, preview_id)
+    if not preview or preview["status"] != "pending":
+        _safe_ack(cq_id, "Already handled.")
+        return
+    result = send_message(_operator_chat_id(), f"Reply to THIS message with the final post text for preview #{preview_id}.")
+    with dict_cursor(conn) as cur:
+        cur.execute("UPDATE approvals SET prompt_message_id = %s WHERE id = %s", (result["message_id"], preview["approval_id"]))
+    conn.commit()
+    _safe_ack(cq_id, "Send your edit as a reply to my message.")
+
+
+def _apply_preview_edit(conn, text: str, reply_to_message_id: int) -> bool:
+    """A reply to an Edit-preview prompt: replace the preview's text and the forwardable message in place. True when it matched."""
+    with dict_cursor(conn) as cur:
+        cur.execute(
+            """SELECT p.id AS preview_id, p.content_message_id FROM post_previews p JOIN approvals a ON a.id = p.approval_id
+               WHERE a.prompt_message_id = %s AND p.status = 'pending'""", (reply_to_message_id,))
+        row = cur.fetchone()
+    if not row:
+        return False
+    content_html = html.escape(text, quote=False)
+    with dict_cursor(conn) as cur:
+        cur.execute("UPDATE post_previews SET variant_a_text = %s, variant_a_model = 'operator_edited' WHERE id = %s", (content_html, row["preview_id"]))
+    conn.commit()
+    if row["content_message_id"]:
+        try:
+            edit_message_text(_operator_chat_id(), row["content_message_id"], content_html)
+        except Exception:
+            logger.exception("poll: could not edit the preview message in place; sending the edited text as a new message")
+            send_message(_operator_chat_id(), content_html, disable_web_page_preview=True)
+    return True
+
+
 def _handle_mark_sent(conn, preview_id: int, cq_id: str):
     """No Telegram send here — the operator has already copied/forwarded the
     text themselves. This just logs it to `posts` for history/dedup."""
@@ -488,6 +545,8 @@ def handle_callback_query(conn, cq: dict) -> dict | None:
         _handle_reject(conn, target_id, cq["id"])
     elif action == "edit":
         _handle_edit_prompt(conn, target_id, cq["id"])
+    elif action == "edit_preview":
+        _handle_edit_preview_prompt(conn, target_id, cq["id"])
     elif action == "mark_sent_a":  # name kept: already-sent preview buttons carry it
         _handle_mark_sent(conn, target_id, cq["id"])
     elif action == "discard":
@@ -522,6 +581,7 @@ def handle_message(conn, msg: dict):
         )
         row = cur.fetchone()
     if not row:
+        _apply_preview_edit(conn, text, reply_to["message_id"])       # a reply to an "Edit" tap on a PREVIEW (not on a candidate card)
         return
 
     with dict_cursor(conn) as cur:
