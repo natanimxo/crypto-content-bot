@@ -4,44 +4,32 @@ For a fresh Claude Code session picking this project up cold. This is STATE + th
 "READ FIRST -- traps" block, then the section for whatever you touch); `intelligence-bot-spec-v2.md` is the original design. The previous handoff (2026-09-11, stale: it says
 "not yet live") is kept at `docs/HANDOFF-2026-09-11-archive.md` for the bug history of the first three categories.
 
-## STATUS AT THE END OF THE 2026-11-16 SESSION (read this first)
+## STATUS (2026-11-17, read this first)
 
-The session was cut short by the operator's usage limit. Nothing was left half-rewired in committed code: HEAD passes all four regression scripts (`check_earning`, `check_sources`, `check_exchange_listings`,
-`check_voice_checks`) and the cycle scripts import cleanly. The poller was healthy (last `approval_poll` success 12:42 UTC). **No more test or regenerated cards are being sent**: the one-off regeneration scripts
-(scratchpad, not in the repo) finished; nothing in the repo sends test cards. (The daily below-the-line digest and the normal cards are production features and will still send.)
+Everything below is committed and pushed; HEAD passes `check_earning`, `check_sources`, `check_exchange_listings`, `check_voice_checks`. The operator's 2026-11-17 message REPLACES his earlier
+"remove the recruitment penalty" and "full control" prompts: it is self-contained and is what is implemented. (A dangling empty bullet at the end of its item 1 was ignored.)
 
-### LIVE NOW (committed, pushed, running on the Railway cron services)
-- Earn Stack: guaranteed / raffle / competition classification with prize structure + odds in the ORIGINAL currency; skill fact; competitions lowest priority and at most 2 a day; the third floor (expected payout >= $10,
-  or for competitions a largest-prize floor of $100); referral counts in value; recruitment-shaped offers get a trust penalty; the daily below-the-line digest with an Approve button per item; Superteam / Zindi / Immunefi / Devpost / Doctor of Credit / 4 airdrop channels.
-- Earn Stack display name (key `coincraft`, chat_id unchanged). Hustle shares 2 / 2 / 1 / 1 seeded into the DB (the cap change is already in effect).
-- New collectors wired into `scripts/collect_cycle.py` (they ran from the 2026-11-17 04:00 UTC cycle on): Whale Alert (`collect_whale_alert`), ZachXBT (`collect_zachxbt`), Wu Blockchain + Cointelegraph inside `collect_news`,
-  Binance Announcements corroboration inside `collect_exchange_listings`, `collect_startup_news` (+ scorer, facts, template, config, channel wiring). Verified locally and then from Railway (see below).
+### DONE (live on Railway after the push; the new sources' first cycle is the 08:30 UTC earning run)
+1. **Recruitment / referral.** The recruitment-shaped trust penalty and the Raenest-style referral-promotion detection are REMOVED entirely. A stated per-referral earning ("$15 per friend", "up to $15 for each
+   friend") is read as the offer's PAYOUT when the offer states no other, scored like any payout. Multi-level wording (downline, MLM) is a WARNING LABEL on the card and in the digest, with NO score effect.
+   The referral availability bonus (<= 12 value points) stays. **The recruitment penalty was the assistant's recommendation; the operator overrode it (2026-11-16 once, 2026-11-17 for good). It must NOT be restored.**
+   The Raenest bounty was un-expired and its approval put back to pending.
+2. **Nothing disappears silently.** Floors, caps and the one-card-per-cycle limit are kept. The daily below-the-line digest (`bot/below_line.py`) now lists every soft-floor failure AND every hard-gated item whose
+   reasons are security-flavoured (seed-phrase, connect-wallet, upfront-fee wording, a GoPlus-flagged contract) with a RED label and the gate's reason; each has Approve. The expected-payout floor applies to RAFFLES
+   only (a guaranteed $2 deposit bonus passes); a competition keeps its own largest-prize floor. **Roundup posts are expanded**: each block with its own link becomes an offer that goes through the ordinary gate,
+   scoring and dedup (`extract_roundup_offers`); a roundup with no linked block stays excluded. Kept: no discounts / free games (not-income gate), the source registry, the Telegram spam filter, dedup. A plain
+   deposit is never a block (the fee gate matches fees, not deposits) and an offer that asks for a deposit, is a bank / exchange sign-up, or has a referral program gets a small "monetizable" value bonus (5 points,
+   label "💸 monetizable").
+3. **Writer.** Guards against invented facts and copied text are unchanged. When an earning draft still fails them after its retries, the poller sends a PLAIN FACTS card (`pipeline/fallback_card.py`, no model, no URL,
+   no referral wording) as an ordinary preview; every preview now has an Edit button (reply with the final text, the preview is replaced in place).
+4. **Sources** (each verified from Railway FIRST; only fresh ones built). See BACKLOG "Earn Stack sources, round 2".
 
-### HALF-DONE (where it stopped)
-- **Railway verification: DONE (2026-11-17 04:05 UTC cycle).** All five new channel sources serve from Railway with the same freshness and posts-per-day as locally, and every new collector ran and stored scored items
-  (whale_alert 14, wublockchain 10, cointelegraph 13, zachxbt 1, startup_news 5). Hustle sent exactly 2 / 2 / 1 / 1 in its first 24 hours. The `collect-earning` service is healthy (every 2 hours, last 04:33 UTC).
-- **Cards the operator already received in the old competition format**: regenerated in place where possible (two Zindi candidate cards were edited; two Devpost drafts were regenerated and re-sent, one header message was sent twice).
-  Two drafts first went out with WRONG claims and were corrected: "one $25,000 prize" (Devpost's `prizes_counts.cash` is prize categories, not winners) and "needs machine learning skill" for a Photoshop design contest (a theme tag is not a
-  requirement). The Meta VR Start draft was already published, so it could not be regenerated and still carries the OLD wording ("average per participant" style): check it before forwarding.
-- The `skill` fallback fix (a Devpost theme tag must not become a skill) is committed.
-- `BACKLOG.md` now has the section "Channels as sources and Phase 6 startup_news" (the Railway table, what was not built and why, the Cointelegraph reversal).
-
-### STILL TO DO (the operator's open asks, in the order he gave them)
-1. **Earn Stack "full control" spec -- NOT STARTED.** The operator's words (relayed at the end of the session): remove the floors, caps and gates; a money-only score; everything else becomes a LABEL; a digest with Approve / Skip; and a
-   command that lists what was dropped. I have no copy of the detailed spec in this session's conversation, only that summary: get the spec text from him before building. NONE of it is implemented: the floors (trust 40 / value 40 / expected
-   payout $10 / competition $100), the cap of 8, the 2-a-day competition cap, the hard gate and the recruitment penalty are all still in force. Hard gates he has said stay out: seed phrase / upfront fee (forgery and KYC-evasion he handles by hand).
-2. **Referral / recruitment-shaped offers: the operator's latest statement is that he does NOT want to cut referral offers or ANY recruitment-shaped offer.** This reverses the 2026-11-16 ruling that gave recruitment-shaped offers a 30-point trust
-   penalty (the Raenest bounty was expired for it). NOT implemented: the penalty is still in `pipeline/earning.py`. Under the full-control spec these become labels ("recruitment-shaped", "referral promotion") on the card, not penalties and not exclusions.
-3. **Phase 6 + the channel builds: BUILT, committed and VERIFIED from Railway.** Still outstanding there: the startup_jobs name link is built strictly but unproven (expected 0-1 a month); `startup_news` "notable launches" were deliberately not built.
-4. Nov 23 report (scheduled task `earn-stack-draft-attempts-nov23`), Discord (waits on the operator's server and bot), the Bybit-from-Railway decision.
-
-### The operator's decisions this session, for the record
-- Competitions: show prize structure and odds, never pool / entrants; pool / entrants only for raffles; never convert currency; "skill required" fact; fewer competitions (priority + 2 a day) -- DONE.
-- Channels: build Whale Alert (transfers only, tx-hash dedupe), Wu Blockchain, Cointelegraph (reverses his September exclusion: deliberate), ZachXBT, Binance Announcements (corroboration only); skip Cryptopolitan, ICO Drops, CryptoRank, CryptoQuant,
-  CoinMarketCap News, TON Community, CertiK -- DONE (built and verified on Railway).
-- Phase 6: startup_news from Tech.eu / Sifted / TechCrunch Venture RSS, skip @tech, Hustle shares 2 / 2 / 1 / 1, startup_jobs name link at low priority -- DONE (built and verified on Railway).
-- Skip the forgery / KYC-evasion gate (he handles those by hand) -- honoured.
-- Full-control spec and "keep every referral / recruitment-shaped offer" -- recorded above, NOT done.
+### STILL TO DO / OPEN
+- Read the first Railway cycles of the new earning sources (`collect_earning_opportunities` details.sources: `binance_campaigns`, `kucoin_campaigns`, `galxe`, the five new Telegram channels, OKX / Bybit announcements)
+  and the first digest that carries red items. Galxe and the open Telegram channels are tier 3: almost all of their items fail the trust floor and land in the digest, which is intended; watch the digest size.
+- Nov 23 09:00 local: the scheduled draft-attempts report (`earn-stack-draft-attempts-nov23`). Decision rule: if most cards need 4+ attempts, widen the 400-750 band.
+- Discord (waits on the operator's server and bot), Bybit from Railway (403), AirdropAlert's real feed URL (its `rss-feed` page answers 200 from Railway but is HTML; it 429s from a dev machine).
+- startup_jobs name link on startup_news: built, expected ~0-1 a month. `scripts/check_reproduction_masking.py` reports 2 PROBLEM cases that predate all of this.
 
 ## What this is
 
@@ -92,18 +80,19 @@ into the DB by `scripts/seed_config.py` (`seed_categories`, `seed_channels`, `se
 
 ## Earn Stack rules (operator-set; the scoring is deliberate)
 
-1. **Two scores, never blended**: `value` (what it is worth) and `trust` (checkable facts). Selection = trust >= 40 AND value >= 40 AND (expected payout >= $10, or for a competition the largest prize >= $100; UNKNOWN expected payout passes
-   and scores 20-25 on the payout component). Order by value. Both numbers, plus referral / KYC / skill facts, are on every card.
+1. **Two scores, never blended**: `value` (what it is worth) and `trust` (checkable facts). Selection = trust >= 40 AND value >= 40 AND (for a RAFFLE expected payout >= $10; for a competition the largest prize >= $100; guaranteed payouts have no payout floor; UNKNOWN passes and scores 20-25 on the payout component). Order by value. Both numbers, plus referral / KYC / skill facts, are on every card.
 2. **Award kind** (`pipeline/prizes.py`): `guaranteed`, `raffle` (pool / entrants is meaningful: the only kind with an expected amount), `competition` (prize structure + odds shown, no expected amount, e.g.
    "Top 3 share €25,000 (€12k / €8k / €5k) · ~142 entrants · 3 winners"). **Amounts are ALWAYS shown in the original currency, never converted.** Devpost's `prizes_counts.cash` is NOT a winner count (it counts prize categories).
-3. **Hard gate** (item stored HELD, never a candidate): seed phrase / key, connect-wallet-to-claim, upfront fee, roundups, not income (free games, freebies, credits). The wallet rule is NARROW (claim-shaped only) for exactly
-   `superteam` / `zindi` / `immunefi`; broad for every relay (the Telegram channels, Devpost, Doctor of Credit). **No forgery / KYC-evasion gate: the operator handles those by hand** (e.g. the PumpFun posts).
-4. **Referral** (the recruitment penalty below is SUPERSEDED by the operator's last statement -- he wants none cut; see "STILL TO DO" #2; it is still in the code): counts in value (<= 12 points, added on top); availability is read from the offer TEXT only (a code on the source's own link is "unconfirmed"); referral parameters are still stripped from every stored link (the operator adds
-   his own). **Recruitment-shaped** (referral earnings above the base payout, multi-level / downline wording, or required work = promoting with your OWN referral code): no bonus, trust -30, no official-source exemption.
+3. **Hard gate** (item stored HELD, never a normal card, but SHOWN in the daily digest with a red label when its reasons are security-flavoured): seed phrase / key, connect-wallet-to-claim, upfront-fee wording,
+   a GoPlus-flagged contract. Still excluded entirely: not income (free games, freebies, credits, discounts), spam, a roundup (its offers are extracted instead). The wallet rule is NARROW (claim-shaped only) for exactly
+   `superteam` / `zindi` / `immunefi`; broad for every relay. **No forgery / KYC-evasion gate: the operator handles those by hand.**
+4. **Referral**: counts in value (<= 12 points, added on top); availability is read from the offer TEXT only (a code on the source's own link is "unconfirmed"); referral parameters are still stripped from every stored link
+   (the operator adds his own). A stated per-referral earning is the PAYOUT when no other is stated. Multi-level wording is a warning LABEL, no score effect. **No recruitment penalty and no referral-promotion detection: both
+   were removed at the operator's order and must not be restored.**
 5. **Token-denominated reward** (not a stablecoin): an unclear amount, never priced, value capped at 30 (below the floor).
 6. **Selection**: non-competitions first; competitions only fill slots nothing else wants, at most 2 per rolling 24h. One card per 2-hour cycle.
-7. **Daily "below the line" digest** (`bot/below_line.py`): every item that failed only a SOFT floor, with scores + reason + an Approve button into the normal write flow. Outside the cap (`notifications.kind = 'below_line'`; every cap
-   query counts only `kind = 'candidate'`). `python -m bot.below_line --dry-run --hours 72` previews it.
+7. **Daily "below the line" digest** (`bot/below_line.py`): every item that failed a SOFT floor plus every security-gated item (red), with scores + reason + an Approve button into the normal write flow. Outside the cap
+   (`notifications.kind = 'below_line'`; every cap query counts only `kind = 'candidate'`). `python -m bot.below_line --dry-run --hours 72` previews it. The expected-payout floor is for RAFFLES only.
 8. Cards: curated-find voice (a "why this one" clause drawn ONLY from the facts' "what stands out" line), band 400-750 characters, 9 retries. `earning_draft` rows in `run_logs` count attempts.
 9. Any calibration data on this category from before 2026-11-16 is SUSPECT (a parser that could not read "50$" or Russian / Portuguese deposits, before the referral bonus and the competition change).
 

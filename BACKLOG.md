@@ -2346,3 +2346,47 @@ startup_jobs 2, macro_news 1, startup_news 1, set as each category's own cap; in
 164 stories matched when tested, and 0 of this cycle's did, so expect almost none.
 
 **Daily below-the-line digest:** first one sent 2026-11-16 14:31 UTC (3 messages). Built and described in the section above.
+
+### Earn Stack, 2026-11-17 (operator: self-contained message replacing the earlier "remove the recruitment penalty" and "full control" prompts)
+
+**THE RECRUITMENT PENALTY WAS CLAUDE'S RECOMMENDATION, NOT THE OPERATOR'S DECISION, AND HE OVERRODE IT. IT MUST NOT BE RESTORED.** It cut 30 trust points for referral earnings above the base payout, multi-level wording, or a required own
+referral code (the Raenest-style detection, `has_referral_promotion`); it expired the Raenest bounty and pushed a "$15 per friend" post below the floor. Removed entirely, with its tests. What replaced it: a stated per-referral
+earning counts as the offer's PAYOUT when it states no other (`earning.referral_payout`, used by the collector), multi-level wording (downline, MLM) is a warning label on the card and the digest with NO score effect, and the
+referral availability bonus (<= 12 value points, an earlier operator override) stays. The Raenest bounty was un-expired (its approval is pending again; if approved and the writer cannot pass its guards the plain facts card is sent).
+
+**Nothing disappears silently (kept: floors, caps, one card per cycle; the operator's own rules: no discounts or free games, the source registry, the Telegram spam filter, dedup).**
+- The daily digest now also lists HARD-GATED items whose reasons are security-flavoured (seed-phrase wording, connect-wallet-to-claim, upfront-fee wording, a GoPlus-flagged contract) with a RED label and the reason; the
+  operator handles security himself. Not shown: not-income and spam. The gate itself is unchanged.
+- The expected-payout floor applies to RAFFLES only (a guaranteed $2 deposit bonus must pass). A competition keeps its largest-prize floor ($100, the assistant's choice).
+- Roundups: `extract_roundup_offers` splits a roundup post into blocks and turns every block that has its own link and real text into an offer (same channel, same time, id `<post>-<n>`) that goes through the gate,
+  scoring and dedup; the roundup itself is not stored when anything was extracted. A roundup with no linked block stays excluded (the held row says why). Live: the current Airdrop Radar roundups carry 53 linked
+  offers and Incrypted's "Otzhimka" posts 32 (15 roundup rows had been excluded before).
+- A deposit is never a block (the fee gate matches fees such as gas / activation / entry fees, not deposits) and "monetizable" offers (a deposit is asked, a bank / exchange sign-up, a referral program) get +5 value
+  (`earning.MONETIZABLE_BONUS`) and a "💸 monetizable" label, so the ones that can earn the channel owner something surface a little sooner.
+- Writer: the guards stay; a draft that still fails them after the retries now produces a plain FACTS card (`pipeline/fallback_card.py`) as an ordinary preview, and EVERY preview has an Edit button.
+
+**Items released by these changes (stored rows, measured by re-scoring all 407):** 2 now pass the floors that did not (PumpFun: a $60 deposit now reads as monetizable; "up to $15 per friend": the penalty is gone and the per-friend
+amount is its payout, trust 13 -> 43, value 58 -> 70), 1 un-held (the worm Premier League bounty, now allowed by the narrow wallet rule), Raenest restored. The digest would list 18 stored items (16 soft-floor, 2 red). No item that
+passed before stopped passing. Roundup expansion adds ~85 candidate offers from the roundups currently on the channels (they mostly land in the digest: tier 3).
+
+### Earn Stack sources, round 2 (operator list, verified from Railway 2026-11-17 06:33 UTC; only fresh ones built)
+| Source | Railway | Decision |
+|---|---|---|
+| airdropinspector | 200, newest 1.1h, 0.9/day | BUILT (tier 3) |
+| AirdropDetective | 200, newest 14.5h, 0.4/day, ~60k views | BUILT (tier 3) |
+| airdropking_io | 200, newest 17h, 1.3/day | BUILT (tier 3) |
+| LegitAirdrops | 200, newest 24h, 0.9/day | BUILT (tier 3) |
+| cryptoairdrops | 200, newest 12.7h, 0.1/day | BUILT (tier 3) |
+| bulka_crypto, moni_talks | alive (60h, 88h) but commentary / calls, not offers | not built |
+| AirdropNinja (31 days), airdropalert (570 days; the channel says it consolidated), easyprofitcrypto (826 days), CoinMarketCapAirdrops (333 days), Galxe's Telegram (58 days, price commentary) | DEAD | not built |
+| AirdropOasis, top2airdrop, unfud_crypto, OKXOfficial_English | no public preview | not built (dead for our purposes) |
+| Galxe public GraphQL | 200 | BUILT (tier 3), ONLY campaigns with a STATED reward (a money amount; not a testnet credit, not a free badge): 17 kept of the 80 it fetches (Trending + Newest, 40 each); all fail the trust floor and go to the digest |
+| Binance campaigns (CMS catalog 93 "Latest Activities") | 200 | BUILT (tier 1, the exchange's own API); trading competitions, quizzes / Word of the Day, new-user bonuses, cashback; APR promotions and fee discounts dropped; 4 live, all pass the floors |
+| KuCoin activities API | 200 | BUILT (tier 1); 2 live, both pass |
+| OKXAnnouncements, Bybit_Announcements (official channels) | already fetched as references | now also campaign SOURCES (tier 2), campaign posts only (learn and earn, launchpool, token splash, giveaway, win / share rewards, quiz, trading competition) |
+| Learn & Earn / Launchpool / Token Splash | no recent post found in Binance's catalogs; Coinbase Learn 403 from Railway | covered only through the Binance CMS quiz / Word of the Day items and the official-channel filter above |
+| AirdropAlert RSS | the `rss-feed` page answers 200 from Railway but is HTML (title "RSS Feed - AirdropAlert"); 429 from a dev machine | not built: the real feed URL was not verified |
+| TaskOn, CryptoRank Drophunting | 403 (Cloudflare challenge) from Railway | not built |
+| QuestN | connection error | not built |
+| PartnerStack, Impact, FirstPromoter | marketing pages (200), no listings | not built (the operator: no affiliate networks) |
+The campaign feeds are Earn Stack candidates, separate from exchange_listings. Exchange campaigns and Galxe are `text_api` sources (`earning.SOURCES`): type, payout and deadline are read from the words like a post.

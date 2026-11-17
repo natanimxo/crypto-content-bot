@@ -434,7 +434,7 @@ def main():
     check("only Doctor of Credit is left as an RSS feed", sorted(C.RSS_FEEDS), ["doctorofcredit"])
     check("the registry is exactly the income sources", sorted(C.earning.SOURCES),
           sorted(["binance_campaigns", "devpost", "doctorofcredit", "galxe", "immunefi", "kucoin_campaigns", "superteam", "tg:OKXAnnouncements", "tg:Bybit_Announcements",
-                  "tg:airdropfind", "tg:airdrops_io", "tg:criptinho", "tg:incrypted_airdrops", "zindi"] + []))
+                  "tg:airdropfind", "tg:airdrops_io", "tg:criptinho", "tg:incrypted_airdrops", "tg:airdropinspector", "tg:AirdropDetective", "tg:airdropking_io", "tg:LegitAirdrops", "tg:cryptoairdrops", "zindi"] + []))
     check("the bounty-platform feeds, the micro-task sites and the affiliate networks are not built (operator)", [s for s in ("yeswehack", "intigriti", "bugcrowd", "hackerone", "taskon", "questn", "partnerstack", "impact", "firstpromoter") if s in C.earning.SOURCES], [])
     for t, gated in [("free_game", True), ("freebie", True), ("credits", True), ("airdrop", False), ("hackathon", False),
                      ("bank_bonus", False), ("bounty", False), ("giveaway", False), ("cashback", False)]:
@@ -705,7 +705,7 @@ def main():
 
     # ---- the three exchange-announcement channels are corroboration only, never opportunity sources
     check("CoinMarketCap announcements stay corroboration-only; OKX and Bybit announcements are campaign sources, filtered to campaign posts", ([h for h in ("CoinMarketCapAnnouncements",) if f"tg:{h}" in C.earning.SOURCES], sorted(C.CAMPAIGN_ONLY_SOURCES)), ([], ["tg:Bybit_Announcements", "tg:OKXAnnouncements"]))
-    check("the dead / absent handles are not configured", [h for h in ("WWGiveaways", "freestuff_hub", "FREE_UDEMY_COURSES1", "bugbountyplzen", "officialairdropalert", "cryptosale_tg", "2top_airdrop")
+    check("the dead / absent handles are not configured", [h for h in ("AirdropNinja", "airdropalert", "easyprofitcrypto", "CoinMarketCapAirdrops", "Galxe", "AirdropOasis", "top2airdrop", "unfud_crypto", "OKXOfficial_English", "bulka_crypto", "moni_talks", "WWGiveaways", "freestuff_hub", "FREE_UDEMY_COURSES1", "bugbountyplzen", "officialairdropalert", "cryptosale_tg", "2top_airdrop")
                                                          if h in C.earning.TELEGRAM_HANDLES], [])
 
     if FAILS:

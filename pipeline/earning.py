@@ -65,6 +65,12 @@ SOURCES = {
     "tg:airdrops_io": {"name": "AIRDROPS.IO (Telegram)", "tier": 3, "kind": "telegram", "default_type": "airdrop"},
     "tg:incrypted_airdrops": {"name": "Incrypted Airdrops (Telegram)", "tier": 3, "kind": "telegram", "default_type": "airdrop"},
     "tg:criptinho": {"name": "Criptinho (Telegram)", "tier": 3, "kind": "telegram", "default_type": "airdrop"},
+    # Added 2026-11-17 (operator list from third-party research, each verified FROM RAILWAY first: fresh posts, 0.1-1.3 a day). Tier 3: open channels anyone can post to.
+    "tg:airdropinspector": {"name": "Airdrop Inspector (Telegram)", "tier": 3, "kind": "telegram", "default_type": "airdrop"},
+    "tg:AirdropDetective": {"name": "Airdrop Detective (Telegram)", "tier": 3, "kind": "telegram", "default_type": "airdrop"},
+    "tg:airdropking_io": {"name": "Airdrop King (Telegram)", "tier": 3, "kind": "telegram", "default_type": "airdrop"},
+    "tg:LegitAirdrops": {"name": "Legit Airdrops (Telegram)", "tier": 3, "kind": "telegram", "default_type": "airdrop"},
+    "tg:cryptoairdrops": {"name": "Crypto Airdrops (Telegram)", "tier": 3, "kind": "telegram", "default_type": "airdrop"},
 }
 # SCOPE RULE (operator ruling 2026-11-15): money INTO the reader's pocket, not money SAVED. A discount is a cheaper purchase and a free
 # game is a free purchase -- neither is earning. REMOVED, not filtered: Epic Games Store, GamerPower, OzBargain, Dealabs, MyDealz and the
