@@ -42,6 +42,14 @@ PROBES = [
     {"id": "intigriti_public", "dir": "bug bounty", "url": "https://app.intigriti.com/api/core/public/programs"},
     {"id": "immunefi_explore", "dir": "bug bounty", "url": "https://immunefi.com/bug-bounty/"},
     # ---- Phase 6 startup_news candidates (2026-11-16): verified from Railway before build; crunchbase / eu-startups 403 locally, checked here for the record
+    # ---- Earn Stack web candidates (operator 2026-11-17)
+    {"id": "airdropalert_rss", "dir": "airdrops", "url": "https://airdropalert.com/rss-feed/"},
+    {"id": "taskon_site", "dir": "quests", "url": "https://taskon.xyz/"},
+    {"id": "questn_site", "dir": "quests", "url": "https://app.questn.com/"},
+    {"id": "cryptorank_drophunting", "dir": "airdrops", "url": "https://cryptorank.io/drophunting"},
+    {"id": "partnerstack_site", "dir": "affiliate networks", "url": "https://partnerstack.com/"},
+    {"id": "impact_site", "dir": "affiliate networks", "url": "https://impact.com/"},
+    {"id": "firstpromoter_site", "dir": "affiliate networks", "url": "https://firstpromoter.com/"},
     {"id": "startup_techeu_rss", "dir": "startup news", "url": "https://tech.eu/feed"},
     {"id": "startup_sifted_rss", "dir": "startup news", "url": "https://sifted.eu/feed"},
     {"id": "startup_techcrunch_venture_rss", "dir": "startup news", "url": "https://techcrunch.com/category/venture/feed/"},
@@ -197,6 +205,23 @@ TELEGRAM_CANDIDATES = {
     "tonblockchain": "TON Blockchain (candidate)", "investigations": "ZachXBT", "CertiKCommunity": "CertiK Community", "certikalert": "CertiK Alert (candidate)",
     "binance_announcements": "Binance Announcements", "icodrops": "ICO Drops", "CryptoRankNews": "CryptoRank", "cryptoquant_official": "CryptoQuant",
     "tech": "@tech Startups & Ventures",
+    # ---- Earn Stack candidates (operator 2026-11-17; third-party research, expect dead / renamed ones): verified FROM RAILWAY before anything is built
+    "airdropinspector": "airdropinspector (earn candidate)",
+    "AirdropDetective": "AirdropDetective (earn candidate)",
+    "airdropking_io": "airdropking_io (earn candidate)",
+    "LegitAirdrops": "LegitAirdrops (earn candidate)",
+    "AirdropOasis": "AirdropOasis (earn candidate)",
+    "AirdropNinja": "AirdropNinja (earn candidate)",
+    "cryptoairdrops": "cryptoairdrops (earn candidate)",
+    "airdropalert": "airdropalert (earn candidate)",
+    "bulka_crypto": "bulka_crypto (earn candidate)",
+    "top2airdrop": "top2airdrop (earn candidate)",
+    "easyprofitcrypto": "easyprofitcrypto (earn candidate)",
+    "unfud_crypto": "unfud_crypto (earn candidate)",
+    "moni_talks": "moni_talks (earn candidate)",
+    "CoinMarketCapAirdrops": "CoinMarketCapAirdrops (earn candidate)",
+    "OKXOfficial_English": "OKXOfficial_English (earn candidate)",
+    "Galxe": "Galxe (earn candidate)",
 }
 _ADISH_RE = re.compile(r"join @|bitcoin_priceupdatebot|promo|sponsored|#ad\b|advertis|referral|use code|sign up (?:now|today)|trade (?:now|with)|signals?\b|vip\b", re.IGNORECASE)
 
