@@ -146,6 +146,7 @@ def render_candidates(conn, channel: str, all_candidates: list) -> tuple[str, li
 # The text is stored on the approval (approvals.draft_text) and Approve sends exactly that text as the forwardable preview. A candidate whose draft cannot be written (a guard kept
 # failing, a model outage) is NOT lost: it goes out as the ordinary triage card, and Approve writes it then, as before.
 DRAFT_FIRST_CHANNELS = {"crypto_notebook", "we_talk_a_lot"}
+CHANNEL_PER_CYCLE_LIMIT = {"we_talk_a_lot": 2}   # cards per notify run for the whole channel, on top of each category's own per-cycle slot
 DRAFT_CARD_MAX_CHARS = 3900
 
 
@@ -254,6 +255,14 @@ def notify_channel(conn, channel: str, categories: list[str], soft_daily_cap: in
                 "(%d already sent in the last %.0fh, cap=%d)",
                 channel, trimmed, already_recent, CAP_WINDOW_HOURS, soft_daily_cap,
             )
+
+    # Per-cycle limit for a channel as a whole (operator 2026-11-20: We Talk A Lot, at most 2 cards per 4-hour cycle). The categories' own per-cycle slots add up to more
+    # (weird_news 1 + satire 1 + jokes 1, and more as phases 2-3 add categories), so this trims the combined list, highest score first. The rest stay "new" and are offered next cycle.
+    cycle_limit = CHANNEL_PER_CYCLE_LIMIT.get(channel)
+    if cycle_limit is not None and len(all_candidates) > cycle_limit:
+        all_candidates.sort(key=lambda pair: float(pair[1]["score"]), reverse=True)
+        logger.info("notify: channel=%s per-cycle limit %d trimmed %d candidate(s)", channel, cycle_limit, len(all_candidates) - cycle_limit)
+        all_candidates = all_candidates[:cycle_limit]
 
     if not all_candidates:
         return None

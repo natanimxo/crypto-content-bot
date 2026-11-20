@@ -169,6 +169,8 @@ def main():
     check("jokes: the card's original block shows the category and the flags that are set", ("Dark | flags: racist" in orig, "JokeAPI" in orig), (True, True))
     check("jokes: Dark JokeAPI ranks above other JokeAPI above dad jokes", (SC.score_jokes(None, 1, tp | {"body": "x" * 30})["quality"], SC.score_jokes(None, 1, {"body": "x" * 30, "source_key": "jokeapi", "joke_category": "Pun"})["quality"], SC.score_jokes(None, 1, {"body": "x" * 30, "source_key": "dad"})["quality"]), (80.0, 75.0, 70.0))
 
+    check("notify: the humor channel is limited to 2 cards per cycle in total", N.CHANNEL_PER_CYCLE_LIMIT.get("we_talk_a_lot"), 2)
+
     # ---- config
     chans = yaml.safe_load(open(os.path.join(ROOT, "config", "channel_config.yaml"), encoding="utf-8"))
     ch = chans["we_talk_a_lot"]
