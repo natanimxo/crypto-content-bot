@@ -115,6 +115,8 @@ into the DB by `scripts/seed_config.py` (`seed_categories`, `seed_channels`, `se
 
 ## Traps (the expensive ones)
 
+- **Row-Level Security is ON for every public table, with no policies (2026-11-20, Supabase security advisory).** `DATABASE_URL` connects as the `postgres` role (table owner, BYPASSRLS), so the bot is unaffected; the Supabase REST API (anon / authenticated keys) can read and write nothing. Never switch the bot to the anon or service-role keys, never add `FORCE ROW LEVEL SECURITY`, and keep the RLS `DO` block LAST in `db/schema.sql` (it loops over all public tables, so new tables are covered on the next `scripts/apply_schema.py`). The git history (124 commits, all refs, unreachable commits) was scanned: no Supabase key, project URL or real `DATABASE_URL` was ever committed.
+
 - **Python in a bash heredoc halves backslashes** on this Windows setup: `\\n` becomes a real newline, `\\b` a backspace character. Write regex / string edits with the Edit or Write tool, or a script file; then `grep -c $'\x08' file`
   and `python -c "import ast; ast.parse(...)"`. This corrupted five files before it was caught.
 - Local DNS can drop (scripts fail); `railway config plan` fails on an IaC CLI-version check (not applied); `SIGALRM` does not exist on Windows; DeepSeek's balance lags by minutes (see BACKLOG READ FIRST).

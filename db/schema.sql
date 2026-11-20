@@ -331,3 +331,30 @@ CREATE TABLE IF NOT EXISTS domain_checks (
     created_on DATE,
     checked_at TIMESTAMPTZ NOT NULL
 );
+
+-- 2026-11-20: Row-Level Security on EVERY table in the public schema, with NO policies.
+-- Supabase exposes the public schema through PostgREST, so anyone holding the project URL and
+-- the anon key could otherwise read, edit or delete these tables over the REST API. RLS enabled
+-- + no policies = the anon and authenticated roles can do nothing at all.
+-- The bot is unaffected: DATABASE_URL connects as the `postgres` role (owner of every table,
+-- BYPASSRLS), and table owners skip RLS unless FORCE is set. Do NOT add FORCE ROW LEVEL SECURITY
+-- and do not switch DATABASE_URL to the anon or service-role API keys.
+-- This block is deliberately LAST and loops over pg_class instead of naming tables, so any
+-- table added anywhere above is covered the next time scripts/apply_schema.py runs.
+-- Keep it at the end of the file. Idempotent.
+DO $$
+DECLARE
+    t RECORD;
+BEGIN
+    FOR t IN
+        SELECT n.nspname AS schema_name, c.relname AS table_name
+        FROM pg_class c
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = 'public'
+          AND c.relkind IN ('r', 'p')
+          AND NOT c.relrowsecurity
+    LOOP
+        EXECUTE format('ALTER TABLE %I.%I ENABLE ROW LEVEL SECURITY', t.schema_name, t.table_name);
+    END LOOP;
+END
+$$;
