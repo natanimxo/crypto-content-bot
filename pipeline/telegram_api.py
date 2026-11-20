@@ -51,6 +51,15 @@ def edit_message_text(chat_id: str, message_id: int, text: str, reply_markup: di
     return resp["result"]
 
 
+def send_poll(chat_id: str, question: str, options: list[str], *, is_anonymous: bool = True) -> dict:
+    """A native Telegram poll (2-10 options). Options go as InputPollOption objects (Bot API 7.3+)."""
+    body = {"chat_id": chat_id, "question": question[:300], "options": [{"text": str(o)[:100]} for o in options], "is_anonymous": is_anonymous}
+    resp = post_json(f"{_base_url()}/sendPoll", json_body=body)
+    if not resp.get("ok"):
+        raise RuntimeError(f"Telegram sendPoll failed: {resp}")
+    return resp["result"]
+
+
 def answer_callback_query(callback_query_id: str, text: str | None = None) -> None:
     body = {"callback_query_id": callback_query_id}
     if text:

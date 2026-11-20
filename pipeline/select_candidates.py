@@ -175,7 +175,11 @@ AGE_BONUS_MAX_POINTS = 12.0
 # as good as a fresh one (a job posting, a tool, a yield pool). For
 # time-sensitive categories, older is WORSE, not owed a turn for waiting; see
 # FRESHNESS_MAX_AGE_HOURS below for the harder cutoff on the same principle.
-NO_AGE_BONUS_CATEGORIES = {"news", "macro_news", "whale_movements", "hacks_exploits", "exchange_listings", "technique_explainer"}
+NO_AGE_BONUS_CATEGORIES = {"news", "macro_news", "whale_movements", "hacks_exploits", "exchange_listings", "technique_explainer", "weird_news", "satire", "trending_jokes"}
+
+# LIBRARY categories (We Talk A Lot, operator 2026-11-20): evergreen items collected in bulk once and refreshed monthly. They are NOT ranked by score -- a card is a RANDOM unused item (an item that was ever in a
+# notification never returns, even if skipped), no freshness window, no cross-cycle dedup (done once when the library is built).
+LIBRARY_CATEGORIES = {"jokes", "dark_history", "unusual_deaths", "world_records", "conspiracies", "weird_facts", "shower_thoughts"}
 # hacks_exploits added 2026-09-30 -- a confirmed past incident is the same
 # "older is worse, not owed a turn" shape as news/macro_news/whale_movements,
 # just on a longer real-world clock (DefiLlama's own feed lags by days, not
@@ -208,6 +212,8 @@ FRESHNESS_MAX_AGE_HOURS = {
     "hacks_exploits": 336.0,
     # technique_explainer (2026-11-20): one a week, so it stays eligible for its own week (7 days) and no longer -- next week brings the next type.
     "technique_explainer": 168.0,
+    # We Talk A Lot (2026-11-20): absurd news and satire are time-boxed; trending is a day-old topic at best
+    "weird_news": 48.0, "satire": 72.0, "trending_jokes": 24.0,
 }
 
 
@@ -368,7 +374,9 @@ def get_new_candidates(conn, category: str, channel: str) -> list[dict]:
                JOIN scores s ON s.raw_item_id = r.id
                WHERE r.category = %s AND s.score >= %s AND r.held = FALSE
                  AND r.expired_at IS NULL
-                 AND (r.payload->>'assigned_channel' IS NULL OR r.payload->>'assigned_channel' = %s)""",
+                 AND (r.payload->>'assigned_channel' IS NULL OR r.payload->>'assigned_channel' = %s)"""
+            + (""" AND NOT EXISTS (SELECT 1 FROM notifications nf WHERE r.id = ANY(nf.candidate_raw_item_ids))
+                 ORDER BY random() LIMIT 40""" if category in LIBRARY_CATEGORIES else ""),
             (category, threshold, channel),
         )
         rows = cur.fetchall()
@@ -421,7 +429,7 @@ def get_new_candidates(conn, category: str, channel: str) -> list[dict]:
     # Also compared against items already NOTIFIED in the lookback window
     # (NOTIFIED_DEDUP_LOOKBACK_DAYS): without that, a duplicate that lands in a
     # LATER cycle than its twin's notification is compared against nothing.
-    notified_stories = _recently_notified_stories(conn, category)
+    notified_stories = [] if category in LIBRARY_CATEGORIES else _recently_notified_stories(conn, category)
     deduped = []
     for row in candidates:
         p = row["payload"] or {}
@@ -454,10 +462,15 @@ def get_new_candidates(conn, category: str, channel: str) -> list[dict]:
     # comment; ranking there is real score only, oldest-first ties broken by
     # score alone rather than letting staleness buy rank.
     apply_age_bonus = category not in NO_AGE_BONUS_CATEGORIES
-    candidates.sort(
-        key=lambda row: float(row["score"]) + (_age_bonus(row["collected_at"], now) if apply_age_bonus else 0.0),
-        reverse=True,
-    )
+    if category in LIBRARY_CATEGORIES:
+        import random
+        random.shuffle(candidates)                       # a random unused item, not the best-scoring one (see LIBRARY_CATEGORIES)
+        apply_age_bonus = False
+    else:
+        candidates.sort(
+            key=lambda row: float(row["score"]) + (_age_bonus(row["collected_at"], now) if apply_age_bonus else 0.0),
+            reverse=True,
+        )
 
     if category in SUBJECT_CAP_CATEGORIES:
         seen_subjects, capped = set(), []

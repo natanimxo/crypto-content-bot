@@ -628,6 +628,57 @@ hacks_exploits:
     giving beyond stating the fact of the incident. No emoji beyond what the
     template itself adds.
 
+# ---- We Talk A Lot (operator 2026-11-20): a humor channel that posts the SOURCE'S EXACT WORDS, formatted by code (pipeline/verbatim.py; the model only picks paragraph breaks and hashtags).
+# Phase 1 categories below; the others (dark_history, unusual_deaths, world_records, conspiracies, weird_facts, shower_thoughts, trending_jokes) are added with their sources in phases 2 and 3.
+# Weights are priors. weird_news / satire poll every cycle; jokes is a LIBRARY (collected in bulk, refreshed monthly, drawn at random without repeats).
+weird_news:
+  score_weights:
+    freshness: 0.5
+    quality: 0.3
+    source: 0.2
+  review_threshold: 50
+  cooldown_hours: 24
+  soft_daily_cap: 2           # operator: ~1.5 a day
+  triage_model: template
+  write_model: deepseek-v4-flash      # used only for hashtags and paragraph breaks
+  label: "😵 WEIRD NEWS"
+  emoji: ""
+  display_label: "Weird News"
+  hashtags: []
+  voice: verbatim
+  prompt_notes: "Verbatim channel: the card carries the source's exact words (pipeline/verbatim.py)."
+
+satire:
+  score_weights:
+    freshness: 0.5
+    quality: 0.5
+  review_threshold: 50
+  cooldown_hours: 24
+  soft_daily_cap: 1
+  triage_model: template
+  write_model: deepseek-v4-flash
+  label: "🎭 SATIRE"
+  emoji: ""
+  display_label: "Satire"
+  hashtags: []
+  voice: verbatim
+  prompt_notes: "Verbatim channel: the headline exactly as the source wrote it, credited 'via <source>, satire', no body."
+
+jokes:
+  score_weights:
+    quality: 1.0
+  review_threshold: 50
+  cooldown_hours: 0
+  soft_daily_cap: 1
+  triage_model: template
+  write_model: deepseek-v4-flash
+  label: "🃏 JOKE"
+  emoji: ""
+  display_label: "Jokes"
+  hashtags: []
+  voice: verbatim
+  prompt_notes: "Library category: posted from the library exactly as stored, with hashtags added and nothing rewritten."
+
 technique_explainer:
   # Added 2026-11-20 (operator direction) -- ONE post a week to Crypto Notebook explaining an attack type (DefiLlama's own classification: Key Compromise, Oracle Manipulation, Bridge &
   # Cross-Chain ...) with real incidents from the stored tracker data as examples. No new source: collectors/technique_explainer.py picks the type and the examples from the incidents

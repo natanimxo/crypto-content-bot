@@ -35,7 +35,8 @@ from pipeline.http import _redact  # noqa: E402
 from pipeline.publish import get_channel_display_name, mark_as_sent  # noqa: E402
 from pipeline.run_log import run_log  # noqa: E402
 from pipeline.score import load_category_config  # noqa: E402
-from pipeline.telegram_api import answer_callback_query, edit_message_text, get_updates, send_message  # noqa: E402
+from pipeline import verbatim  # noqa: E402
+from pipeline.telegram_api import answer_callback_query, edit_message_text, get_updates, send_message, send_poll  # noqa: E402
 from pipeline.write_post import generate_post  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -241,6 +242,8 @@ def _send_preview_and_store(conn, approval_id: int, channel: str, category: str,
     ], [
         {"text": "✏️ Edit", "callback_data": f"edit_preview:{preview_id}"},        # reply with the final text; the preview below is replaced in place
     ]]
+    if channel == verbatim.CHANNEL:
+        keyboard[1].append({"text": "📊 Poll", "callback_data": f"poll:{preview_id}"})   # sends the operator a native 2-option poll to forward alongside the post
 
     header_result = send_message(_operator_chat_id(), header_text, reply_markup={"inline_keyboard": keyboard})
     content_a_result = send_message(_operator_chat_id(), variant_a_text, disable_web_page_preview=True)
@@ -467,12 +470,12 @@ def _apply_preview_edit(conn, text: str, reply_to_message_id: int) -> bool:
     """A reply to an Edit-preview prompt: replace the preview's text and the forwardable message in place. True when it matched."""
     with dict_cursor(conn) as cur:
         cur.execute(
-            """SELECT p.id AS preview_id, p.content_message_id FROM post_previews p JOIN approvals a ON a.id = p.approval_id
+            """SELECT p.id AS preview_id, p.content_message_id, p.channel FROM post_previews p JOIN approvals a ON a.id = p.approval_id
                WHERE a.prompt_message_id = %s AND p.status = 'pending'""", (reply_to_message_id,))
         row = cur.fetchone()
     if not row:
         return False
-    content_html = html.escape(text, quote=False)
+    content_html = verbatim.escape_keep_tags(text) if row.get("channel") == verbatim.CHANNEL else html.escape(text, quote=False)
     with dict_cursor(conn) as cur:
         cur.execute("UPDATE post_previews SET variant_a_text = %s, variant_a_model = 'operator_edited' WHERE id = %s", (content_html, row["preview_id"]))
     conn.commit()
@@ -483,6 +486,21 @@ def _apply_preview_edit(conn, text: str, reply_to_message_id: int) -> bool:
             logger.exception("poll: could not edit the preview message in place; sending the edited text as a new message")
             send_message(_operator_chat_id(), content_html, disable_web_page_preview=True)
     return True
+
+
+def _handle_poll(conn, preview_id: int, cq_id: str):
+    """Poll button on a humor-channel preview: send the operator a native 2-option poll (pairs in config/wtal.yaml, the category's own first) to forward next to the post.
+    Whether a forwarded bot poll behaves as a channel poll is for the operator's live test; nothing here posts anywhere."""
+    preview = _fetch_preview(conn, preview_id)
+    if not preview:
+        _safe_ack(cq_id, "Already handled.")
+        return
+    pair = verbatim.poll_for(preview["category"], preview_id)
+    if not pair:
+        _safe_ack(cq_id, "No poll pairs configured.")
+        return
+    send_poll(_operator_chat_id(), pair["question"], list(pair["options"]))
+    _safe_ack(cq_id, "Poll sent -- forward it with the post.")
 
 
 def _handle_mark_sent(conn, preview_id: int, cq_id: str):
@@ -548,6 +566,8 @@ def handle_callback_query(conn, cq: dict) -> dict | None:
         _handle_edit_prompt(conn, target_id, cq["id"])
     elif action == "edit_preview":
         _handle_edit_preview_prompt(conn, target_id, cq["id"])
+    elif action == "poll":
+        _handle_poll(conn, target_id, cq["id"])
     elif action == "mark_sent_a":  # name kept: already-sent preview buttons carry it
         _handle_mark_sent(conn, target_id, cq["id"])
     elif action == "discard":
@@ -599,7 +619,7 @@ def handle_message(conn, msg: dict):
     # typed text — it must be escaped here, once, so _send_preview_and_store's
     # invariant ("variant text is always ready-to-send HTML") holds for every
     # caller. approvals.edited_text above keeps the raw, unescaped original.
-    content_html = html.escape(text, quote=False)
+    content_html = verbatim.escape_keep_tags(text) if row["channel"] == verbatim.CHANNEL else html.escape(text, quote=False)   # the humor channel keeps <tg-spoiler>, <b>, <i> the operator types
     _send_preview_and_store(conn, row["approval_id"], row["channel"], row["category"], row["score"],
                              "operator_edited", content_html)
 

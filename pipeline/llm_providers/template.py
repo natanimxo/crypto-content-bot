@@ -142,6 +142,16 @@ def render_hacks_exploits(raw_item: dict) -> str:
     return " · ".join(parts)
 
 
+def _wtal_line(raw_item: dict) -> str:
+    p = raw_item["payload"]
+    text = (p.get("title") or p.get("body") or "")[:110]
+    return f"{text} · {p.get('source_name') or 'source'}"
+
+
+for _cat in ("weird_news", "satire", "jokes", "dark_history", "unusual_deaths", "world_records", "conspiracies", "weird_facts", "shower_thoughts", "trending_jokes"):
+    register_template(_cat)(_wtal_line)       # the humor channel's cards show the item itself (pipeline/verbatim.py); this line is only the fallback digest text
+
+
 @register_template("technique_explainer")
 def render_technique_explainer(raw_item: dict) -> str:
     """The card line for the weekly explainer: the attack type, how big it is in the tracker, and the incidents the post will cite."""

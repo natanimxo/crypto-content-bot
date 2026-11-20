@@ -2037,6 +2037,10 @@ def generate_post(conn, category: str, channel: str, raw_item: dict) -> str:
     the category supplies facts and guardrails. Anything else (Earn Stack until its
     Phase 5 profile, a category without a FactSpec) takes the legacy path below,
     unchanged."""
+    if channel == "we_talk_a_lot":
+        # the humor channel posts the SOURCE'S exact words, formatted by code (operator 2026-11-20): never the model-written paths below
+        from pipeline import verbatim
+        return verbatim.build(conn, category, raw_item)["text"]
     if category in FACT_SPECS and channel_voice.load_profile(conn, channel) is not None:
         return generate_post_with_report(conn, category, channel, raw_item)["text"]
     prompt, history = _build_prompt_and_history(conn, category, channel, raw_item)

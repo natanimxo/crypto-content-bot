@@ -32,6 +32,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from dotenv import load_dotenv  # noqa: E402
 
+from pipeline import verbatim  # noqa: E402
 from pipeline.alerts import check_and_alert  # noqa: E402
 from pipeline.channel_router import SHARED_CATEGORY_CHANNELS  # noqa: E402
 from pipeline.db import dict_cursor, get_conn  # noqa: E402
@@ -144,14 +145,17 @@ def render_candidates(conn, channel: str, all_candidates: list) -> tuple[str, li
 # approves, edits or skips -- no second wait for a write after the tap. Each draft is its own message (a draft is ~900 characters; a bundle would hit Telegram's 4096 limit).
 # The text is stored on the approval (approvals.draft_text) and Approve sends exactly that text as the forwardable preview. A candidate whose draft cannot be written (a guard kept
 # failing, a model outage) is NOT lost: it goes out as the ordinary triage card, and Approve writes it then, as before.
-DRAFT_FIRST_CHANNELS = {"crypto_notebook"}
+DRAFT_FIRST_CHANNELS = {"crypto_notebook", "we_talk_a_lot"}
 DRAFT_CARD_MAX_CHARS = 3900
 
 
-def render_draft_card(display_name: str, label: str, score_text: str, draft_html: str, raw_item_id: int) -> tuple[str, list]:
-    """(message text, one keyboard row) for a finished draft. `draft_html` is already valid Telegram HTML (post_format.assemble_post), so it is NOT escaped again."""
+def render_draft_card(display_name: str, label: str, score_text: str, draft_html: str, raw_item_id: int, *, original_html: str | None = None, note: str | None = None) -> tuple[str, list]:
+    """(message text, one keyboard row) for a finished draft. `draft_html` is already valid Telegram HTML (post_format.assemble_post), so it is NOT escaped again.
+    `original_html` (the humor channel) is shown BELOW the draft so the operator can compare and edit from either; `note` is a warning line above the draft (e.g. the exact-words check failed)."""
     text = (f"✍️ <b>Finished draft for {html.escape(display_name)}</b>\n<b>{html.escape(label)}</b> — {score_text}\n"
-            f"Approve to get it ready to forward, Edit to change it, Skip to drop it.\n\n{draft_html}")
+            f"Approve to get it ready to forward, Edit to change it, Skip to drop it.\n" + (f"{note}\n" if note else "") + f"\n{draft_html}")
+    if original_html:
+        text += f"\n\n— — —\n{original_html}"
     keyboard = [
         {"text": "✅ Approve", "callback_data": f"approve:{raw_item_id}"},
         {"text": "✏️ Edit", "callback_data": f"edit:{raw_item_id}"},
@@ -179,12 +183,19 @@ def _send_draft_cards(conn, channel: str, candidates: list) -> tuple[list, int |
     display_name = get_channel_display_name(conn, channel)
     rest, last_id = [], None
     for category, row in candidates:
-        draft = _try_draft(conn, category, channel, row)
+        extra = {}
+        if channel == verbatim.CHANNEL:
+            # the source's exact words, formatted by code (pipeline/verbatim.py): never "no draft" -- a failed exact-words check returns the original unformatted, flagged on the card
+            built = verbatim.build(conn, category, {"raw_item_id": row["raw_item_id"], "payload": row["payload"]})
+            draft = built["text"]
+            extra = {"original_html": built["original_html"], "note": None if built["ok"] else "⚠️ <b>Formatting check failed</b> -- this is the ORIGINAL text, unformatted."}
+        else:
+            draft = _try_draft(conn, category, channel, row)
         if not draft:
             rest.append((category, row))
             continue
         cfg = load_category_config(conn, category)
-        text, keyboard = render_draft_card(display_name, cfg.get("label") or category, _score_text(category, row), draft, row["raw_item_id"])
+        text, keyboard = render_draft_card(display_name, cfg.get("label") or category, _score_text(category, row), draft, row["raw_item_id"], **extra)
         if len(text) > DRAFT_CARD_MAX_CHARS:
             logger.warning("notify: draft for raw_item_id=%s is %d characters -- too long for one card, sending the ordinary card", row["raw_item_id"], len(text))
             rest.append((category, row))

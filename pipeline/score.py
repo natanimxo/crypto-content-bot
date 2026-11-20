@@ -893,6 +893,51 @@ def score_technique_explainer(conn, raw_item_id: int, payload: dict) -> dict:
     }
 
 
+# We Talk A Lot (2026-11-20). The humor channel posts the SOURCE'S exact words, so there is no "importance" to score: these only rank freshness and completeness, and keep out a stub or an
+# enormous block of text. All weights are priors. weird_news and satire are ranked by them; the LIBRARY categories (jokes, history ...) are not ranked at all -- a card is a random unused
+# item (pipeline/select_candidates.py LIBRARY_CATEGORIES) -- and only use the length check below as a floor.
+WTAL_SOURCE_TIER = {"upi": 100.0, "lemmy": 75.0, "gnews": 65.0}      # a wire's own summary beats a link aggregator's title
+
+
+def _wtal_age_hours(payload: dict) -> float:
+    try:
+        return max(0.0, (datetime.now(timezone.utc) - datetime.fromisoformat(payload["published_at"])).total_seconds() / 3600)
+    except (KeyError, ValueError, TypeError):
+        return 24.0
+
+
+def _wtal_freshness(payload: dict, window_hours: float) -> float:
+    return round(max(0.0, 100.0 - 100.0 * _wtal_age_hours(payload) / window_hours), 1)
+
+
+def _wtal_text_quality(title: str, body: str, *, title_min=25, title_max=160, body_ideal=(0, 700)) -> float:
+    """Headline of a readable length (a stub or a paragraph is not a headline) and, when there is a body, one that is not enormous."""
+    t = len((title or "").strip())
+    q = 100.0 if title_min <= t <= title_max else 40.0
+    b = len((body or "").strip())
+    if b > body_ideal[1]:
+        q -= min(50.0, (b - body_ideal[1]) / 20.0)
+    return round(max(0.0, q), 1)
+
+
+@register_scorer("weird_news")
+def score_weird_news(conn, raw_item_id: int, payload: dict) -> dict:
+    return {"freshness": _wtal_freshness(payload, 48.0), "quality": _wtal_text_quality(payload.get("title"), payload.get("body")),
+            "source": WTAL_SOURCE_TIER.get(payload.get("source_key"), 60.0)}
+
+
+@register_scorer("satire")
+def score_satire(conn, raw_item_id: int, payload: dict) -> dict:
+    return {"freshness": _wtal_freshness(payload, 72.0), "quality": _wtal_text_quality(payload.get("title"), None, title_min=20, title_max=140)}
+
+
+@register_scorer("jokes")
+def score_jokes(conn, raw_item_id: int, payload: dict) -> dict:
+    """Library item: only a length floor (a one-word entry or an essay is not a joke)."""
+    n = len(((payload.get("body") or "") + (payload.get("title") or "")).strip())
+    return {"quality": 70.0 if 15 <= n <= 500 else 30.0}
+
+
 # exchange_listings (2026-11-15, operator-approved: spot token listings on Binance / OKX / Bybit / KuCoin).
 # Pure function of the stored payload -- the collector already resolved everything (prior listings on the
 # other tracked exchanges, the trading start time), so scoring needs no query.

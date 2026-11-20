@@ -112,6 +112,18 @@ crypto_notebook:
                         # realistically ~1-2/day, so this is a backstop, not a bottleneck
   chat_id: "-1002905948541"   # the channel's original chat_id, from before it was removed 2026-09-20; unused (see top)
 
+we_talk_a_lot:
+  # Added 2026-11-20 (operator): a humor channel, https://t.me/we_talk_a_lot3. The bot never posts to it (the operator forwards from the preview, as for every channel); the chat_id is stored for completeness.
+  # Posts are the SOURCE'S exact words, formatted by code (pipeline/verbatim.py). Phase 1 categories; the cap is the sum of their caps (2 + 1 + 1) and rises to 9 as phases 2 and 3 add the rest.
+  display_name: "We Talk A Lot"
+  categories:
+    - weird_news
+    - satire
+    - jokes
+  region_profile: default
+  soft_daily_cap: 4
+  chat_id: "-1004376927203"
+
 coincraft:
   display_name: "Earn Stack"
   categories:

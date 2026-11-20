@@ -1,0 +1,191 @@
+# We Talk A Lot -- the operator's own file: episode headers, poll pairs, default hashtags and per-category format switches. Read by pipeline/verbatim.py. Edit freely; no code change needed
+# (the header pool is a DRAFT written 2026-11-20 -- "I'll edit them"). Headers are picked by CODE, one per card, cycling through the whole pool before any repeats. The model never writes one.
+
+headers:
+  weird_news:
+    - "On today's episode of: Who approved this reality?"
+    - "[REALITY HAS LOST THE PLOT]"
+    - "On today's episode of: Somebody let the humans out again"
+    - "[THE SIMULATION IS RUNNING ON A BUDGET]"
+    - "On today's episode of: This was in an actual newspaper"
+    - "[NEWS DESK: SEND HELP]"
+    - "On today's episode of: Nobody was supervising"
+    - "[CANNOT BE EXPLAINED. WILL BE REPORTED ANYWAY]"
+    - "On today's episode of: Florida is a state of mind"
+    - "On today's episode of: We should have never invented the internet"
+  satire:
+    - "On today's episode of: Satire has nothing left to do"
+    - "[IT'S FAKE. WE CHECKED. WE'RE STILL NERVOUS]"
+    - "On today's episode of: Reality wrote the sequel"
+    - "[FICTION, BUT JUST]"
+    - "On today's episode of: A headline of questionable honesty"
+    - "[FACT CHECK: GOOD LUCK]"
+    - "On today's episode of: Somebody got paid for this"
+    - "[THE SATIRE WRITERS ARE NOT OKAY]"
+    - "On today's episode of: Too on the nose to be fake"
+    - "[NUKE THE TIMELINE]"
+  jokes:
+    - "[WARNING: CONTAINS JOKE]"
+    - "On today's episode of: Things we shouldn't laugh at"
+    - "[NO REFUNDS]"
+    - "[SPOT IN HEAVEN: -1000 PTS]"
+    - "On today's episode of: Bad ideas, told well"
+    - "[LAUGH AT YOUR OWN RISK]"
+    - "[THE JUDGE IS WATCHING]"
+    - "[HELL WAITLIST: UPDATED]"
+    - "On today's episode of: Okay, that one was a bit much"
+    - "[BADLY RECEIVED AT FUNERALS]"
+  dark_history:
+    - "On today's episode of: History was a mistake"
+    - "[NUKE THE TIMELINE]"
+    - "On today's episode of: The past was unsupervised"
+    - "[SPOT IN HEAVEN: -1000 PTS]"
+    - "On today's episode of: Medieval people had a lot of free time"
+    - "[HISTORY CLASS NEVER MENTIONED THIS]"
+    - "On today's episode of: Everybody involved is dead now"
+    - "[THE SOURCES ARE ABSOLUTELY REAL]"
+    - "On today's episode of: Please do not do this again"
+    - "[THIS HAPPENED. WE CHECKED]"
+  unusual_deaths:
+    - "[SPOT IN HEAVEN: -1000 PTS]"
+    - "On today's episode of: Darwin would like a word"
+    - "[THE LAST WORDS WERE 'WATCH THIS']"
+    - "On today's episode of: A very specific way to go"
+    - "[FINAL DESTINATION, LOW BUDGET EDITION]"
+    - "On today's episode of: Nobody saw that coming. Literally"
+    - "[DEATH HAD TO CHECK THE PAPERWORK]"
+    - "On today's episode of: The obituary was hard to write"
+    - "[THE UNIVERSE HAS A SENSE OF HUMOR]"
+    - "On today's episode of: Natural selection, working overtime"
+  world_records:
+    - "On today's episode of: Nobody asked, they did it anyway"
+    - "[A RECORD NOBODY NEEDED]"
+    - "On today's episode of: Hobbies that got out of hand"
+    - "[OFFICIALLY THE WORLD'S BEST AT THIS]"
+    - "On today's episode of: Somebody trained for this"
+    - "[A WITNESS WAS PRESENT]"
+    - "On today's episode of: Dedication, misdirected"
+    - "[PLACED IN THE RECORD BOOKS]"
+    - "On today's episode of: A very niche world title"
+    - "[THE JUDGES WERE CONSULTED]"
+  conspiracies:
+    - "[THEY SAID IT WAS A CONSPIRACY]"
+    - "On today's episode of: It turns out they were not crazy"
+    - "[TINFOIL HATS: VINDICATED]"
+    - "On today's episode of: Absolutely not, and yet"
+    - "[THE TRUTH IS OUT THERE. IT IS ALSO WRONG]"
+    - "On today's episode of: Do your own research (please don't)"
+    - "[CLASSIFIED. NOT ANYMORE]"
+    - "On today's episode of: A theory has entered the chat"
+    - "[THE GOVERNMENT ADMITS NOTHING]"
+    - "On today's episode of: Some guy on the internet was right"
+  weird_facts:
+    - "On today's episode of: Facts nobody asked for"
+    - "[YOUR BRAIN HAS A NEW TENANT]"
+    - "On today's episode of: This is real, unfortunately"
+    - "[FILE UNDER: WHY]"
+    - "On today's episode of: Things you can't unlearn"
+    - "[THE UNIVERSE IS MESSING WITH US]"
+    - "On today's episode of: Useless knowledge, delivered fresh"
+    - "[NOW YOU KNOW. SORRY]"
+    - "On today's episode of: Reality is weirder than the script"
+    - "[FACT CHECKED. STILL WEIRD]"
+  shower_thoughts:
+    - "[SHOWER THOUGHT: LOCKED IN]"
+    - "On today's episode of: Thoughts that arrive wet"
+    - "[THE WATER IS HOT AND SO IS THIS TAKE]"
+    - "On today's episode of: Deep, and also stupid"
+    - "[BRAIN CELL DETECTED]"
+    - "On today's episode of: Nobody is safe in the shower"
+    - "[THOUGHT PROCESS: UNSUPERVISED]"
+    - "On today's episode of: Too much hot water"
+    - "[3 AM LOGIC, 3 PM EDITION]"
+    - "On today's episode of: Philosophy by accident"
+  trending_jokes:
+    - "On today's episode of: The internet cannot be trusted"
+    - "[TRENDING NOW. HELP]"
+    - "On today's episode of: Everybody is talking about this"
+    - "[THE TIMELINE IS NOT OKAY]"
+    - "On today's episode of: Main character of the day"
+    - "[SOMEBODY LET THE ALGORITHM COOK]"
+    - "On today's episode of: A topic has entered the chat"
+    - "[BREAKING: PEOPLE ARE ONLINE]"
+    - "On today's episode of: We should have never invented the internet"
+    - "[NUKE THE TIMELINE]"
+
+# Poll pairs for the Poll button on a preview (a native 2-option poll sent to the operator to forward). A category's own pairs come first, then `default`.
+polls:
+  default:
+    - {question: "Verdict?", options: ["Straight to jail", "Let them cook"]}
+    - {question: "Rate it", options: ["Spot in heaven", "Spot in hell"]}
+    - {question: "Be honest", options: ["Funny", "Too far"]}
+  weird_news:
+    - {question: "Verdict?", options: ["Straight to jail", "Let them cook"]}
+    - {question: "Would you have done it?", options: ["Obviously", "Never"]}
+    - {question: "Believable?", options: ["Sadly yes", "Absolutely not"]}
+  satire:
+    - {question: "Is it fake?", options: ["Obviously fake", "Sadly plausible"]}
+    - {question: "Could this be real?", options: ["Tomorrow's news", "Pure fiction"]}
+  jokes:
+    - {question: "Rate the joke", options: ["Spot in heaven", "Spot in hell"]}
+    - {question: "Too dark?", options: ["Not dark enough", "Too far"]}
+
+# Default hashtags when the model returns none that pass the checks (2-3, niche).
+hashtag_defaults:
+  weird_news: ["#WeirdNews", "#AbsurdButTrue"]
+  satire: ["#Satire", "#HeadlineOfTheDay"]
+  jokes: ["#DarkHumor", "#OneLiners"]
+  dark_history: ["#DarkHistory", "#BizarreHistory"]
+  unusual_deaths: ["#UnusualDeaths", "#DarwinWouldKnow"]
+  world_records: ["#WorldRecords", "#UselessTalent"]
+  conspiracies: ["#Conspiracies", "#TinfoilTimes"]
+  weird_facts: ["#WeirdFacts", "#UselessKnowledge"]
+  shower_thoughts: ["#ShowerThoughts", "#DeepThoughts"]
+  trending_jokes: ["#TrendingNow", "#TimelineWatch"]
+
+# Per-category format switches.
+#   label        what the model is told the category is (for the hashtags)
+#   source_line  the credit line at the bottom ({source} = the source's name)
+#   spoiler      last_sentence = the final sentence goes inside <tg-spoiler>; last_paragraph = the final paragraph (a joke's delivery); none = no spoiler.
+#                The operator can also type <tg-spoiler>...</tg-spoiler> himself when he taps Edit.
+categories:
+  weird_news:
+    label: "weird and absurd real news"
+    source_line: "Source: {source}"
+    spoiler: last_sentence
+  satire:
+    label: "satire headline"
+    source_line: "via {source}, satire"
+    spoiler: none
+  jokes:
+    label: "dark and other jokes"
+    source_line: "Source: {source}"
+    spoiler: last_paragraph
+  dark_history:
+    label: "dark and bizarre history"
+    source_line: "Source: {source}"
+    spoiler: last_sentence
+  unusual_deaths:
+    label: "unusual deaths"
+    source_line: "Source: {source}"
+    spoiler: last_sentence
+  world_records:
+    label: "absurd world records"
+    source_line: "Source: {source}"
+    spoiler: last_sentence
+  conspiracies:
+    label: "conspiracy theories (true and hilariously wrong)"
+    source_line: "Source: {source}"
+    spoiler: last_sentence
+  weird_facts:
+    label: "weird facts"
+    source_line: "Source: {source}"
+    spoiler: last_sentence
+  shower_thoughts:
+    label: "shower thoughts"
+    source_line: "via {source}"
+    spoiler: none
+  trending_jokes:
+    label: "trending topic"
+    source_line: "Source: {source}"
+    spoiler: none
