@@ -2390,3 +2390,44 @@ passed before stopped passing. Roundup expansion adds ~85 candidate offers from 
 | QuestN | connection error | not built |
 | PartnerStack, Impact, FirstPromoter | marketing pages (200), no listings | not built (the operator: no affiliate networks) |
 The campaign feeds are Earn Stack candidates, separate from exchange_listings. Exchange campaigns and Galxe are `text_api` sources (`earning.SOURCES`): type, payout and deadline are read from the words like a post.
+
+## We Talk A Lot (humor channel), phase 1 (2026-11-20, operator)
+
+Channel `we_talk_a_lot`, https://t.me/we_talk_a_lot3, chat id -1004376927203. Same codebase, bot and approval flow. See HANDOFF.md for the design and the zero-word-changes rule; this section is the decision log and the Railway verification table.
+
+Operator decisions (2026-11-20): ten categories and cadence approved as proposed (weird_news 1.5/day cap 2, satire 1/day, trending_jokes 1/day, dark_history 1/day, unusual_deaths / world_records / conspiracies 3 a week each, weird_facts 1/day, shower_thoughts 1/day, jokes 1/day; channel cap 9 when all are built, at most 2 cards per 4-hour cycle). An episode-header pool per category picked by code (about 10 drafted per category, the operator edits them in config/wtal.yaml). Satire = headline verbatim + "via [source], satire", no body. Shower thoughts as they are, credited. DeepSeek may be used for a yes/no dark-and-bizarre relevance filter when building the phase-2 libraries. Credit Wikipedia ("Source: Wikipedia", CC BY-SA). One slow pass of Guinness and Darwin Awards, rewritten in our own words. JokeAPI: all flags included, the operator decides. No safety limits. `<tg-spoiler>` for every category. Polls: a button on the preview; the operator tests a forward live. Phases: 1 core + weird_news, satire, jokes; 2 libraries; 3 trending. Each phase's sources are verified from Railway and reported before they are built.
+CORRECTION (supersedes "rewrite to a clean draft"): zero word changes. The card is the source's exact words in the same order; code does the formatting, DeepSeek only picks paragraph breaks and hashtags; the output is checked against the original and falls back to the original unformatted; the copy guard is off for this channel.
+
+### Railway verification (run_logs `source_probe`, 2026-11-20 10:36 UTC, 171 probes)
+| Direction | Source | From Railway | Decision |
+|---|---|---|---|
+| weird news | UPI Odd News RSS | 200, 25 items, newest Nov 19 | BUILT (title + summary) |
+| weird news | Lemmy c/nottheonion | 200, 20 items, newest Nov 20 | BUILT (title; META / Reminder posts skipped) |
+| weird news | Google News "florida man" | 200, 73 items | BUILT (headline; " - Publisher" becomes the source) |
+| weird news | Google News "weird OR bizarre OR absurd" | 200, 100 items | not used: returns ordinary news containing the word |
+| weird news | Fark | 200, 50 items | not used: headlines are written by its users |
+| weird news | Fox odd news, News of the Weird, IFLScience, Yahoo odd, Time (406) | 400 / 404 / 403 / 406 | dead |
+| weird news | Newsweek, KTAR, AOL, NewsNow, WDBO pages | 200 HTML, no feed | not built |
+| satire | The Onion, ClickHole, Daily Mash, NewsThump, Beaverton, Shovel, Chaser, Reductress, Duffel Blog, Hard Times, Babylon Bee | 200, 7-30 items each, newest Nov 18-20 | BUILT (headline only). NewsThump is 403 from a dev machine, 200 from Railway |
+| satire | Postillon | 200, 20 items | German: left out |
+| satire | Betoota, The Hard Drive, Al Hudood, WNN | 404 / connection error / SSL / no items | dead |
+| jokes | JokeAPI | 200 | BUILT: all 319 English jokes, all categories and flags, swept by id range |
+| jokes | icanhazdadjoke | 200 | BUILT: 744 (735 after cross-source dedupe) |
+| jokes | chucknorris.io | 200 | not used: ~9,700 entries would swamp every random draw |
+| jokes | Lemmy c/jokes (4 items), c/darkhumor (1), Reddit (429), Official Joke API (503), Excuser, corporate-buzz | | not used |
+| (phase 2) | Wikimedia on-this-day (407), Wikipedia featured / news feed (45), list pages: unusual deaths hub (302 links), unusual articles (104), conspiracy theories list (102) | 200 | candidates for the library builds, to be reported before building |
+| (phase 2) | Guinness records / news, Darwin Awards home | 200 HTML | candidates for the one slow pass (rewritten in our words) |
+| (phase 2) | Lemmy showerthoughts (lemmy.world 20 items, deep paging gives 140+), Listverse (10), Atlas Obscura (27), Mental Floss (77), Strange Company (25), History Collection (10), Snopes (20) | 200 | candidates |
+| (phase 2) | Cracked (404), todayilearned lemmy (0), Reddit RSS (429 / 404), Numbers API (404 / SSL), uselessfacts (0), Britannica (403), history.com (404), Ranker (401) | | dead or empty |
+| (phase 3) | Google Trends RSS (10), Wikipedia top pageviews (1 doc), Bluesky trends (10) | 200 | candidates; Bluesky search 403 |
+| (phase 3) | the eight meme Telegram channels | telegram_probe had not reported at this writing | read its run_logs row (job `telegram_probe`) before deciding |
+
+### Built in phase 1
+- `pipeline/verbatim.py`, `config/wtal.yaml`, hooks in `bot/notify.py` (draft-first, original below the draft), `bot/approval_poller.py` (finished-draft reuse, Poll button, tag-keeping Edit), `pipeline/telegram_api.py` (send_poll), `pipeline/write_post.py` (routes this channel to the builder), `pipeline/select_candidates.py` (library draw: random never-notified, no age bonus), `pipeline/score.py` (weird_news, satire, jokes).
+- `collectors/wtal_news.py` (weird_news, satire), `collectors/wtal_jokes.py` (library, monthly refresh), registered in `scripts/collect_cycle.py`.
+- First jokes pass: 1,054 items (JokeAPI 319: Pun 84, Programming 80, Dark 71, Misc 60, Christmas 14, Spooky 10; dad jokes 735). 9 cross-source duplicates dropped.
+- Hashtags: generic ones (#funny, #news, #weirdnews, #satire ...) are rejected in `verbatim._GENERIC_TAGS` and the model is told to be niche; the per-category defaults in config/wtal.yaml are the fallback.
+- NOT done: phases 2 and 3; YouTube trending (needs a key); the NewsData / FreeNewsApi sources (need keys); BACKLOG's Cracked / Listverse "listicle" sources are candidates only.
+
+### Rekt.news post-mortems -> hacks_exploits (2026-11-20, operator)
+Verified from Railway first (`rekt_rss`, `rekt_home`, run_logs `source_probe` 10:36 UTC): the RSS feed answers 200 but holds 7 opinion essays, newest April 2026, so it is NOT the post-mortem feed; the HOMEPAGE answers 200 with 12 `<article class="post">` blocks, newest Nov 18, no login wall. Built on the homepage (`collectors/rekt.py`): only posts tagged "Rekt" / titled "... - Rekt"; matched to the tracker incident by name (45 days before, 3 after); skipped when the operator already approved or edited a card for that incident; otherwise a tier-2 candidate whose facts attribute the account to Rekt. A page that parses to nothing, or whose newest post is 45+ days old, raises (a visible failure, never a quiet empty run). First live read: `collect_rekt` in the 12:00 UTC cycle.

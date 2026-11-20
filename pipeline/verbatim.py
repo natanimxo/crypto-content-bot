@@ -38,7 +38,7 @@ CARD_ORIGINAL_MAX_CHARS = 1100
 _SENTENCE_SPLIT_RE = re.compile(r'(?<=[.!?…])["”’)\]]*\s+(?=["“‘(\[]?[A-Z0-9])')
 _NO_SPACE_AFTER_STOP_RE = re.compile(r"([a-z0-9][.!?])([A-Z])")
 _TAG_RE = re.compile(r"^#[A-Za-z][A-Za-z0-9]{3,24}$")
-_GENERIC_TAGS = {"#funny", "#lol", "#memes", "#meme", "#viral", "#humor", "#humour", "#fun", "#news", "#joke", "#jokes", "#haha", "#comedy"}
+_GENERIC_TAGS = {"#funny", "#lol", "#memes", "#meme", "#viral", "#humor", "#humour", "#fun", "#news", "#joke", "#jokes", "#haha", "#comedy", "#weirdnews", "#satire", "#satirenews", "#satireheadline", "#headline", "#breakingnews", "#wtf", "#odd", "#oddnews", "#bizarre"}
 _ALLOWED_EDIT_TAGS = ("tg-spoiler", "b", "i", "u", "s", "code")
 
 
@@ -310,4 +310,9 @@ def original_block(payload: dict) -> str:
         text = text[:CARD_ORIGINAL_MAX_CHARS].rstrip() + " [cut for the card]"
     src = payload.get("source_name") or "source"
     link = payload.get("source_url") or payload.get("link") or ""
-    return f"<b>Original</b> ({esc(src)})\n{esc(text)}" + (f"\n{esc(link)}" if link else "")
+    flags = payload.get("flags") if isinstance(payload.get("flags"), dict) else {}
+    marks = [k for k, v in flags.items() if v]
+    extra = ""
+    if payload.get("joke_category") or marks:
+        extra = "\n<i>" + esc(" | ".join(x for x in [payload.get("joke_category") or "", ("flags: " + ", ".join(marks)) if marks else "no flags"] if x)) + "</i>"
+    return f"<b>Original</b> ({esc(src)})\n{esc(text)}" + extra + (f"\n{esc(link)}" if link else "")

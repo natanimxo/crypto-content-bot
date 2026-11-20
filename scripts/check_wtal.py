@@ -141,6 +141,34 @@ def main():
     check("selection: jokes is a library category (random, no repeats); news and satire are time-boxed", ("jokes" in SEL.LIBRARY_CATEGORIES, SEL.FRESHNESS_MAX_AGE_HOURS["weird_news"], SEL.FRESHNESS_MAX_AGE_HOURS["satire"]), (True, 48.0, 72.0))
     check("selection: the library category's cards are not age-bonus ranked", all(c in SEL.NO_AGE_BONUS_CATEGORIES for c in ("weird_news", "satire")), True)
 
+    # ---- collectors (offline: fake feeds)
+    import feedparser
+    from collectors import wtal_jokes as WJ, wtal_news as WN
+    now = datetime(2026, 11, 20, 12, 0, tzinfo=timezone.utc)
+    def rss(items):
+        body = "".join(f"<item><title>{t}</title><link>https://x.test/{i}</link><guid>g{i}</guid><pubDate>{d.strftime('%a, %d %b %Y %H:%M:%S GMT')}</pubDate><description>{s}</description></item>" for i, (t, d, s) in enumerate(items))
+        return feedparser.parse(f"<?xml version='1.0'?><rss version='2.0'><channel><title>f</title>{body}</channel></rss>".encode())
+    hrs = lambda h: now - timedelta(hours=h)
+    upi = WN.weird_items("upi", "UPI", rss([("Man  builds boat out of cheese", hrs(3), "<p>He sailed it &amp; sank.</p><p>Nobody was hurt.</p>"), ("Old odd story from long ago", hrs(200), "x")]), True, now)
+    check("weird news: stale item dropped, text extracted exactly (entities decoded, paragraphs kept)", [(i["payload"]["title"], i["payload"]["body"]) for i in upi], [("Man builds boat out of cheese", "He sailed it & sank.\n\nNobody was hurt.")])
+    lem = WN.weird_items("lemmy", "Lemmy c/nottheonion", rss([("META: Banning Townflex", hrs(1), ""), ("Squirrel elected mayor of tiny town", hrs(2), "")]), False, now)
+    check("weird news: Lemmy community-management posts are skipped, title only", [(i["payload"]["title"], i["payload"]["body"]) for i in lem], [("Squirrel elected mayor of tiny town", "")])
+    g = WN.weird_items("gnews", "Google News", rss([("Florida man rides alligator to work - The Mirror US", hrs(5), "")]), False, now)
+    check("weird news: Google's ' - Publisher' suffix becomes the source, not part of the headline", (g[0]["payload"]["title"], g[0]["payload"]["source_name"]), ("Florida man rides alligator to work", "The Mirror US"))
+    check("weird news: external ids are namespaced by source and the payload carries the fields the builder needs", sorted(upi[0]["payload"]), ["body", "published_at", "source_key", "source_name", "source_url", "title"])
+    sat = WN.satire_items("onion", "The Onion", rss([("Area Man Passionately Hates Thing He Has Never Seen", hrs(10), "body that is not used"), ("Short", hrs(1), "")]), now)
+    check("satire: headline only, no body, too-short stubs dropped", [(i["payload"]["title"], i["payload"]["body"]) for i in sat], [("Area Man Passionately Hates Thing He Has Never Seen", "")])
+    check("same story: the same item worded by two sources collapses; unrelated ones do not", (WN.same_story("Florida man rides alligator to work", "Man in Florida rides an alligator to his work"), WN.same_story("Florida man rides alligator to work", "Squirrel elected mayor of tiny town")), (True, False))
+    kept, dropped = WN._dedupe([{"payload": {"title": "Squirrel elected mayor of tiny town"}}, {"payload": {"title": "Tiny town elects squirrel as mayor"}}, {"payload": {"title": "Unrelated headline about cheese boats"}}], [])
+    check("same story: dedupe keeps one of a pair, counts the drop, and honours already-stored titles", (len(kept), dropped, len(WN._dedupe([{"payload": {"title": "Squirrel elected mayor of tiny town"}}], ["Tiny town elects squirrel mayor"])[0])), (2, 1, 0))
+    tp = WJ.jokeapi_payload({"id": 1, "category": "Dark", "type": "twopart", "setup": "Why?", "delivery": "Because.", "flags": {"racist": True, "nsfw": False}})
+    check("jokes: JokeAPI two-part keeps its parts, category and all flags", (tp["body_parts"], tp["joke_category"], tp["flags"]["racist"], tp["source_name"]), (["Why?", "Because."], "Dark", True, "JokeAPI"))
+    check("jokes: an empty delivery is not a joke", WJ.jokeapi_payload({"id": 2, "type": "twopart", "setup": "Why?", "delivery": "", "flags": {}}), None)
+    check("jokes: dedupe key ignores case, punctuation and spacing", WJ.norm_key("Why did the chicken -- cross?") == WJ.norm_key("why did the CHICKEN cross"), True)
+    orig = V.original_block(tp)
+    check("jokes: the card's original block shows the category and the flags that are set", ("Dark | flags: racist" in orig, "JokeAPI" in orig), (True, True))
+    check("jokes: Dark JokeAPI ranks above other JokeAPI above dad jokes", (SC.score_jokes(None, 1, tp | {"body": "x" * 30})["quality"], SC.score_jokes(None, 1, {"body": "x" * 30, "source_key": "jokeapi", "joke_category": "Pun"})["quality"], SC.score_jokes(None, 1, {"body": "x" * 30, "source_key": "dad"})["quality"]), (80.0, 75.0, 70.0))
+
     # ---- config
     chans = yaml.safe_load(open(os.path.join(ROOT, "config", "channel_config.yaml"), encoding="utf-8"))
     ch = chans["we_talk_a_lot"]

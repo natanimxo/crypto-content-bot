@@ -933,9 +933,12 @@ def score_satire(conn, raw_item_id: int, payload: dict) -> dict:
 
 @register_scorer("jokes")
 def score_jokes(conn, raw_item_id: int, payload: dict) -> dict:
-    """Library item: only a length floor (a one-word entry or an essay is not a joke)."""
+    """Library item: a length floor (a one-word entry or an essay is not a joke), and a mild preference for the operator's brief ("dark + other"): JokeAPI Dark 80, other JokeAPI 75, dad jokes 70.
+    Without it the 744 dad jokes would be two of every three draws against JokeAPI's 319."""
     n = len(((payload.get("body") or "") + (payload.get("title") or "")).strip())
-    return {"quality": 70.0 if 15 <= n <= 500 else 30.0}
+    if not 15 <= n <= 500:
+        return {"quality": 30.0}
+    return {"quality": 80.0 if payload.get("joke_category") == "Dark" else 75.0 if payload.get("source_key") == "jokeapi" else 70.0}
 
 
 # exchange_listings (2026-11-15, operator-approved: spot token listings on Binance / OKX / Bybit / KuCoin).

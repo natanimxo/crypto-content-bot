@@ -21,7 +21,7 @@ from dotenv import load_dotenv  # noqa: E402
 from bot import notify  # noqa: E402
 from collectors import (  # noqa: E402
     defi_yields, earning_opportunities, exchange_listings, gems_security, hacks_exploits, macro_news, news, startup_jobs, startup_news,
-    rekt, technique_explainer, tool_launches, whale_alert, whale_movements, zachxbt,
+    rekt, technique_explainer, tool_launches, whale_alert, whale_movements, wtal_jokes, wtal_news, zachxbt,
 )
 from pipeline import llm_usage  # noqa: E402
 from pipeline.alerts import check_and_alert  # noqa: E402
@@ -66,6 +66,10 @@ COLLECTORS = {
     "rekt": rekt.collect,
     # technique of the week (2026-11-20) -> Crypto Notebook: one explainer per ISO week on an attack type, from the incidents stored above (so after hacks_exploits and zachxbt).
     "technique_explainer": technique_explainer.collect,
+    # We Talk A Lot (humor channel, 2026-11-20), phase 1: two polled categories and the jokes library (bulk once, monthly refresh; a no-op on every other cycle). Items are the sources' exact words (pipeline/verbatim.py).
+    "weird_news": wtal_news.collect_weird_news,
+    "satire": wtal_news.collect_satire,
+    "jokes": wtal_jokes.collect,
     # startup_news (Phase 6, 2026-11-16) -> Hustle to Million: Tech.eu / Sifted / TechCrunch Venture RSS, funding with a stated amount and acquisitions.
     "startup_news": startup_news.collect,
     # exchange_listings, added 2026-11-15 (Phase 4) -- four keyless exchange announcement APIs, no GoPlus/rate-limit
