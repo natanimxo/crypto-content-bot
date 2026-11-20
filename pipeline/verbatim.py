@@ -275,10 +275,15 @@ def build(conn, category: str, raw_item: dict, *, use_model: bool = True, seed: 
     header = pick_header(category, seed)
     tag_line = esc(" ".join(tags)) if tags else ""
     src = source_line(category, payload)
+    dateline = (payload.get("dateline") or "").strip()
+    if dateline and not cfg.get("source_line_with_dateline"):
+        src = ""                                                # "BBC, 20 Nov:" at the top already names the outlet (satire keeps its "via X, satire" label)
     blocks = []
     if header:
         blocks.append(esc(header))
     top = []
+    if dateline:
+        top.append(esc(dateline))                               # outlet and day, then the bold title
     if title_html:
         top.append(title_html)
     if tag_line and title_html:

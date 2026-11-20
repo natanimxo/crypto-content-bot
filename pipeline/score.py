@@ -896,7 +896,7 @@ def score_technique_explainer(conn, raw_item_id: int, payload: dict) -> dict:
 # We Talk A Lot (2026-11-20). The humor channel posts the SOURCE'S exact words, so there is no "importance" to score: these only rank freshness and completeness, and keep out a stub or an
 # enormous block of text. All weights are priors. weird_news and satire are ranked by them; the LIBRARY categories (jokes, history ...) are not ranked at all -- a card is a random unused
 # item (pipeline/select_candidates.py LIBRARY_CATEGORIES) -- and only use the length check below as a floor.
-WTAL_SOURCE_TIER = {"upi": 100.0, "lemmy": 75.0, "gnews": 65.0}      # a wire's own summary beats a link aggregator's title
+WTAL_SOURCE_TIER = {"upi": 70.0, "lemmy": 80.0}      # 2026-11-20: UPI's feed gives only a one-sentence lede (its pages answer Cloudflare 403), a Lemmy link post opens the real article
 
 
 def _wtal_age_hours(payload: dict) -> float:
@@ -910,11 +910,16 @@ def _wtal_freshness(payload: dict, window_hours: float) -> float:
     return round(max(0.0, 100.0 - 100.0 * _wtal_age_hours(payload) / window_hours), 1)
 
 
-def _wtal_text_quality(title: str, body: str, *, title_min=25, title_max=160, body_ideal=(0, 700)) -> float:
-    """Headline of a readable length (a stub or a paragraph is not a headline) and, when there is a body, one that is not enormous."""
+def _wtal_text_quality(title: str, body: str, *, title_min=25, title_max=160, body_ideal=(0, 1000), thin_penalty=30.0) -> float:
+    """Headline of a readable length (a stub or a paragraph is not a headline) and an article opening to go with it (operator 2026-11-20: a bare headline reads like a joke, not news). A card with NO body
+    (the source genuinely gave nothing more) is ranked below every card that has one; a one-sentence lede is ranked a little below a full opening; an enormous body is trimmed back."""
     t = len((title or "").strip())
     q = 100.0 if title_min <= t <= title_max else 40.0
     b = len((body or "").strip())
+    if b == 0:
+        q -= thin_penalty
+    elif b < 150:
+        q -= thin_penalty / 3
     if b > body_ideal[1]:
         q -= min(50.0, (b - body_ideal[1]) / 20.0)
     return round(max(0.0, q), 1)
@@ -928,7 +933,7 @@ def score_weird_news(conn, raw_item_id: int, payload: dict) -> dict:
 
 @register_scorer("satire")
 def score_satire(conn, raw_item_id: int, payload: dict) -> dict:
-    return {"freshness": _wtal_freshness(payload, 72.0), "quality": _wtal_text_quality(payload.get("title"), None, title_min=20, title_max=140)}
+    return {"freshness": _wtal_freshness(payload, 72.0), "quality": _wtal_text_quality(payload.get("title"), payload.get("body"), title_min=20, title_max=140, thin_penalty=25.0)}
 
 
 @register_scorer("jokes")

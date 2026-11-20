@@ -141,34 +141,89 @@ def main():
     check("selection: jokes is a library category (random, no repeats); news and satire are time-boxed", ("jokes" in SEL.LIBRARY_CATEGORIES, SEL.FRESHNESS_MAX_AGE_HOURS["weird_news"], SEL.FRESHNESS_MAX_AGE_HOURS["satire"]), (True, 48.0, 72.0))
     check("selection: the library category's cards are not age-bonus ranked", all(c in SEL.NO_AGE_BONUS_CATEGORIES for c in ("weird_news", "satire")), True)
 
-    # ---- collectors (offline: fake feeds)
+    # ---- collectors (offline: fake feeds and a fake page fetcher)
     import feedparser
     from collectors import wtal_jokes as WJ, wtal_news as WN
+    from pipeline import article as AR
     now = datetime(2026, 11, 20, 12, 0, tzinfo=timezone.utc)
     def rss(items):
-        body = "".join(f"<item><title>{t}</title><link>https://x.test/{i}</link><guid>g{i}</guid><pubDate>{d.strftime('%a, %d %b %Y %H:%M:%S GMT')}</pubDate><description>{s}</description></item>" for i, (t, d, s) in enumerate(items))
+        body = "".join(f"<item><title>{t}</title><link>{l}</link><guid>g{i}</guid><pubDate>{d.strftime('%a, %d %b %Y %H:%M:%S GMT')}</pubDate><description><![CDATA[{s}]]></description></item>" for i, (t, d, s, l) in enumerate(items))
         return feedparser.parse(f"<?xml version='1.0'?><rss version='2.0'><channel><title>f</title>{body}</channel></rss>".encode())
     hrs = lambda h: now - timedelta(hours=h)
-    upi = WN.weird_items("upi", "UPI", rss([("Man  builds boat out of cheese", hrs(3), "<p>He sailed it &amp; sank.</p><p>Nobody was hurt.</p>"), ("Old odd story from long ago", hrs(200), "x")]), True, now)
-    check("weird news: stale item dropped, text extracted exactly (entities decoded, paragraphs kept)", [(i["payload"]["title"], i["payload"]["body"]) for i in upi], [("Man builds boat out of cheese", "He sailed it & sank.\n\nNobody was hurt.")])
-    lem = WN.weird_items("lemmy", "Lemmy c/nottheonion", rss([("META: Banning Townflex", hrs(1), ""), ("Squirrel elected mayor of tiny town", hrs(2), "")]), False, now)
-    check("weird news: Lemmy community-management posts are skipped, title only", [(i["payload"]["title"], i["payload"]["body"]) for i in lem], [("Squirrel elected mayor of tiny town", "")])
-    g = WN.weird_items("gnews", "Google News", rss([("Florida man rides alligator to work - The Mirror US", hrs(5), "")]), False, now)
-    check("weird news: Google's ' - Publisher' suffix becomes the source, not part of the headline", (g[0]["payload"]["title"], g[0]["payload"]["source_name"]), ("Florida man rides alligator to work", "The Mirror US"))
-    check("weird news: external ids are namespaced by source and the payload carries the fields the builder needs", sorted(upi[0]["payload"]), ["body", "published_at", "source_key", "source_name", "source_url", "title"])
-    sat = WN.satire_items("onion", "The Onion", rss([("Area Man Passionately Hates Thing He Has Never Seen", hrs(10), "body that is not used"), ("Short", hrs(1), "")]), now)
-    check("satire: headline only, no body, too-short stubs dropped", [(i["payload"]["title"], i["payload"]["body"]) for i in sat], [("Area Man Passionately Hates Thing He Has Never Seen", "")])
+    class FakeFetcher:
+        def __init__(self, pages): self.pages, self.asked = pages, []
+        def get(self, url):
+            self.asked.append(url)
+            return self.pages.get(url, {"outlet": "", "date": None, "paragraphs": [], "status": "http_403"})
+    PAGE = "<html><head><meta property='og:site_name' content='CNA'><meta property='article:published_time' content='2026-11-20T03:00:00+00:00'></head><body><nav><p>Menu item that is long enough to be a real paragraph of text</p></nav><article><div class='content-detail__description'><p>Standfirst that restates the whole story in one line for the front page.</p></div><div class='category-news tag-a post-1 status-publish'><p>By Staff Writer</p><p>SINGAPORE: A woman sued her driver after he braked for a chicken, but lost the case in court on Thursday.</p><p>The judge said the incident was caused by a chicken crossing the road and was part of life.</p><p>A third paragraph that must not be included in the card at all.</p></div></article></body></html>"
+    pg = AR.from_html(PAGE, "https://www.channelnewsasia.com/x")
+    check("article: outlet from og:site_name, the article's own date, standfirst / byline / nav skipped, the first body paragraphs verbatim (a third is not added)", (pg["outlet"], pg["date"].day, pg["paragraphs"]), ("CNA", 20, ["SINGAPORE: A woman sued her driver after he braked for a chicken, but lost the case in court on Thursday.", "The judge said the incident was caused by a chicken crossing the road and was part of life."]))
+    check("article: dateline is 'Outlet, 20 Nov:' (no date -> 'Outlet:')", (AR.dateline("BBC", datetime(2026, 11, 20, tzinfo=timezone.utc)), AR.dateline("BBC", None)), ("BBC, 20 Nov:", "BBC:"))
+    check("article: a page with no usable paragraph says so (paywall / bot wall) instead of inventing one", AR.from_html("<html><body><p>Short.</p><p>Please enable cookies to continue reading this article on our website today.</p></body></html>", "https://x.test/")["paragraphs"], [])
+    check("article: the second paragraph is dropped when it would push the total past 900 characters", len(AR._pick(["a" * 700, "b" * 400])), 1)
+    check("article: a feed fragment gives its own first paragraphs, 'The post X appeared first on' lines are not the lede", AR.paragraphs_from_fragment("<p>The opening paragraph of the satire piece, written in full by the outlet.</p><p>The post <a href='x'>T</a> appeared first on <a>Y</a>.</p>")[0].startswith("The opening paragraph"), True)
+
+    lem_feed = rss([("META: Banning Townflex", hrs(1), "x", "https://lemmy.world/post/1"),
+                    ("Woman loses suit against driver over incident caused by chicken crossing road", hrs(2), 'submitted by <a href="https://lemmy.zip/u/a">a</a> to <a href="https://lemmy.world/c/nottheonion">n</a><br />39 points<br /><a href="https://www.channelnewsasia.com/sg/chicken">https://www.channelnewsasia.com/sg/chicken</a>', "https://lemmy.world/post/2"),
+                    ("A text post that links to no article at all, only talks", hrs(2), "submitted by a to n<p>just words</p>", "https://lemmy.world/post/3"),
+                    ("Old odd story from long ago that nobody posts now", hrs(300), '<br /><a href="https://x.test/old">x</a>', "https://lemmy.world/post/4")])
+    ents = WN.weird_entries("lemmy", lem_feed, now)
+    check("weird news: Lemmy keeps only fresh LINK posts (META, text posts and stale ones are skipped)", [e["title"][:20] for e in ents], ["Woman loses suit aga"])
+    ff = FakeFetcher({"https://www.channelnewsasia.com/sg/chicken": {"outlet": "CNA", "date": None, "paragraphs": ["SINGAPORE: A woman sued her driver.", "The judge dismissed it."], "status": "ok"}})
+    wp = WN.weird_payload("lemmy", "Lemmy c/nottheonion", ents[0], ff)
+    check("weird news: the article is opened, its paragraphs become the body, the dateline is the outlet and day", (wp["body"], wp["dateline"], wp["body_source"], wp["source_url"]), ("SINGAPORE: A woman sued her driver.\n\nThe judge dismissed it.", "CNA, 20 Nov:", "page", "https://www.channelnewsasia.com/sg/chicken"))
+    ff2 = FakeFetcher({})
+    wp2 = WN.weird_payload("lemmy", "Lemmy c/nottheonion", ents[0], ff2)
+    check("weird news: an article that cannot be opened is a headline-only card, flagged body_source=none, outlet from the link's domain", (wp2["body"], wp2["body_source"], wp2["dateline"]), ("", "none", "channelnewsasia.com, 20 Nov:"))
+    upi_feed = rss([("Pepper pileup closes two lanes of busy Florida road", hrs(3), '<img src="x.jpg" /> Authorities in Florida said two lanes of a busy roadway were temporarily closed when a truck lost 19 pallets of peppers.', "https://www.upi.com/Odd_News/a")])
+    up = WN.weird_payload("upi", "UPI", WN.weird_entries("upi", upi_feed, now)[0], FakeFetcher({}))
+    check("weird news: UPI's lede comes from the feed when its page cannot be opened (image tag removed)", (up["body"], up["body_source"], up["dateline"]), ("Authorities in Florida said two lanes of a busy roadway were temporarily closed when a truck lost 19 pallets of peppers.", "feed", "UPI, 20 Nov:"))
+    sat_feed = rss([("Area Man Passionately Hates Thing He Has Never Seen", hrs(10), "<p>WASHINGTON—An area man announced Thursday that he passionately hates a thing he has never seen, in a statement of some length.</p><p>Second.</p>", "https://theonion.com/a"),
+                    ("Satire headline with nothing underneath it at all", hrs(5), "", "https://reductress.com/b"), ("Short", hrs(1), "", "https://x.test/c")])
+    sents = WN.satire_entries("onion", sat_feed, now)
+    check("satire: stubs dropped, fresh headlines kept", [s["title"][:10] for s in sents], ["Area Man P", "Satire hea"])
+    sp = WN.satire_payload("onion", "The Onion", sents[0], FakeFetcher({}))
+    check("satire: the feed's own opening paragraph is the body, the dateline names the outlet and day", (sp["body"][:20], sp["dateline"], sp["body_source"]), ("WASHINGTON—An area m", "The Onion, 20 Nov:", "feed"))
+    sp0 = WN.satire_payload("reductress", "Reductress", sents[1], FakeFetcher({}))
+    check("satire: nothing in the feed and the page will not open -> headline-only, flagged", (sp0["body"], sp0["body_source"]), ("", "none"))
+    check("fetcher: a site that answered an error is not asked again in the same run; Cloudflare-walled sites are never asked", (WN.Fetcher().blocked >= {"upi.com", "thedailymash.co.uk"},), (True,))
     check("same story: the same item worded by two sources collapses; unrelated ones do not", (WN.same_story("Florida man rides alligator to work", "Man in Florida rides an alligator to his work"), WN.same_story("Florida man rides alligator to work", "Squirrel elected mayor of tiny town")), (True, False))
     kept, dropped = WN._dedupe([{"payload": {"title": "Squirrel elected mayor of tiny town"}}, {"payload": {"title": "Tiny town elects squirrel as mayor"}}, {"payload": {"title": "Unrelated headline about cheese boats"}}], [])
     check("same story: dedupe keeps one of a pair, counts the drop, and honours already-stored titles", (len(kept), dropped, len(WN._dedupe([{"payload": {"title": "Squirrel elected mayor of tiny town"}}], ["Tiny town elects squirrel mayor"])[0])), (2, 1, 0))
+    # the card
+    full = V.build(None, "weird_news", {"raw_item_id": 9, "payload": wp}, seed=0, use_model=False)
+    lines = full["text"].split("\n")
+    check("card (news): header, then 'CNA, 20 Nov:', then the bold title, then the hashtags; no bottom 'Source:' line; the check passed", (lines[2], lines[3].startswith("<b>Woman loses"), lines[4].startswith("#"), "Source:" in full["text"], full["ok"]), ("CNA, 20 Nov:", True, True, False, True))
+    check("card (news): the article's own words follow, the last sentence in a spoiler", ("SINGAPORE: A woman sued her driver." in full["text"], "<tg-spoiler>The judge dismissed it.</tg-spoiler>" in full["text"]), (True, True))
+    sat = V.build(None, "satire", {"raw_item_id": 10, "payload": sp}, seed=0, use_model=False)
+    check("card (satire): dateline on top AND the 'via The Onion, satire' label at the bottom; the check passed", (sat["text"].split("\n")[2], sat["text"].endswith("via The Onion, satire"), sat["ok"]), ("The Onion, 20 Nov:", True, True))
+    check("scoring: a card with an article opening outranks the same headline alone", (SC.score_weird_news(None, 1, wp | {"published_at": hrs(2).isoformat()})["quality"] > SC.score_weird_news(None, 1, wp2 | {"published_at": hrs(2).isoformat()})["quality"], SC.score_satire(None, 1, sp | {"published_at": hrs(2).isoformat()})["quality"] > SC.score_satire(None, 1, sp0 | {"published_at": hrs(2).isoformat()})["quality"]), (True, True))
+    # dark jokes
     tp = WJ.jokeapi_payload({"id": 1, "category": "Dark", "type": "twopart", "setup": "Why?", "delivery": "Because.", "flags": {"racist": True, "nsfw": False}})
     check("jokes: JokeAPI two-part keeps its parts, category and all flags", (tp["body_parts"], tp["joke_category"], tp["flags"]["racist"], tp["source_name"]), (["Why?", "Because."], "Dark", True, "JokeAPI"))
     check("jokes: an empty delivery is not a joke", WJ.jokeapi_payload({"id": 2, "type": "twopart", "setup": "Why?", "delivery": "", "flags": {}}), None)
     check("jokes: dedupe key ignores case, punctuation and spacing", WJ.norm_key("Why did the chicken -- cross?") == WJ.norm_key("why did the CHICKEN cross"), True)
+    check("jokes: only the Dark category is fetched", WJ.JOKEAPI_CATEGORIES, "Dark")
+    import pipeline.llm as LLM
+    real = LLM.generate_write
+    try:
+        LLM.generate_write = lambda conn, cat, prompt: '{"verdicts": [true, false, true]}'
+        ok3 = WJ.dark_verdicts(None, ["a", "b", "c"])
+        LLM.generate_write = lambda conn, cat, prompt: '{"verdicts": [true]}'
+        short = WJ.dark_verdicts(None, ["a", "b", "c"])
+        LLM.generate_write = lambda conn, cat, prompt: "I cannot help with that"
+        junk = WJ.dark_verdicts(None, ["a", "b"])
+        def boom(*a, **k): raise RuntimeError("model down")
+        LLM.generate_write = boom
+        down = WJ.dark_verdicts(None, ["a"])
+    finally:
+        LLM.generate_write = real
+    check("jokes: the DeepSeek check keeps yes / no per joke in order", ok3, [True, False, True])
+    check("jokes: a wrong-length, unparseable or failed answer is UNKNOWN (None), never a yes", (short, junk, down), ([None, None, None], [None, None], [None]))
     orig = V.original_block(tp)
     check("jokes: the card's original block shows the category and the flags that are set", ("Dark | flags: racist" in orig, "JokeAPI" in orig), (True, True))
-    check("jokes: Dark JokeAPI ranks above other JokeAPI above dad jokes", (SC.score_jokes(None, 1, tp | {"body": "x" * 30})["quality"], SC.score_jokes(None, 1, {"body": "x" * 30, "source_key": "jokeapi", "joke_category": "Pun"})["quality"], SC.score_jokes(None, 1, {"body": "x" * 30, "source_key": "dad"})["quality"]), (80.0, 75.0, 70.0))
-
+    check("jokes: Dark JokeAPI scores above other sources", (SC.score_jokes(None, 1, tp | {"body": "x" * 30})["quality"], SC.score_jokes(None, 1, {"body": "x" * 30, "source_key": "jokeapi", "joke_category": "Pun"})["quality"]), (80.0, 75.0))
+    check("headers: the jokes pool is the dark pool (no pun-friendly lines), one pool per category", (all(h for h in V.load_config()["headers"]["jokes"]), "jokes" in V.load_config()["headers"], "weird_news" in V.load_config()["headers"], "satire" in V.load_config()["headers"]), (True, True, True, True))
     check("notify: the humor channel is limited to 2 cards per cycle in total", N.CHANNEL_PER_CYCLE_LIMIT.get("we_talk_a_lot"), 2)
 
     # ---- config

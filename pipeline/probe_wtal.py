@@ -106,6 +106,9 @@ WTAL_PROBES = [
     {"id": "t_wikipedia_news_feed", "dir": T, "url": f"https://api.wikimedia.org/feed/v1/wikipedia/en/featured/{_YMD}"},
     # ---- jokes
     {"id": "j_jokeapi_dark", "dir": J, "url": "https://v2.jokeapi.dev/joke/Dark?amount=10"},
+    # 2026-11-20 (operator: dark jokes only, "JokeAPI's Dark category and dark-joke sources"): Lemmy's API from Railway, for the two communities that could feed the dark library (each joke would go through the DeepSeek dark check)
+    {"id": "j_lemmy_jokes_api", "dir": J, "url": "https://lemmy.world/api/v3/post/list?community_name=jokes&sort=New&limit=50"},
+    {"id": "j_lemmy_darkhumor_api", "dir": J, "url": "https://lemmy.world/api/v3/post/list?community_name=darkhumor&sort=New&limit=50"},
     {"id": "j_jokeapi_info", "dir": J, "url": "https://v2.jokeapi.dev/info"},
     {"id": "j_chucknorris", "dir": J, "url": "https://api.chucknorris.io/jokes/random"},
     {"id": "j_chucknorris_dev", "dir": J, "url": "https://api.chucknorris.io/jokes/random?category=dev"},

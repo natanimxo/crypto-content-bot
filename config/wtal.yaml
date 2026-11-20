@@ -134,7 +134,7 @@ polls:
 hashtag_defaults:
   weird_news: ["#WeirdNews", "#AbsurdButTrue"]
   satire: ["#Satire", "#HeadlineOfTheDay"]
-  jokes: ["#DarkHumor", "#OneLiners"]
+  jokes: ["#DarkHumor", "#BlackComedy"]
   dark_history: ["#DarkHistory", "#BizarreHistory"]
   unusual_deaths: ["#UnusualDeaths", "#DarwinWouldKnow"]
   world_records: ["#WorldRecords", "#UselessTalent"]
@@ -151,14 +151,15 @@ hashtag_defaults:
 categories:
   weird_news:
     label: "weird and absurd real news"
-    source_line: "Source: {source}"
+    source_line: "Source: {source}"      # dropped on a card that has the "Outlet, 20 Nov:" line on top (that line names the outlet)
     spoiler: last_sentence
   satire:
-    label: "satire headline"
-    source_line: "via {source}, satire"
-    spoiler: none
+    label: "satire article"
+    source_line: "via {source}, satire"      # kept even though the card also has the "Outlet, 20 Nov:" line on top: it is what says "satire"
+    source_line_with_dateline: true
+    spoiler: last_sentence
   jokes:
-    label: "dark and other jokes"
+    label: "dark jokes"
     source_line: "Source: {source}"
     spoiler: last_paragraph
   dark_history:
