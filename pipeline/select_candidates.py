@@ -175,7 +175,7 @@ AGE_BONUS_MAX_POINTS = 12.0
 # as good as a fresh one (a job posting, a tool, a yield pool). For
 # time-sensitive categories, older is WORSE, not owed a turn for waiting; see
 # FRESHNESS_MAX_AGE_HOURS below for the harder cutoff on the same principle.
-NO_AGE_BONUS_CATEGORIES = {"news", "macro_news", "whale_movements", "hacks_exploits", "exchange_listings"}
+NO_AGE_BONUS_CATEGORIES = {"news", "macro_news", "whale_movements", "hacks_exploits", "exchange_listings", "technique_explainer"}
 # hacks_exploits added 2026-09-30 -- a confirmed past incident is the same
 # "older is worse, not owed a turn" shape as news/macro_news/whale_movements,
 # just on a longer real-world clock (DefiLlama's own feed lags by days, not
@@ -206,6 +206,8 @@ FRESHNESS_MAX_AGE_HOURS = {
     # days (live-observed, 2026-09-30: newest entry was already 3 days old at
     # collection time), not because a hack matters longer than a headline.
     "hacks_exploits": 336.0,
+    # technique_explainer (2026-11-20): one a week, so it stays eligible for its own week (7 days) and no longer -- next week brings the next type.
+    "technique_explainer": 168.0,
 }
 
 

@@ -851,6 +851,48 @@ def score_hacks_exploits(conn, raw_item_id: int, payload: dict) -> dict:
     }
 
 
+# technique_explainer (2026-11-20, operator): one weekly explainer on an attack type, built from the stored DefiLlama incidents (collectors/technique_explainer.py).
+# It is an editorial item, not a news item: the collector creates exactly one per ISO week and only for a type with real depth, so these weights rank WITHIN that
+# guarantee (they are priors; there is no decision history for this category) and are sized so any eligible type clears the review threshold of 50 -- a test pins that.
+#   impact        how much the type matters: how many incidents the tracker holds (half) and how much they cost (half), both log-scaled
+#   novelty       how long since this type was last explained (never = 100; a type explained last week = 80, falling no lower than 70 -- a floor, because this item is created once a week
+#                 and a score under the threshold would make it vanish without a trace)
+#   credibility   the type has three real named examples to cite -- the data completeness the post depends on
+#   actionability a flat 80: every type has checks a reader can run themselves (the post's third paragraph)
+TECHNIQUE_EXPLAINER_COUNT_FLOOR = 10
+TECHNIQUE_EXPLAINER_COUNT_CEILING = 150
+TECHNIQUE_EXPLAINER_LOSS_FLOOR = 100_000_000
+TECHNIQUE_EXPLAINER_LOSS_CEILING = 20_000_000_000
+
+
+def _technique_impact(payload: dict) -> float:
+    by_count = _log_scale(payload.get("incident_count") or 0, TECHNIQUE_EXPLAINER_COUNT_FLOOR, TECHNIQUE_EXPLAINER_COUNT_CEILING)
+    by_loss = _log_scale(payload.get("total_lost_usd") or 0.0, TECHNIQUE_EXPLAINER_LOSS_FLOOR, TECHNIQUE_EXPLAINER_LOSS_CEILING)
+    return round(0.5 * by_count + 0.5 * by_loss, 1)
+
+
+def _technique_novelty(conn, payload: dict) -> float:
+    with dict_cursor(conn) as cur:
+        cur.execute("SELECT MAX(collected_at) AS last FROM raw_items WHERE category = 'technique_explainer' AND payload->>'technique_type' = %s "
+                    "AND payload->>'week' <> %s", (payload.get("technique_type"), payload.get("week")))
+        row = cur.fetchone()
+    last = row["last"] if row else None
+    if not last:
+        return 100.0
+    weeks = max(0.0, (datetime.now(timezone.utc) - last).total_seconds() / (7 * 86400))
+    return round(min(100.0, 70.0 + 10.0 * weeks), 1)
+
+
+@register_scorer("technique_explainer")
+def score_technique_explainer(conn, raw_item_id: int, payload: dict) -> dict:
+    return {
+        "impact": _technique_impact(payload),
+        "novelty": _technique_novelty(conn, payload),
+        "credibility": 100.0 if len(payload.get("examples") or []) >= 3 else 60.0,
+        "actionability": 80.0,
+    }
+
+
 # exchange_listings (2026-11-15, operator-approved: spot token listings on Binance / OKX / Bybit / KuCoin).
 # Pure function of the stored payload -- the collector already resolved everything (prior listings on the
 # other tracked exchanges, the trading start time), so scoring needs no query.

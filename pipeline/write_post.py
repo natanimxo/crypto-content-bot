@@ -1045,6 +1045,49 @@ _EARN_URL_RE = re.compile(r"https?://|www\.", re.IGNORECASE)
 _EARN_STEP_LINE_RE = re.compile(r"^\s*\d+[.)]\s+(.+)$", re.MULTILINE)
 EARNING_CHECKED_CATEGORIES = {"earning_opportunities"}
 
+# technique_explainer (2026-11-20): a post about an ATTACK TYPE that cites real incidents. Every dollar figure, count and year in it must come from the facts, and at least two of the
+# example incidents must actually be named -- an explainer with no incident in it is the generic essay the operator did not ask for. Same code-level-check-not-a-prompt-request rule
+# as every guard above. A figure may be ROUNDED the way post_facts.usd_words rounds it (within 6% of a fact), never changed.
+EXPLAINER_CHECKED_CATEGORIES = {"technique_explainer"}
+_EXPLAINER_AMOUNT_RE = re.compile(r"\$\s?(\d[\d,]*(?:\.\d+)?)\s?(billion|million|thousand|bn|b|m|k)?\b", re.IGNORECASE)
+_EXPLAINER_COUNT_RE = re.compile(r"\b(\d[\d,]*)\s+(?:\w+\s+)?(?:incidents?|hacks?|exploits?|attacks?|cases?|thefts?)\b", re.IGNORECASE)
+_EXPLAINER_YEAR_RE = re.compile(r"\b(?:19|20)\d{2}\b")
+_EXPLAINER_UNIT = {"billion": 1e9, "bn": 1e9, "b": 1e9, "million": 1e6, "m": 1e6, "thousand": 1e3, "k": 1e3}
+
+
+def _find_explainer_issues(parsed: dict, payload: dict) -> list[str]:
+    title = str(parsed.get("title", ""))
+    text = "\n".join([title] + [str(x) for x in (parsed.get("paragraphs") or [])])
+    examples = payload.get("examples") or []
+    allowed_amounts = [payload.get("total_lost_usd"), payload.get("last12_lost_usd"), 500_000.0]
+    for e in examples:
+        allowed_amounts += [e.get("amount_usd"), e.get("returned_usd")]
+    allowed_amounts = [float(a) for a in allowed_amounts if a]
+    allowed_counts = {int(payload.get("incident_count") or 0), int(payload.get("last12_count") or 0)} | {int(t["count"]) for t in (payload.get("top_techniques") or [])}
+    allowed_years = {int(payload["first_year"])} if payload.get("first_year") else set()
+    allowed_years |= {int(e["date"][:4]) for e in examples if e.get("date")}
+    if payload.get("last_incident"):
+        allowed_years.add(int(payload["last_incident"][:4]))
+    issues = []
+    for m in _EXPLAINER_AMOUNT_RE.finditer(text):
+        value = float(m.group(1).replace(",", "")) * _EXPLAINER_UNIT.get((m.group(2) or "").lower(), 1)
+        if not any(abs(value - a) <= 0.06 * a for a in allowed_amounts):
+            issues.append(f"the amount {m.group(0).strip()} is not one of the facts' figures -- use only the amounts the facts give")
+            break
+    for m in _EXPLAINER_COUNT_RE.finditer(text):
+        n = int(m.group(1).replace(",", ""))
+        if n not in allowed_counts and not (1900 <= n <= 2100):
+            issues.append(f"the count \"{m.group(0)}\" is not in the facts -- use only the incident counts the facts give")
+            break
+    for y in sorted({int(x) for x in _EXPLAINER_YEAR_RE.findall(text)}):
+        if y not in allowed_years:
+            issues.append(f"the year {y} is not in the facts -- use only the years the facts give (the examples' and the tracker's first year)")
+            break
+    named = [e["name"] for e in examples if e.get("name") and e["name"].lower() in text.lower()]
+    if len(named) < min(2, len(examples)):
+        issues.append("name at least two of the example incidents from the facts, by name, with their month and year and amount")
+    return issues
+
 
 def _earn_words(text: str) -> set[str]:
     stop = {"the", "and", "you", "your", "for", "with", "that", "this", "then", "into", "from", "will", "are", "can", "any", "all"}
@@ -1273,6 +1316,12 @@ def compute_hacks_exploits_elements(conn, raw_item: dict, history: list) -> dict
     risk_line = "; ".join(parts) + "."
 
     return {"history_line": None, "risk_line": risk_line, "source_name": "DefiLlama"}
+
+
+@register_post_computer("technique_explainer")
+def compute_technique_explainer_elements(conn, raw_item: dict, history: list) -> dict:
+    """No evidence line and no history: the examples and the tracker's scale are IN the post, where the guard checks them. Only the source is added."""
+    return {"history_line": None, "risk_line": None, "source_name": "DefiLlama"}
 
 
 @register_prompt_builder("exchange_listings")
@@ -1821,7 +1870,7 @@ NEUTRALITY_CHECKED_CATEGORIES = {"macro_news"}
 # Categories whose written output gets checked against
 # _find_speculation_issues -- see that function's docstring and
 # _generate_checked_write's check_no_speculation param.
-SPECULATION_CHECKED_CATEGORIES = {"hacks_exploits"}
+SPECULATION_CHECKED_CATEGORIES = {"hacks_exploits", "technique_explainer"}
 
 
 # earning_opportunities from the platform sources (Superteam, Zindi) carries a real steps list, a prize ladder and eligibility, so a draft lands a few
@@ -1956,6 +2005,8 @@ def generate_post_with_report(conn, category: str, channel: str, raw_item: dict,
             hits += _find_listing_issues(parsed, raw_item["payload"])
         if category in EARNING_CHECKED_CATEGORIES:
             hits += _find_earning_issues(parsed, raw_item["payload"])
+        if category in EXPLAINER_CHECKED_CATEGORIES:
+            hits += _find_explainer_issues(parsed, raw_item["payload"])
         chars = channel_voice.measure(assemble(str(parsed.get("title", "")), parsed["paragraphs"], final=False))
         return hits + channel_voice.find_voice_issues(profile, parsed, chars, facts_have_figures)
 

@@ -135,6 +135,14 @@ def render_hacks_exploits(raw_item: dict) -> str:
     return " · ".join(parts)
 
 
+@register_template("technique_explainer")
+def render_technique_explainer(raw_item: dict) -> str:
+    """The card line for the weekly explainer: the attack type, how big it is in the tracker, and the incidents the post will cite."""
+    p = raw_item["payload"]
+    names = ", ".join(e["name"] for e in (p.get("examples") or []))
+    return f"Technique of the week: {p.get('technique_type')} · {p.get('incident_count')} incidents in DefiLlama's record" + (f" · examples: {names}" if names else "")
+
+
 @register_template("exchange_listings")
 def render_exchange_listings(raw_item: dict) -> str:
     """The digest line (operator, 2026-11-15: "which exchange, and how many of the four already list it -- a first

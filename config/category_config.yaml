@@ -628,6 +628,33 @@ hacks_exploits:
     giving beyond stating the fact of the incident. No emoji beyond what the
     template itself adds.
 
+technique_explainer:
+  # Added 2026-11-20 (operator direction) -- ONE post a week to Crypto Notebook explaining an attack type (DefiLlama's own classification: Key Compromise, Oracle Manipulation, Bridge &
+  # Cross-Chain ...) with real incidents from the stored tracker data as examples. No new source: collectors/technique_explainer.py picks the type and the examples from the incidents
+  # hacks_exploits already holds, once per ISO week. The post is written on Approve in Notebook's explainer voice; pipeline/write_post.py refuses any figure, count or year not in the facts.
+  # Weights are priors (pipeline/score.py) sized so every eligible type clears the threshold -- a test pins that; this category is editorial, so the threshold is not a quality gate here.
+  score_weights:
+    impact: 0.35          # how many incidents the tracker holds for the type (half) and how much they cost (half), log-scaled
+    novelty: 0.25         # how long since the type was last explained (never = 100)
+    credibility: 0.25     # three real named examples to cite
+    actionability: 0.15   # flat 80: every type has checks a reader can run
+  review_threshold: 50
+  cooldown_hours: 144     # one a week by construction; a belt-and-braces 6 days on the same topic
+  soft_daily_cap: 1
+  triage_model: template
+  write_model: deepseek-v4-flash
+  label: "🧭 TECHNIQUE OF THE WEEK"
+  emoji: "🧭"
+  display_label: "Technique of the Week"
+  hashtags:
+    - "#DeFiSecurity"
+    - "#HowItWorks"
+  voice: educational
+  prompt_notes: >
+    Teach an attack type using only the tracker facts given: the type, the tracker's own counts and totals, and the example incidents with their month, year, amount and
+    DefiLlama's technique label. Explain the general mechanism in plain words. Never describe how a specific incident was carried out beyond its label, never name or imply an
+    attacker or a motive, never add an incident or a figure that is not in the facts, no advice about money.
+
 exchange_listings:
   # Added 2026-11-15 (Phase 4, operator direction) -- new SPOT token listings announced by Binance, OKX, Bybit and
   # KuCoin, for Crypto Wall Street only. Perpetuals, futures, tokenized stocks, new trading pairs and delistings are

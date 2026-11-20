@@ -186,6 +186,52 @@ def facts_hacks_exploits(p: dict) -> str:
 - Recovery status: {recovery_note}"""
 
 
+def usd_words(x: float) -> str:
+    """'$1.5 billion', '$283 million', '$3.4 million', '$720,000' -- a figure the way a reader says it. The explainer guard (pipeline/write_post.py) accepts a post figure only if it is
+    within a few percent of one of these, so rounding here is the one place a figure may be softened."""
+    x = float(x or 0)
+    if x >= 1e9:
+        return f"${x / 1e9:.1f} billion"
+    if x >= 1e7:
+        return f"${x / 1e6:.0f} million"
+    if x >= 1e6:
+        return f"${x / 1e6:.1f} million"
+    return f"${x:,.0f}"
+
+
+def month_year(iso_date: str) -> str:
+    import datetime as _dt
+    try:
+        d = _dt.date.fromisoformat(iso_date[:10])
+        return f"{d.strftime('%B')} {d.year}"
+    except (TypeError, ValueError):
+        return ""
+
+
+def facts_technique_explainer(p: dict) -> str:
+    ex_lines = []
+    for n, e in enumerate(p.get("examples") or [], 1):
+        if not e.get("returned_usd"):
+            rec = "no funds recovered as of the tracker's record"
+        elif e["returned_usd"] > e["amount_usd"]:
+            # the tracker's recovery figure can exceed the recorded loss (Euler V1: $240M back on $197M lost, the returned amount counted at a later price): never print a figure that reads as nonsense
+            rec = "funds were returned according to the tracker (state no recovery figure)"
+        else:
+            rec = f"{usd_words(e['returned_usd'])} recovered"
+        ex_lines.append(
+            f"  {n}. {e['name']} -- {month_year(e['date'])} -- lost {usd_words(e['amount_usd'])} (exactly ${e['amount_usd']:,.0f}) -- chain: {e.get('chain') or 'not specified'} -- "
+            f"DefiLlama's technique label: {e.get('technique') or 'not specified'} -- {rec}")
+    techs = ", ".join(f"{t['technique']} ({t['count']})" for t in (p.get("top_techniques") or [])) or "not specified"
+    return f"""Facts about this ATTACK TYPE (all from DefiLlama's own incident tracker; its counts cover only incidents of $500,000 or more, so they describe the tracker's record, not every incident that ever happened):
+- Attack type (DefiLlama's own classification): {p.get('technique_type')}
+- Incidents of this type in the tracker: {p.get('incident_count')}, recorded from {p.get('first_year')} on, totalling about {usd_words(p.get('total_lost_usd'))}
+- In the last 12 months: {p.get('last12_count')} incident(s), about {usd_words(p.get('last12_lost_usd'))}
+- The most common technique labels within this type: {techs}
+- Real incidents you may cite as examples -- state each ONLY as given, and cite at least two:
+{chr(10).join(ex_lines)}
+- You may NOT mention any other incident, protocol, figure, count or year."""
+
+
 def listing_record_window(p: dict) -> str | None:
     """'Mar 2026' -- how far back EVERY other tracked exchange's record reaches (the latest of their start dates).
     This is the window a "no earlier listing" statement is true for, and it can be short: KuCoin's announcement API
@@ -587,6 +633,31 @@ FACT_SPECS: dict[str, FactSpec] = {
             "'suspected to be'). Never say a recovery is likely or unlikely beyond the recovery status "
             "given. Never tell the reader what to do with their own money. " + _NO_SCORES
         ),
+    ),
+    "technique_explainer": FactSpec(
+        audience=None,
+        facts=facts_technique_explainer,
+        content_brief=(
+            "Teach this ATTACK TYPE, not one headline. Say plainly what the weakness is and how an attacker uses it -- the general mechanism, with any term of art defined the first "
+            "time it appears. Ground it in the real incidents above (at least two): name each, give its month and year and its amount exactly as the facts do, and state its technique "
+            "as DefiLlama's own label -- never describe how that specific incident was carried out beyond the label. Give the tracker's scale (how many incidents, how much) only as the "
+            "facts state it, and say it is the tracker's record. Then say what a reader can check themselves."
+        ),
+        role_overrides={
+            1: ("What this attack type is, in plain words, and how big it is in the tracker's record (the incident count and the total, only as the facts give them) -- "
+                "so the reader knows why it deserves a post."),
+            2: ("How it works: the general mechanism and why it succeeds, then at least two of the real incidents from the facts as examples -- name, month and year, amount and "
+                "DefiLlama's technique label, each exactly as given."),
+            3: ("How to spot it yourself: what a reader can look at on ANY protocol to see whether it has this kind of exposure (public audit reports, admin and key controls, oracle "
+                "sources, upgrade permissions, who can change what) -- where to look and what to look for. Never a verdict on any named protocol, never an instruction about money."),
+        },
+        guardrails=(
+            "HARD RULES, no exceptions: use ONLY the incidents, names, dates, amounts, counts and years in the facts -- never add another incident, a figure, a count or a year, and never "
+            "round a figure into a different one. Never say how a cited incident was carried out beyond its technique label. Never speculate on who caused anything or why -- no attacker "
+            "identity or motive, nothing about an inside job. Never use hedge-words that smuggle in an unconfirmed claim ('allegedly', 'apparently', 'suspected to be'). Never say a protocol "
+            "is safe or unsafe. Never tell the reader what to do with their own money. " + _NO_SCORES
+        ),
+        title_figures=False,
     ),
     "exchange_listings": FactSpec(
         audience=None,

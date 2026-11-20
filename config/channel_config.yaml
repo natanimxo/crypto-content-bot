@@ -106,8 +106,9 @@ crypto_notebook:
                        # threshold (50) since 2026-09-11, 9 of them notified.
     - hacks_exploits  # moved here from coincraft 2026-11-15 (Phase 3): confirmed incidents are the
                        # same "learn to spot it" material as the security findings.
+    - technique_explainer   # 2026-11-20 (operator): one explainer a week on an attack type, with real incidents from the tracker as examples
   region_profile: default
-  soft_daily_cap: 8    # = the two category caps (4 + 4), as for the other channels; combined demand is
+  soft_daily_cap: 9    # = the three category caps (4 + 4 + 1), as for the other channels; combined demand is
                         # realistically ~1-2/day, so this is a backstop, not a bottleneck
   chat_id: "-1002905948541"   # the channel's original chat_id, from before it was removed 2026-09-20; unused (see top)
 

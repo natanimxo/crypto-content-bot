@@ -21,7 +21,7 @@ from dotenv import load_dotenv  # noqa: E402
 from bot import notify  # noqa: E402
 from collectors import (  # noqa: E402
     defi_yields, earning_opportunities, exchange_listings, gems_security, hacks_exploits, macro_news, news, startup_jobs, startup_news,
-    tool_launches, whale_alert, whale_movements, zachxbt,
+    technique_explainer, tool_launches, whale_alert, whale_movements, zachxbt,
 )
 from pipeline import llm_usage  # noqa: E402
 from pipeline.alerts import check_and_alert  # noqa: E402
@@ -62,6 +62,8 @@ COLLECTORS = {
     "hacks_exploits": hacks_exploits.collect,
     # ZachXBT's investigations channel -> hacks_exploits (2026-11-16): reports an incident hours-to-days before DefiLlama; deduped by protocol name.
     "zachxbt": zachxbt.collect,
+    # technique of the week (2026-11-20) -> Crypto Notebook: one explainer per ISO week on an attack type, from the incidents stored above (so after hacks_exploits and zachxbt).
+    "technique_explainer": technique_explainer.collect,
     # startup_news (Phase 6, 2026-11-16) -> Hustle to Million: Tech.eu / Sifted / TechCrunch Venture RSS, funding with a stated amount and acquisitions.
     "startup_news": startup_news.collect,
     # exchange_listings, added 2026-11-15 (Phase 4) -- four keyless exchange announcement APIs, no GoPlus/rate-limit
