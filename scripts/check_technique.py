@@ -100,6 +100,43 @@ def main():
     line = TPL.TEMPLATES["technique_explainer"]({"payload": p})
     check("triage line names the type, the scale and the examples", all(s in line for s in ("Token & Share Accounting", "11 incidents", "Euler V1")), True)
 
+    # ---- Rekt.news post-mortems (markup copied from the live homepage, 2026-11-20)
+    from collectors import rekt as RK
+
+    def art(slug, title, date, tags, excerpt):
+        tag_html = "<span> - </span>".join(f'<span><a href="/?tag={t.replace(" ", "+")}">{t}</a></span>' for t in tags)
+        return (f'<article class="post "><header class="post-header"><h5 class="post-title"><a href="/{slug}"> <!-- -->{title}</a></h5><hr/><span class="post-meta"><time>{date}</time><p>{tag_html}</p></span><hr/></header>'
+                f'<section class="post-excerpt"><p>{excerpt}</p><p class="post-excerpt-more"><a href="/{slug}">MORE</a></p></section></article>')
+    kava = art("kava-lend-rekt", "Kava Lend - Rekt", "Wednesday, November 18, 2026", ["Kava Lend", "Rekt"],
+               "A dormant BUSD market remained exploitable as Kava�s lending protocol was being wound down. An accounting flaw inflated a few thousand BUSD into a 1.25 billion BUSD claim, worth about $3.76 million at pre-attack prices.")
+    binance = art("binance-rekt", "Binance - Rekt", "Friday, November 6, 2026", ["Binance", "Operational Security", "Rekt"],
+                  "A fake job interview led to Binance�s signing service, and $6.43 billion left across 11 chains. About $2.85 billion was frozen or intercepted.")
+    essay = art("is-the-internet-rekt", "Is the Internet Rekt?", "Tuesday, November 3, 2026", ["Operational Security", "Artificial Intelligence", "Cybersecurity"], "Real exploits. Stolen secrets.")
+    arts = RK.parse_articles("<html><body><main>" + kava + binance + essay + "</main></body></html>")
+    check("rekt: every post block is parsed (title, date, tags, excerpt, url)", (len(arts), arts[0]["title"], arts[0]["date"].date().isoformat(), arts[0]["tags"], arts[0]["url"]),
+          (3, "Kava Lend - Rekt", "2026-11-18", ["Kava Lend", "Rekt"], "https://www.rekt.news/kava-lend-rekt"))
+    check("rekt: only post-mortems (tag 'Rekt' or a '- Rekt' title) are incidents; an essay is not", [RK.is_postmortem(a) for a in arts], [True, True, False])
+    check("rekt: the protocol name comes from the title", [RK.protocol_name(a) for a in arts[:2]], ["Kava Lend", "Binance"])
+    check("rekt: the amount is the first million/billion figure in the excerpt", (RK.first_amount(arts[0]["excerpt"]), RK.first_amount(arts[1]["excerpt"]), RK.first_amount("No figure here.")), (3760000.0, 6430000000.0, None))
+    check("rekt: a page that is not the homepage parses to nothing (the collector then RAISES, never a quiet empty run)", RK.parse_articles("<html>Just a moment...</html>"), [])
+    ex = [{"raw_item_id": 11, "name": "Kava Lend", "when": datetime(2026, 11, 14, tzinfo=timezone.utc)}, {"raw_item_id": 12, "name": "Kava Lend", "when": datetime(2025, 1, 5, tzinfo=timezone.utc)},
+          {"raw_item_id": 13, "name": "Binance CEX", "when": datetime(2019, 5, 7, tzinfo=timezone.utc)}, {"raw_item_id": 14, "name": "Initia", "when": datetime(2026, 10, 23, tzinfo=timezone.utc)}]
+    check("rekt: matched to the tracker's incident of the SAME name within 45 days before the post (not the 2025 one)", (RK.match_sibling("Kava Lend", arts[0]["date"], ex) or {}).get("raw_item_id"), 11)
+    check("rekt: a 2019 incident of a similar name is not the same event", RK.match_sibling("Binance", arts[1]["date"], ex), None)
+    check("rekt: a name that is only a short fragment does not match by substring", RK.match_sibling("Ini", datetime(2026, 10, 28, tzinfo=timezone.utc), ex), None)
+    tracker = {"amount_usd": 3.7e6, "classification": "Token & Share Accounting", "technique": "Incorrect Share Accounting", "chain": "Kava", "chains": ["Kava"], "returned_funds": None, "defillama_id": "1", "protocol_tvl_usd": 1.2e7, "protocol_category": "Lending"}
+    pl = RK.to_payload(arts[0], {"raw_item_id": 11}, tracker)
+    check("rekt: payload is a hacks item with the tracker's facts, Rekt's excerpt, tier 2 and the earlier card's id", (pl["source"], pl["source_tier"], pl["amount_usd"], pl["classification"], pl["topic_key"], pl["followup_of_raw_item_id"], pl["description"] == pl["claim_text"]), ("rekt", 2, 3.7e6, "Token & Share Accounting", "kava lend", 11, True))
+    pl2 = RK.to_payload(arts[1], None, None)
+    check("rekt: unmatched -> amount from the excerpt, no tracker facts, no follow-up id", (pl2["amount_usd"], pl2["classification"], pl2["followup_of_raw_item_id"]), (6430000000.0, None, None))
+    check("rekt: the scorer accepts both payloads (unknown tracker data is neutral, never an error)", (isinstance(SC._hacks_impact(pl), float), isinstance(SC._hacks_impact(pl2), float), SC._hacks_impact(dict(pl2, amount_usd=None)) >= 0), (True, True, True))
+    facts_m, facts_u = PF.facts_hacks_exploits(pl), PF.facts_hacks_exploits(pl2)
+    check("rekt facts: Rekt's account is attributed and the tracker's fields appear when matched", all(s in facts_m for s in ("Rekt.news", "attribute it to Rekt", "Token & Share Accounting", "Incorrect Share Accounting")), True)
+    check("rekt facts: an incident the tracker lacks says so and forbids a classification, technique or chain", "not in DefiLlama's tracker -- do not state a classification" in facts_u, True)
+    check("rekt triage line: a follow-up says it follows the earlier card; an unmatched one says it is not in the tracker",
+          (TPL.TEMPLATES["hacks_exploits"]({"payload": pl}).endswith("follows the earlier card for this incident"), "not in DefiLlama's tracker" in TPL.TEMPLATES["hacks_exploits"]({"payload": pl2})), (True, True))
+    check("rekt wiring: in the cycle, scored as hacks_exploits", all(s in open(os.path.join(root, "scripts", "collect_cycle.py"), encoding="utf-8").read() for s in ('"rekt": rekt.collect', '"rekt": "hacks_exploits"')), True)
+
     # ---- finished drafts on Crypto Notebook (draft-first channels): written before the card, stored on the approval, reused on Approve; a failed draft is NOT lost
     from bot import approval_poller as AP
     from bot import notify as N

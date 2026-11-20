@@ -126,6 +126,13 @@ def render_macro_news(raw_item: dict) -> str:
 def render_hacks_exploits(raw_item: dict) -> str:
     p = raw_item["payload"]
     tvl = p.get("protocol_tvl_usd")
+    if p.get("source") == "rekt":
+        # a Rekt.news post-mortem: say so, and say when it follows a card already sent for the same incident (one incident is one event -- never a silent duplicate)
+        amount = f"${p['amount_usd']:,.0f} lost" if p.get("amount_usd") else "amount not stated"
+        parts = [f"{p.get('protocol_name')}: Rekt post-mortem, {amount}", f"DefiLlama: {p['classification']}" if p.get("classification") else "not in DefiLlama's tracker"]
+        if p.get("followup_of_raw_item_id"):
+            parts.append("follows the earlier card for this incident")
+        return " · ".join(parts)
     parts = [
         f"{p.get('protocol_name')}: ${p.get('amount_usd', 0):,.0f} lost ({p.get('classification') or 'unclassified'})",
         f"TVL ${tvl:,.0f}" if tvl is not None else "TVL not tracked",

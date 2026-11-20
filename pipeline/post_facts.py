@@ -176,6 +176,16 @@ def facts_hacks_exploits(p: dict) -> str:
     tvl_note = f"${tvl:,.0f}" if tvl is not None else "not tracked by DefiLlama"
     returned = p.get("returned_funds")
     recovery_note = f"${returned:,.0f} recovered" if returned else "no funds recovered as of this report"
+    if p.get("source") == "rekt":
+        # A POST-MORTEM by the security publication Rekt.news, usually of an incident DefiLlama's tracker already lists. Rekt's excerpt is the only account of WHAT FAILED; the tracker's fields are
+        # added when it has the incident. Everything in the account is Rekt's, and nothing may be added to it.
+        tracker = (f"amount lost ${p.get('amount_usd', 0):,.0f}; classification {p.get('classification')}; technique {p.get('technique') or 'not specified'}; chain {p.get('chain') or 'not specified'}; "
+                   f"{recovery_note}" if p.get("classification") else "this incident is not in DefiLlama's tracker -- do not state a classification, technique, chain or recovery status")
+        return f"""Facts about this incident (a POST-MORTEM published by the security publication Rekt.news, with DefiLlama's tracker entry when it has one):
+- Protocol/platform: {p.get('protocol_name')}
+- Rekt's own account of what happened (its published excerpt -- attribute it to Rekt, never state it as your own finding): "{p.get('claim_text')}"
+- DefiLlama's tracker entry: {tracker}
+- If Rekt's figure differs from the tracker's, give each with its source. Never name an attacker or a motive unless the excerpt does, and never add a detail the excerpt does not state."""
     return f"""Facts about this incident (confirmed by DefiLlama's own incident tracker, not your judgment):
 - Protocol/platform: {p.get('protocol_name')}
 - Amount lost: ${p.get('amount_usd', 0):,.0f}

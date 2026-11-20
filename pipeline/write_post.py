@@ -1306,8 +1306,11 @@ def compute_hacks_exploits_elements(conn, raw_item: dict, history: list) -> dict
     "unknown is never coded as clear" posture as gems_security's own
     risk_line: an untracked protocol says so, it doesn't go silent."""
     p = raw_item["payload"]
+    if p.get("source") == "rekt" and not p.get("classification"):
+        # a Rekt post-mortem of an incident the tracker does not list: there is no tracker line to show
+        return {"history_line": None, "risk_line": None, "source_name": "Rekt.news"}
     tvl = p.get("protocol_tvl_usd")
-    parts = [f"DefiLlama: ${p.get('amount_usd', 0):,.0f} lost, classified as {p.get('classification') or 'unclassified'}"]
+    parts = [f"DefiLlama: ${p.get('amount_usd') or 0:,.0f} lost, classified as {p.get('classification') or 'unclassified'}"]
     if p.get("chain"):
         parts.append(f"chain: {p['chain']}")
     parts.append(f"protocol TVL: ${tvl:,.0f}" if tvl is not None else "protocol TVL not tracked by DefiLlama")
@@ -1315,7 +1318,7 @@ def compute_hacks_exploits_elements(conn, raw_item: dict, history: list) -> dict
         parts.append(f"${p['returned_funds']:,.0f} recovered")
     risk_line = "; ".join(parts) + "."
 
-    return {"history_line": None, "risk_line": risk_line, "source_name": "DefiLlama"}
+    return {"history_line": None, "risk_line": risk_line, "source_name": "Rekt.news and DefiLlama" if p.get("source") == "rekt" else "DefiLlama"}
 
 
 @register_post_computer("technique_explainer")
