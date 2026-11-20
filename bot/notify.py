@@ -140,6 +140,67 @@ def render_candidates(conn, channel: str, all_candidates: list) -> tuple[str, li
     return "\n".join(lines), keyboard_rows
 
 
+# Channels whose candidates arrive as FINISHED DRAFTS (operator 2026-11-20, Crypto Notebook): the post is written BEFORE the card is sent, the card IS the draft, and the operator only
+# approves, edits or skips -- no second wait for a write after the tap. Each draft is its own message (a draft is ~900 characters; a bundle would hit Telegram's 4096 limit).
+# The text is stored on the approval (approvals.draft_text) and Approve sends exactly that text as the forwardable preview. A candidate whose draft cannot be written (a guard kept
+# failing, a model outage) is NOT lost: it goes out as the ordinary triage card, and Approve writes it then, as before.
+DRAFT_FIRST_CHANNELS = {"crypto_notebook"}
+DRAFT_CARD_MAX_CHARS = 3900
+
+
+def render_draft_card(display_name: str, label: str, score_text: str, draft_html: str, raw_item_id: int) -> tuple[str, list]:
+    """(message text, one keyboard row) for a finished draft. `draft_html` is already valid Telegram HTML (post_format.assemble_post), so it is NOT escaped again."""
+    text = (f"✍️ <b>Finished draft for {html.escape(display_name)}</b>\n<b>{html.escape(label)}</b> — {score_text}\n"
+            f"Approve to get it ready to forward, Edit to change it, Skip to drop it.\n\n{draft_html}")
+    keyboard = [
+        {"text": "✅ Approve", "callback_data": f"approve:{raw_item_id}"},
+        {"text": "✏️ Edit", "callback_data": f"edit:{raw_item_id}"},
+        {"text": "❌ Skip", "callback_data": f"reject:{raw_item_id}"},
+    ]
+    return text, keyboard
+
+
+def _try_draft(conn, category: str, channel: str, row: dict) -> str | None:
+    """The finished post for this candidate, or None when it cannot be written (the caller then sends the ordinary card)."""
+    from pipeline.write_post import generate_post          # imported here: the write path pulls the model clients, which a notify run without drafts never needs
+    raw_item = {"raw_item_id": row["raw_item_id"], "payload": row["payload"], "collected_at": row.get("collected_at"), "score": row["score"], "score_breakdown": row.get("score_breakdown")}
+    try:
+        return generate_post(conn, category, channel, raw_item)
+    except Exception:
+        logger.exception("notify: no draft for raw_item_id=%s (%s) -- sending the ordinary card instead", row["raw_item_id"], category)
+        return None
+
+
+def _send_draft_cards(conn, channel: str, candidates: list) -> tuple[list, int | None]:
+    """Write and send a finished-draft card per candidate. Returns (the candidates that still need an ordinary card, the id of the last draft notification or None)."""
+    operator_chat_id = os.environ.get("TELEGRAM_OPERATOR_CHAT_ID")
+    if not operator_chat_id:
+        raise RuntimeError("TELEGRAM_OPERATOR_CHAT_ID is not set")
+    display_name = get_channel_display_name(conn, channel)
+    rest, last_id = [], None
+    for category, row in candidates:
+        draft = _try_draft(conn, category, channel, row)
+        if not draft:
+            rest.append((category, row))
+            continue
+        cfg = load_category_config(conn, category)
+        text, keyboard = render_draft_card(display_name, cfg.get("label") or category, _score_text(category, row), draft, row["raw_item_id"])
+        if len(text) > DRAFT_CARD_MAX_CHARS:
+            logger.warning("notify: draft for raw_item_id=%s is %d characters -- too long for one card, sending the ordinary card", row["raw_item_id"], len(text))
+            rest.append((category, row))
+            continue
+        result = send_message(operator_chat_id, text, reply_markup={"inline_keyboard": [keyboard]}, disable_web_page_preview=True)
+        # persisted only after a successful send, as for every card: a failed send leaves the candidate "new" and it is retried next cycle
+        with dict_cursor(conn) as cur:
+            cur.execute("INSERT INTO notifications (channel, candidate_raw_item_ids, telegram_message_id) VALUES (%s, %s, %s) RETURNING id",
+                        (channel, [row["raw_item_id"]], result["message_id"]))
+            last_id = cur.fetchone()["id"]
+            cur.execute("INSERT INTO approvals (notification_id, raw_item_id, decision, draft_text) VALUES (%s, %s, 'pending', %s)", (last_id, row["raw_item_id"], draft))
+        conn.commit()
+        logger.info("notify: channel=%s sent a finished draft for raw_item_id=%s notification_id=%s", channel, row["raw_item_id"], last_id)
+    return rest, last_id
+
+
 def notify_channel(conn, channel: str, categories: list[str], soft_daily_cap: int | None = None) -> int | None:
     all_candidates = []  # list of (category, row)
     for category in categories:
@@ -185,6 +246,12 @@ def notify_channel(conn, channel: str, categories: list[str], soft_daily_cap: in
 
     if not all_candidates:
         return None
+
+    draft_notification_id = None
+    if channel in DRAFT_FIRST_CHANNELS:
+        all_candidates, draft_notification_id = _send_draft_cards(conn, channel, all_candidates)
+        if not all_candidates:
+            return draft_notification_id
 
     # Build the whole message and keyboard BEFORE writing anything to the DB.
     # Buttons reference raw_item_id (not an approval_id) precisely so nothing

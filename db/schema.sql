@@ -332,6 +332,10 @@ CREATE TABLE IF NOT EXISTS domain_checks (
     checked_at TIMESTAMPTZ NOT NULL
 );
 
+-- 2026-11-20: a finished draft written BEFORE the operator's tap (channels in bot/notify.py DRAFT_FIRST_CHANNELS: Crypto Notebook). NULL = the usual flow (the post is written on Approve).
+-- On Approve the poller sends this text as the preview instead of calling the model again.
+ALTER TABLE approvals ADD COLUMN IF NOT EXISTS draft_text TEXT;
+
 -- 2026-11-20: Row-Level Security on EVERY table in the public schema, with NO policies.
 -- Supabase exposes the public schema through PostgREST, so anyone holding the project URL and
 -- the anon key could otherwise read, edit or delete these tables over the REST API. RLS enabled

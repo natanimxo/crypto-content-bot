@@ -159,7 +159,7 @@ def _fetch_orphaned_approvals(conn) -> list[dict]:
     no-op by construction (_fetch_pending_approval only matches 'pending')."""
     with dict_cursor(conn) as cur:
         cur.execute(
-            """SELECT a.id AS approval_id, a.decision, a.raw_item_id, a.prompt_message_id,
+            """SELECT a.id AS approval_id, a.decision, a.raw_item_id, a.prompt_message_id, a.draft_text,
                       r.category, r.payload, r.collected_at, s.score, s.score_breakdown, n.channel
                FROM approvals a
                JOIN raw_items r ON r.id = a.raw_item_id
@@ -181,7 +181,7 @@ def _fetch_pending_approval(conn, raw_item_id: int):
     already-notified check) and therefore only ever gets one approvals row."""
     with dict_cursor(conn) as cur:
         cur.execute(
-            """SELECT a.id AS approval_id, a.decision, a.raw_item_id, a.prompt_message_id,
+            """SELECT a.id AS approval_id, a.decision, a.raw_item_id, a.prompt_message_id, a.draft_text,
                       r.category, r.payload, r.collected_at, s.score, s.score_breakdown, n.channel
                FROM approvals a
                JOIN raw_items r ON r.id = a.raw_item_id
@@ -267,7 +267,8 @@ def _generate_and_preview(conn, approval: dict):
         "score": approval["score"],
         "score_breakdown": approval["score_breakdown"],
     }
-    text = generate_post(conn, category, channel, raw_item)
+    # A channel whose candidates arrive as finished drafts (bot/notify.py DRAFT_FIRST_CHANNELS) already holds the post: the operator approved THAT text, so it is sent as is, no second model call.
+    text = approval.get("draft_text") or generate_post(conn, category, channel, raw_item)
     _send_preview_and_store(conn, approval["approval_id"], channel, category, approval["score"],
                              cfg["write_model"], text)
 
@@ -361,7 +362,7 @@ def _handle_retry_write(conn, raw_item_id: int, cq_id: str) -> dict | None:
     and hand the approval back to run() for a fresh write."""
     with dict_cursor(conn) as cur:
         cur.execute(
-            """SELECT a.id AS approval_id, a.decision, a.raw_item_id, a.prompt_message_id,
+            """SELECT a.id AS approval_id, a.decision, a.raw_item_id, a.prompt_message_id, a.draft_text,
                       r.category, r.payload, r.collected_at, s.score, s.score_breakdown, n.channel
                FROM approvals a
                JOIN raw_items r ON r.id = a.raw_item_id

@@ -100,6 +100,70 @@ def main():
     line = TPL.TEMPLATES["technique_explainer"]({"payload": p})
     check("triage line names the type, the scale and the examples", all(s in line for s in ("Token & Share Accounting", "11 incidents", "Euler V1")), True)
 
+    # ---- finished drafts on Crypto Notebook (draft-first channels): written before the card, stored on the approval, reused on Approve; a failed draft is NOT lost
+    from bot import approval_poller as AP
+    from bot import notify as N
+
+    check("draft-first: only Crypto Notebook", N.DRAFT_FIRST_CHANNELS, {"crypto_notebook"})
+    card, kb = N.render_draft_card("Crypto Notebook", "🧭 TECHNIQUE OF THE WEEK", "score 83.7/100", "🧭 <b>How does it work?</b>\n\nBody.", 42)
+    check("draft card: the draft is shown unescaped under a header that names the channel", ("Finished draft for Crypto Notebook" in card, "<b>How does it work?</b>" in card, "&lt;" in card), (True, True, False))
+    check("draft card: Approve / Edit / Skip use the existing callbacks (no new handler)", [(b["text"], b["callback_data"]) for b in kb], [("✅ Approve", "approve:42"), ("✏️ Edit", "edit:42"), ("❌ Skip", "reject:42")])
+
+    class _Cur:
+        def __init__(self, log):
+            self.log, self._id = log, 0
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            return False
+        def execute(self, sql, params=None):
+            self.log.append((" ".join(sql.split()), params))
+        def fetchone(self):
+            return {"id": 900 + len(self.log)}
+
+    class _Conn:
+        def __init__(self):
+            self.log, self.commits = [], 0
+        def cursor(self, **kw):
+            return _Cur(self.log)
+        def commit(self):
+            self.commits += 1
+
+    sent = []
+    orig = (N._try_draft, N.send_message, N.load_category_config, N.get_channel_display_name)
+    drafts = {1: "🧭 <b>A short draft</b>\n\nText.", 2: None, 3: "x" * 5000}
+    N._try_draft = lambda conn, category, channel, row: drafts[row["raw_item_id"]]
+    N.send_message = lambda chat, text, reply_markup=None, **kw: (sent.append((text, reply_markup)) or {"message_id": 7000 + len(sent)})
+    N.load_category_config = lambda conn, category: {"label": "🧭 TECHNIQUE OF THE WEEK"}
+    N.get_channel_display_name = lambda conn, channel: "Crypto Notebook"
+    os.environ["TELEGRAM_OPERATOR_CHAT_ID"] = "1"
+    try:
+        fc = _Conn()
+        cands = [("technique_explainer", {"raw_item_id": i, "payload": {}, "score": 80.0, "score_breakdown": {}}) for i in (1, 2, 3)]
+        rest, last_id = N._send_draft_cards(fc, "crypto_notebook", cands)
+    finally:
+        N._try_draft, N.send_message, N.load_category_config, N.get_channel_display_name = orig
+    check("draft-first: only the candidate with a usable draft gets a draft card; a failed draft and an over-long one go out as ordinary cards (nothing lost)", ([r[1]["raw_item_id"] for r in rest], len(sent)), ([2, 3], 1))
+    inserts = [p for sql, p in fc.log if sql.startswith("INSERT INTO approvals")]
+    check("draft-first: the approval row stores the draft text and starts pending", (len(inserts), inserts[0][1], inserts[0][2]), (1, 1, drafts[1]))
+    check("draft-first: persisted after the send, notification id returned", (fc.commits, last_id is not None), (1, True))
+
+    calls = []
+    op = (AP.generate_post, AP._send_preview_and_store, AP.load_category_config)
+    AP.generate_post = lambda *a, **k: (calls.append("model") or "FROM THE MODEL")
+    AP._send_preview_and_store = lambda conn, approval_id, channel, category, score, model, text: calls.append(("preview", text))
+    AP.load_category_config = lambda conn, category: {"write_model": "m"}
+    try:
+        base = {"category": "technique_explainer", "channel": "crypto_notebook", "raw_item_id": 5, "payload": {}, "collected_at": NOW, "score": 80.0, "score_breakdown": {}, "approval_id": 9}
+        AP._generate_and_preview(None, dict(base, draft_text="THE DRAFT"))
+        AP._generate_and_preview(None, dict(base, draft_text=None))
+    finally:
+        AP.generate_post, AP._send_preview_and_store, AP.load_category_config = op
+    check("approve: a stored draft is sent as is with NO model call; without one the post is written as before", calls, [("preview", "THE DRAFT"), "model", ("preview", "FROM THE MODEL")])
+    check("schema: the draft column exists", "ADD COLUMN IF NOT EXISTS draft_text" in open(os.path.join(root, "db", "schema.sql"), encoding="utf-8").read(), True)
+    schema = open(os.path.join(root, "db", "schema.sql"), encoding="utf-8").read()
+    check("schema: the RLS block is still the LAST statement (new columns above it)", schema.rstrip().endswith("$$;") and schema.index("draft_text") < schema.index("ENABLE ROW LEVEL SECURITY"), True)
+
     if FAILS:
         print(f"{len(FAILS)} MISMATCH(ES):")
         for f_ in FAILS:
