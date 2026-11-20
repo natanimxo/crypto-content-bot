@@ -106,6 +106,10 @@ PROBES = [
     {"id": "dataannotation", "dir": "data / AI work", "url": "https://www.dataannotation.tech/"},
 ]
 
+# the humor channel's candidate sources (operator 2026-11-20): see pipeline/probe_wtal.py
+from pipeline.probe_wtal import WTAL_PROBES, WTAL_TELEGRAM  # noqa: E402
+PROBES.extend(WTAL_PROBES)
+
 _DATE_KEYS = re.compile(r"(date|time|created|updated|published|start|end|deadline|posted)", re.IGNORECASE)
 
 
@@ -232,6 +236,7 @@ TELEGRAM_CANDIDATES = {
     "OKXOfficial_English": "OKXOfficial_English (earn candidate)",
     "Galxe": "Galxe (earn candidate)",
 }
+TELEGRAM_CANDIDATES.update(WTAL_TELEGRAM)
 _ADISH_RE = re.compile(r"join @|bitcoin_priceupdatebot|promo|sponsored|#ad\b|advertis|referral|use code|sign up (?:now|today)|trade (?:now|with)|signals?\b|vip\b", re.IGNORECASE)
 
 

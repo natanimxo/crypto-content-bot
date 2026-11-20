@@ -1,0 +1,148 @@
+"""Candidate sources for the humor channel "We Talk A Lot" (operator 2026-11-20), probed FROM RAILWAY by pipeline/source_probe.py before anything is built on them.
+
+Every URL here is a candidate, not a decision: a probe answers "reachable from Railway, shaped like a feed, how fresh" -- whether the CONTENT suits the channel, and whether its terms allow
+reposting, is a separate judgement recorded in BACKLOG.md. Where a site has no known feed URL, the usual paths are tried (the ones that fail are reported dead, which is the point).
+Sources that need a key the operator has not given yet (NewsData / FreeNewsApi, YouTube Data API) cannot be probed and are listed in BACKLOG as pending a key.
+"""
+
+from datetime import datetime, timedelta, timezone
+
+_NOW = datetime.now(timezone.utc)
+_MD = _NOW.strftime("%m/%d")
+_YMD = _NOW.strftime("%Y/%m/%d")
+_Y_M = _NOW.strftime("%Y/%m")
+_YESTERDAY = (_NOW - timedelta(days=1)).strftime("%Y/%m/%d")
+
+W = "weird news"
+S = "satire"
+H = "history / deaths / records / facts"
+T = "trending"
+J = "jokes"
+L = "listicles / evergreen"
+
+WTAL_PROBES = [
+    # ---- weird / absurd real news
+    {"id": "w_upi_odd", "dir": W, "url": "https://rss.upi.com/news/odd_news.rss"},
+    {"id": "w_lemmy_nottheonion", "dir": W, "url": "https://lemmy.world/feeds/c/nottheonion.xml?sort=Hot"},
+    {"id": "w_gnews_weird", "dir": W, "url": "https://news.google.com/rss/search?q=weird+OR+bizarre+OR+absurd+when:2d&hl=en-US&gl=US&ceid=US:en"},
+    {"id": "w_gnews_florida_man", "dir": W, "url": "https://news.google.com/rss/search?q=%22florida+man%22+when:3d&hl=en-US&gl=US&ceid=US:en"},
+    {"id": "w_fox_odd_feed1", "dir": W, "url": "https://moxie.foxnews.com/google-publisher/odd-news.xml"},
+    {"id": "w_fox_odd_feed2", "dir": W, "url": "https://feeds.foxnews.com/foxnews/oddnews"},
+    {"id": "w_fox_odd_page", "dir": W, "url": "https://www.foxnews.com/category/odd-news"},
+    {"id": "w_wdbo_feed", "dir": W, "url": "https://www.wdbo.com/arc/outboundfeeds/rss/category/news/weird-news/?outputType=xml"},
+    {"id": "w_wdbo_page", "dir": W, "url": "https://www.wdbo.com/news/weird-news/"},
+    {"id": "w_time_feed", "dir": W, "url": "https://time.com/tag/weird-news/feed/"},
+    {"id": "w_time_page", "dir": W, "url": "https://time.com/tag/weird-news/"},
+    {"id": "w_newsnow", "dir": W, "url": "https://www.newsnow.co.uk/h/World+News/Weird+and+Wonderful"},
+    {"id": "w_newsoftheweird_feed", "dir": W, "url": "https://newsoftheweird.com/feed/"},
+    {"id": "w_newsoftheweird_page", "dir": W, "url": "https://newsoftheweird.com/"},
+    {"id": "w_ktar_odd", "dir": W, "url": "https://ktar.com/odd-news/feed/"},
+    {"id": "w_newsweek_weird", "dir": W, "url": "https://www.newsweek.com/topic/weird-news"},
+    {"id": "w_yahoo_odd", "dir": W, "url": "https://news.yahoo.com/rss/odd-news"},
+    {"id": "w_aol_odd", "dir": W, "url": "https://lite.aol.com/news/odd/headlines/index/ap/oddities"},
+    {"id": "w_fark", "dir": W, "url": "https://www.fark.com/fark.rss"},
+    # ---- satire
+    {"id": "s_onion", "dir": S, "url": "https://theonion.com/feed/"},
+    {"id": "s_clickhole", "dir": S, "url": "https://clickhole.com/feed/"},
+    {"id": "s_dailymash", "dir": S, "url": "https://www.thedailymash.co.uk/feed"},
+    {"id": "s_newsthump", "dir": S, "url": "https://newsthump.com/feed/"},
+    {"id": "s_beaverton", "dir": S, "url": "https://thebeaverton.com/feed/"},
+    {"id": "s_wwn", "dir": S, "url": "https://waterfordwhispersnews.com/feed/"},
+    {"id": "s_shovel", "dir": S, "url": "https://theshovel.com.au/feed/"},
+    {"id": "s_betoota", "dir": S, "url": "https://www.betootaadvocate.com/feed/"},
+    {"id": "s_chaser", "dir": S, "url": "https://chaser.com.au/feed/"},
+    {"id": "s_reductress", "dir": S, "url": "https://reductress.com/feed/"},
+    {"id": "s_duffel", "dir": S, "url": "https://www.duffelblog.com/feed"},
+    {"id": "s_harddrive", "dir": S, "url": "https://thehard-drive.com/feed"},
+    {"id": "s_hardtimes", "dir": S, "url": "https://thehardtimes.net/feed/"},
+    {"id": "s_babylonbee", "dir": S, "url": "https://babylonbee.com/feed"},
+    {"id": "s_postillon", "dir": S, "url": "https://www.der-postillon.com/feeds/posts/default"},
+    {"id": "s_alhudood", "dir": S, "url": "https://alhudood.net/feed/"},
+    # ---- history, unusual deaths, records, facts
+    {"id": "h_wikimedia_onthisday", "dir": H, "url": f"https://api.wikimedia.org/feed/v1/wikipedia/en/onthisday/all/{_MD}"},
+    {"id": "h_wikimedia_featured", "dir": H, "url": f"https://api.wikimedia.org/feed/v1/wikipedia/en/featured/{_YMD}"},
+    {"id": "h_wiki_unusual_deaths", "dir": H, "url": "https://en.wikipedia.org/w/api.php?action=parse&page=List_of_unusual_deaths&prop=sections&format=json"},
+    {"id": "h_wiki_unusual_deaths_hub", "dir": H, "url": "https://en.wikipedia.org/w/api.php?action=parse&page=Lists_of_unusual_deaths&prop=links&format=json"},
+    {"id": "h_wiki_unusual_articles", "dir": H, "url": "https://en.wikipedia.org/w/api.php?action=parse&page=Wikipedia:Unusual_articles&prop=sections&format=json"},
+    {"id": "h_wiki_conspiracy_list", "dir": H, "url": "https://en.wikipedia.org/w/api.php?action=parse&page=List_of_conspiracy_theories&prop=sections&format=json"},
+    {"id": "h_wiki_conspiracy_true", "dir": H, "url": "https://en.wikipedia.org/w/api.php?action=parse&page=List_of_conspiracies_(political)&prop=sections&format=json"},
+    {"id": "t_wiki_pageviews_top", "dir": T, "url": f"https://wikimedia.org/api/rest_v1/metrics/pageviews/top/en.wikipedia/all-access/{_YESTERDAY}"},
+    {"id": "h_guinness_news", "dir": H, "url": "https://www.guinnessworldrecords.com/news"},
+    {"id": "h_guinness_feed", "dir": H, "url": "https://www.guinnessworldrecords.com/news/rss"},
+    {"id": "h_guinness_records", "dir": H, "url": "https://www.guinnessworldrecords.com/records/showcase"},
+    {"id": "h_darwin_home", "dir": H, "url": "https://darwinawards.com/"},
+    {"id": "h_darwin_feed", "dir": H, "url": "https://darwinawards.com/rss/darwin.xml"},
+    {"id": "h_numbersapi", "dir": H, "url": "http://numbersapi.com/random/trivia?json"},
+    {"id": "h_numbersapi_https", "dir": H, "url": "https://numbersapi.com/random/trivia?json"},
+    {"id": "h_uselessfacts", "dir": H, "url": "https://uselessfacts.jsph.pl/api/v2/facts/random"},
+    {"id": "h_uselessfacts_today", "dir": H, "url": "https://uselessfacts.jsph.pl/api/v2/facts/today"},
+    {"id": "h_funfact_asli", "dir": H, "url": "https://asli-fun-fact-api.herokuapp.com/"},
+    {"id": "h_catfact_style_factsapi", "dir": H, "url": "https://api.api-ninjas.com/v1/facts"},
+    # ---- listicles and evergreen sites (feed paths guessed; the ones that fail are reported dead)
+    {"id": "l_listverse", "dir": L, "url": "https://listverse.com/feed/"},
+    {"id": "l_atlasobscura", "dir": L, "url": "https://www.atlasobscura.com/feeds/latest"},
+    {"id": "l_mentalfloss", "dir": L, "url": "https://www.mentalfloss.com/feed"},
+    {"id": "l_cracked", "dir": L, "url": "https://www.cracked.com/rss"},
+    {"id": "l_cracked_feed", "dir": L, "url": "https://www.cracked.com/feed"},
+    {"id": "l_todayilearned_lemmy", "dir": L, "url": "https://lemmy.world/feeds/c/todayilearned.xml?sort=TopMonth"},
+    {"id": "l_showerthoughts_lemmy_world", "dir": L, "url": "https://lemmy.world/feeds/c/showerthoughts.xml?sort=TopMonth"},
+    {"id": "l_showerthoughts_lemmy_ml", "dir": L, "url": "https://lemmy.ml/feeds/c/showerthoughts.xml?sort=TopMonth"},
+    {"id": "l_showerthoughts_lemmy_lemmee", "dir": L, "url": "https://lemm.ee/feeds/c/showerthoughts.xml?sort=TopMonth"},
+    {"id": "l_reddit_showerthoughts_rss", "dir": L, "url": "https://www.reddit.com/r/Showerthoughts/top/.rss?t=month"},
+    {"id": "l_reddit_darkjokes_rss", "dir": L, "url": "https://www.reddit.com/r/darkjokes/top/.rss?t=month"},
+    {"id": "l_reddit_todayilearned_rss", "dir": L, "url": "https://www.reddit.com/r/todayilearned/top/.rss?t=month"},
+    {"id": "l_damninteresting", "dir": L, "url": "https://www.damninteresting.com/feed/"},
+    {"id": "l_todayifoundout", "dir": L, "url": "https://www.todayifoundout.com/index.php/feed/"},
+    {"id": "l_oddee", "dir": L, "url": "https://www.oddee.com/feed/"},
+    {"id": "l_strangeco", "dir": L, "url": "https://strangeco.blogspot.com/feeds/posts/default"},
+    {"id": "l_historycollection", "dir": L, "url": "https://historycollection.com/feed/"},
+    {"id": "l_ranker_dark_history", "dir": L, "url": "https://www.ranker.com/list/dark-history/"},
+    {"id": "l_wikihow_none", "dir": L, "url": "https://en.wikipedia.org/w/api.php?action=query&list=random&rnnamespace=0&rnlimit=1&format=json"},
+    # ---- trending
+    {"id": "t_google_trends_us", "dir": T, "url": "https://trends.google.com/trending/rss?geo=US"},
+    {"id": "t_google_trends_old", "dir": T, "url": "https://trends.google.com/trends/trendingsearches/daily/rss?geo=US"},
+    {"id": "t_bluesky_search", "dir": T, "url": "https://public.api.bsky.app/xrpc/app.bsky.feed.searchPosts?q=weird&limit=5&sort=top"},
+    {"id": "t_bluesky_trends", "dir": T, "url": "https://public.api.bsky.app/xrpc/app.bsky.unspecced.getTrendingTopics?limit=10"},
+    {"id": "t_wikipedia_news_feed", "dir": T, "url": f"https://api.wikimedia.org/feed/v1/wikipedia/en/featured/{_YMD}"},
+    # ---- jokes
+    {"id": "j_jokeapi_dark", "dir": J, "url": "https://v2.jokeapi.dev/joke/Dark?amount=10"},
+    {"id": "j_jokeapi_info", "dir": J, "url": "https://v2.jokeapi.dev/info"},
+    {"id": "j_chucknorris", "dir": J, "url": "https://api.chucknorris.io/jokes/random"},
+    {"id": "j_chucknorris_dev", "dir": J, "url": "https://api.chucknorris.io/jokes/random?category=dev"},
+    {"id": "j_excuser", "dir": J, "url": "https://excuser-three.vercel.app/v1/excuse/10"},
+    {"id": "j_corporate_buzz", "dir": J, "url": "https://corporatebs-generator.sameerkumar.website/"},
+    {"id": "j_official_joke", "dir": J, "url": "https://official-joke-api.appspot.com/jokes/ten"},
+    {"id": "j_icanhazdadjoke", "dir": J, "url": "https://icanhazdadjoke.com/search?limit=5"},
+    {"id": "j_darkjokes_api_qa", "dir": J, "url": "https://dark-jokes-api.vercel.app/"},
+    # ---- alternates for the ones that failed from the dev machine, and more candidates found by search (2026-11-20)
+    {"id": "s_betoota_alt1", "dir": S, "url": "https://www.betootaadvocate.com/feed"},
+    {"id": "s_betoota_alt2", "dir": S, "url": "https://www.betootaadvocate.com/rss"},
+    {"id": "s_harddrive_www", "dir": S, "url": "https://www.thehard-drive.com/feed"},
+    {"id": "s_alhudood_www", "dir": S, "url": "https://www.alhudood.net/feed/"},
+    {"id": "s_alhudood_rss", "dir": S, "url": "https://alhudood.net/rss.xml"},
+    {"id": "w_time_feed_all", "dir": W, "url": "https://time.com/feed/"},
+    {"id": "w_newsoftheweird_www", "dir": W, "url": "https://www.newsoftheweird.com/feed/"},
+    {"id": "w_iflscience", "dir": W, "url": "https://www.iflscience.com/rss"},
+    {"id": "w_snopes", "dir": W, "url": "https://www.snopes.com/feed/"},
+    {"id": "h_history_com_tdih", "dir": H, "url": "https://www.history.com/.rss/full/this-day-in-history"},
+    {"id": "h_britannica_onthisday", "dir": H, "url": "https://www.britannica.com/on-this-day"},
+    {"id": "h_recordsetter", "dir": H, "url": "https://www.recordsetter.com/"},
+    {"id": "h_vintagenews", "dir": H, "url": "https://www.thevintagenews.com/feed/"},
+    {"id": "h_ancient_origins", "dir": H, "url": "https://www.ancient-origins.net/rss.xml"},
+    {"id": "l_lemmy_darkhumor", "dir": J, "url": "https://lemmy.world/feeds/c/darkhumor.xml?sort=TopMonth"},
+    {"id": "l_lemmy_jokes", "dir": J, "url": "https://lemmy.world/feeds/c/jokes.xml?sort=TopMonth"},
+    {"id": "l_lemmy_historymemes", "dir": H, "url": "https://lemmy.world/feeds/c/historymemes.xml?sort=TopMonth"},
+    {"id": "l_lemmy_unexpected", "dir": W, "url": "https://lemmy.world/feeds/c/unexpected.xml?sort=TopMonth"},
+]
+
+# Telegram: the two content channels the operator named plus the six meme channels (trend signals only -- never reposted).
+WTAL_TELEGRAM = {
+    "shockingfact": "@shockingfact (facts candidate)",
+    "dark_storys": "@dark_storys (dark stories candidate)",
+    "bestmemes": "@bestmemes (trend signal)",
+    "funny_memes_jokes_english_gifs": "@funny_memes_jokes_english_gifs (trend signal)",
+    "DailyEpicMemes": "@DailyEpicMemes (trend signal)",
+    "funny_videotg": "@funny_videotg (trend signal)",
+    "memesouterspace1": "@memesouterspace1 (trend signal)",
+    "talesofthedark": "@talesofthedark (dark stories candidate)",
+}
