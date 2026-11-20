@@ -55,6 +55,10 @@ PROBES = [
     {"id": "startup_techcrunch_venture_rss", "dir": "startup news", "url": "https://techcrunch.com/category/venture/feed/"},
     {"id": "startup_crunchbase_news_rss", "dir": "startup news", "url": "https://news.crunchbase.com/feed/"},
     {"id": "startup_eu_startups_rss", "dir": "startup news", "url": "https://www.eu-startups.com/feed/"},
+    # ---- Crypto Notebook (operator 2026-11-20): Rekt.news post-mortems as a hacks_exploits source. The RSS feed is checked for the record (locally it served 7 essays, newest April 2026);
+    # the homepage is where the post-mortems are listed (title, date, tags, excerpt), so its <article class="post"> blocks are counted and the newest date read.
+    {"id": "rekt_rss", "dir": "security post-mortems", "url": "https://www.rekt.news/rss/feed.xml"},
+    {"id": "rekt_home", "dir": "security post-mortems", "url": "https://www.rekt.news/"},
     {"id": "immunefi_public_json", "dir": "bug bounty", "url": "https://immunefi.com/public-api/bounties.json"},   # keyless JSON: 218 programs, launchDate / maxBounty / rewardsToken / endDate (audit competitions)
     {"id": "hackenproof", "dir": "bug bounty", "url": "https://hackenproof.com/programs"},
     {"id": "code4rena_contests", "dir": "audit contests", "url": f"{B}/code-423n4/code4rena-org/main/_data/contests/contests.json"},
@@ -192,6 +196,11 @@ def run_probe(p: dict) -> dict:
     else:
         out["html_title"] = (re.search(r"<title[^>]*>(.*?)</title>", body, re.S | re.I).group(1).strip()[:70] if re.search(r"<title", body, re.I) else "")
         out["login_wall"] = bool(re.search(r"log ?in|sign ?in|create an account|sign up", body[:6000], re.IGNORECASE))
+        posts = re.findall(r'<article class="post[^"]*">.*?</article>', body, re.S)
+        if posts:                                      # a blog-style page: how many posts it lists and the newest one's own date
+            out["articles"] = len(posts)
+            m = re.search(r"<time[^>]*>([^<]*)</time>", posts[0])
+            out["newest_post"] = m.group(1).strip()[:40] if m else None
     out["kind"] = kind
     return out
 

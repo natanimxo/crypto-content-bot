@@ -74,7 +74,7 @@ def main():
                 if done_ids is not None and done_ids == {p["id"] for p in source_probe.PROBES}:
                     return                  # probed within 20h AND with the same probe set; a new probe is verified at the next cycle
             results = source_probe.probe_all()
-            keep = ("id", "dir", "status", "kind", "items", "newest", "bytes", "secs", "auth_or_blocked", "login_wall", "error", "sample", "html_title", "snippet")
+            keep = ("id", "dir", "status", "kind", "items", "newest", "bytes", "secs", "auth_or_blocked", "login_wall", "error", "sample", "html_title", "snippet", "articles", "newest_post")
             with run_log(conn, "source_probe") as state:
                 state["details"]["results"] = [{k: r[k] for k in keep if k in r} for r in results]
         finally:
