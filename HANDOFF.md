@@ -4,7 +4,22 @@ For a fresh Claude Code session picking this project up cold. This is STATE + th
 "READ FIRST -- traps" block, then the section for whatever you touch); `intelligence-bot-spec-v2.md` is the original design. The previous handoff (2026-09-11, stale: it says
 "not yet live") is kept at `docs/HANDOFF-2026-09-11-archive.md` for the bug history of the first three categories.
 
-## STATUS (2026-11-17, read this first)
+## STATUS UPDATE (2026-11-20): Crypto Notebook (read this with the block below)
+
+**Why Notebook looked silent (diagnosed from the DB, not guessed):** nothing was broken. Since the Nov 15 remap Notebook was sent 6 candidate cards (all `hacks_exploits`, ~1.1/day, each delivered with a Telegram message id); `gems_security`
+contributed 0 (best score 48.7 against 50). None of the 11 Notebook approvals since Nov 5 was ever tapped (no approve, reject or Edit), so no draft was ever requested. Drafts do NOT fail on the 600-900 voice: a dry run of the real writer on all six
+passed every guard (attempt 1 overshoots at 950-1,200 characters, one retry fixes it). `hacks_exploits` supply is ~6 incidents a week at the $500k floor: that is the ceiling.
+
+**Built 2026-11-20 (operator request):**
+1. **Technique of the week** (`collectors/technique_explainer.py`, category `technique_explainer`, Crypto Notebook): ONE explainer per ISO week on an attack type = DefiLlama's own `classification` (13 values, each with 10+ stored incidents), with
+   three real incidents as examples (largest, most recent, largest with a different technique label) taken from the stored tracker rows. No new source, no model call in the collector. Type choice is deterministic (never covered / covered longest ago first, then the
+   newest incident); the item's external_id is the ISO week. The writer (Notebook's explainer voice, 600-900) may cite ONLY the incidents, amounts, counts and years in the facts: `write_post._find_explainer_issues` refuses any other dollar figure
+   (a rounding within 6% is allowed), incident count or year, and requires two examples to be named; the shared speculation guard applies. Scores are priors, sized so every eligible type clears the threshold (pinned by `scripts/check_technique.py`).
+   A recovery figure larger than the loss (Euler V1: $240M back on $197M, a tracker quirk) is never printed. First item: the 12:00 UTC cycle of 2026-11-20 (type: Token & Share Accounting). Rotation covers all 13 types in 13 weeks.
+2. **Finished drafts on Notebook cards** (`bot/notify.py` `DRAFT_FIRST_CHANNELS = {"crypto_notebook"}`): the post is written BEFORE the card, the card IS the draft (own message, buttons Approve / Edit / Skip, same callbacks as always), the text is stored in
+   `approvals.draft_text` (column applied to production) and Approve sends exactly that text as the forwardable preview (no second model call). A candidate whose draft cannot be written (a guard keeps failing, model outage, over 3,900 characters) goes out as the
+   ORDINARY card and is written on Approve as before: nothing is lost. To turn it off, empty the set. To add a channel, add it to the set.
+
 
 Everything below is committed and pushed; HEAD passes `check_earning`, `check_sources`, `check_exchange_listings`, `check_voice_checks`. The operator's 2026-11-17 message REPLACES his earlier
 "remove the recruitment penalty" and "full control" prompts: it is self-contained and is what is implemented. (A dangling empty bullet at the end of its item 1 was ignored.)
