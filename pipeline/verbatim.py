@@ -1,8 +1,8 @@
 """We Talk A Lot's post builder (operator 2026-11-20): the card carries the SOURCE'S EXACT WORDS, in order -- not rewritten, not shortened, not summarised.
 
 What this module does, and the one thing it must never do:
-  * FORMATS only: the episode header from a pool at the top, the title in bold, the fixed hashtags on the line below the title, paragraph breaks where the text naturally divides, clean
-    spacing after full stops and an optional <tg-spoiler> around the payoff. All of that is CODE. NO source or credit line and no warning/flag line in the post (operator 2026-11-21: he adds the
+  * FORMATS only: the title in bold, paragraph breaks where the text naturally divides, clean
+    spacing after full stops, an optional <tg-spoiler> around the payoff and the fixed hashtags as the LAST line of the post. All of that is CODE. NO episode header (operator 2026-11-21: the post starts with the title or the text). NO source or credit line and no warning/flag line in the post (operator 2026-11-21: he adds the
     source himself); the source name and link live only in the reference block under the draft.
   * DeepSeek is used for exactly one thing and is handed no way to change a word: where the paragraph breaks go -- it sees the source's sentences NUMBERED and returns the indices where a
     new paragraph starts, and the code slices the ORIGINAL text there. If the model fails, code breaks paragraphs every few sentences. (Hashtags are NOT the model's: operator 2026-11-21, jokes carry
@@ -13,7 +13,7 @@ What this module does, and the one thing it must never do:
 
 "Source's exact words" means the text as EXTRACTED: HTML tags and entities removed and whitespace collapsed (that is reading, not editing); nothing else is touched.
 
-The episode-header pool, the poll pairs and the default hashtags live in config/wtal.yaml (the operator edits it).
+The poll pairs and the hashtags live in config/wtal.yaml (the operator edits it).
 """
 
 import html
@@ -153,17 +153,7 @@ def paragraphs_from_starts(sentences: list[str], starts: list[int]) -> list[str]
     return [" ".join(sentences[bounds[i]:bounds[i + 1]]) for i in range(len(starts))]
 
 
-# ------------------------------------------------------------------ headers, hashtags, polls
-def pick_header(category: str, seed: int) -> str | None:
-    """A header from the category's pool. `seed` is a counter (how many posts the category has had), so the pool cycles through all its headers before repeating one, in a fixed shuffled order."""
-    import random
-    pool = list((load_config().get("headers") or {}).get(category) or [])
-    if not pool:
-        return None
-    random.Random(f"wtal:{category}").shuffle(pool)
-    return pool[seed % len(pool)]
-
-
+# ------------------------------------------------------------------ hashtags, polls
 def hashtags_for(category: str) -> list[str]:
     """The category's fixed hashtags (config/wtal.yaml `hashtags`): the model has no say."""
     return list((load_config().get("hashtags") or {}).get(category) or [])
@@ -215,7 +205,7 @@ def unformatted(payload: dict) -> str:
     return esc(original_text(payload))
 
 
-def build(conn, category: str, raw_item: dict, *, use_model: bool = True, seed: int | None = None) -> dict:
+def build(conn, category: str, raw_item: dict, *, use_model: bool = True) -> dict:
     """{'text': post HTML, 'ok': bool (False = the exact-words check failed and `text` is the unformatted original), 'original_html': the block the card shows below the draft, 'tags': [...]}."""
     payload = dict(raw_item.get("payload") or {})
     cfg = category_settings(category)
@@ -248,37 +238,20 @@ def build(conn, category: str, raw_item: dict, *, use_model: bool = True, seed: 
         logger.error("verbatim: EXACT-WORDS CHECK FAILED for category=%s title=%r -- sending the original unformatted", category, title[:80])
         return {"text": unformatted(original), "ok": False, "original_html": original_html, "tags": tags}
 
-    if seed is None:
-        seed = _category_counter(conn, category)
-    header = pick_header(category, seed)
     tag_line = esc(" ".join(tags)) if tags else ""
     dateline = (payload.get("dateline") or "").strip() if load_config().get("show_dateline", True) else ""
     blocks = []
-    if header:
-        blocks.append(esc(header))
     top = []
     if dateline:
-        top.append(esc(dateline))                               # outlet and day, then the bold title
+        top.append(esc(dateline))                               # outlet and day (news, satire) or date and place (history, deaths), then the bold title
     if title_html:
         top.append(title_html)
-    if tag_line and title_html:
-        top.append(tag_line)                                    # hashtags on the line below the title
     if top:
         blocks.append("\n".join(top))
     blocks.extend(body_html)
-    if tag_line and not title_html:
-        blocks.append(tag_line)                                 # no title: the tags close the post
+    if tag_line:
+        blocks.append(tag_line)                                 # the hashtags are always the last line of the post, never under the title
     return {"text": "\n\n".join(blocks), "ok": True, "original_html": original_html, "tags": tags}
-
-
-def _category_counter(conn, category: str) -> int:
-    """How many cards the category has had so far: the header pool advances by one per card."""
-    if conn is None:
-        return 0
-    from pipeline.db import dict_cursor
-    with dict_cursor(conn) as cur:
-        cur.execute("SELECT COUNT(*) AS n FROM notifications nf JOIN raw_items r ON r.id = ANY(nf.candidate_raw_item_ids) WHERE r.category = %s", (category,))
-        return int(cur.fetchone()["n"] or 0)
 
 
 def original_block(payload: dict) -> str:

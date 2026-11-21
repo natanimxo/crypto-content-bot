@@ -386,6 +386,51 @@ def yes_no(conn, category: str, prompt: str, texts: list[str]) -> list[bool | No
     return out
 
 
+# ------------------------------------------------------------------------------------------------ junk filters (operator 2026-11-21): rules, then a yes/no that never touches a word
+_LIST_PAGE = re.compile(r"^\s*(?:lists? of|lists of|index of|category:|outline of|timeline of|glossary of)\b", re.I)
+# the shortest text a card of this category may be, in full sentences (title excluded). Only where one-sentence items are junk: weird facts, conspiracies, unusual deaths. A dark-history event, a world record and a
+# shower thought ARE one sentence by nature, so the rule is not applied to them (it would empty those libraries); jokes are not touched at all.
+MIN_SENTENCES = {"weird_facts": 2, "conspiracies": 2, "unusual_deaths": 2}
+FILTERED_CATEGORIES = ["dark_history", "unusual_deaths", "world_records", "conspiracies", "weird_facts", "shower_thoughts"]
+
+AUDIENCE_PROMPT = """You are filtering items for a channel of dark, weird and funny things. For each numbered item answer true ONLY if a general audience would find it genuinely weird, dark, or funny, so that they would send it to a friend.
+Answer false for dry, academic or encyclopedic facts, definitions, list or index entries, fragments that need context to make sense, questions put to the reader, ordinary trivia or news with no twist, and anything merely mildly interesting.
+Judge the item exactly as written; you are only a filter and never suggest changes.
+
+Return ONLY a JSON object: {{"verdicts": [true, false, ...]}} with exactly {n} entries, in the order of the items.
+
+{items}"""
+
+
+def _sentences(text: str) -> list[str]:
+    from pipeline import verbatim
+    out = []
+    for para in str(text or "").split("\n\n"):
+        out.extend(x for x in verbatim.split_sentences(para) if len(x.split()) >= 2)
+    return out
+
+
+def rule_reason(category: str, title: str, body: str) -> str | None:
+    """Why this item is junk by RULE (None = it passes): a list / index / category page, too few full sentences for its category, or mostly a question put back to the reader."""
+    if _LIST_PAGE.match(title or "") or _LIST_PAGE.match(body or ""):
+        return "list, index or category page"
+    sents = _sentences(body)
+    if len(sents) < MIN_SENTENCES.get(category, 1):
+        return f"under {MIN_SENTENCES.get(category, 1)} full sentences"
+    if sents and sum(1 for x in sents if x.rstrip().endswith("?")) * 2 >= len(sents):
+        return "mostly a question back to the reader"
+    return None
+
+
+def audience_text(title: str, body: str) -> str:
+    return f"{title}: {body}" if title else body
+
+
+def audience_verdicts(conn, category: str, texts: list[str]) -> list[bool | None]:
+    """DeepSeek's 'would a general audience find this genuinely weird, dark or funny?' per item. A FILTER: it only answers yes or no. None = no usable answer (never treated as yes)."""
+    return yes_no(conn, category, AUDIENCE_PROMPT, texts)
+
+
 # ------------------------------------------------------------------------------------------------ storing
 def _payload(item: dict, category: str, source_name: str, source_key: str) -> dict:
     p = {"title": item.get("title") or "", "body": item.get("body") or "", "source_name": source_name, "source_key": source_key, "source_url": item.get("source_url") or "", "library": category}
@@ -397,14 +442,14 @@ def _payload(item: dict, category: str, source_name: str, source_key: str) -> di
     return p
 
 
-def _store(conn, category: str, source_label: str, source_key: str, items: list[dict], judge=None, limit: int | None = None) -> dict:
+def _store(conn, category: str, source_label: str, source_key: str, items: list[dict], judge=None, limit: int | None = None, audience: bool = True) -> dict:
     """Dedupe against what is stored, optionally ask the model (yes -> live, no -> held with the verdict, unknown -> nothing stored), insert. Returns the per-source counts."""
     with dict_cursor(conn) as cur:
         cur.execute("SELECT payload->>'title' AS t, payload->>'body' AS b FROM raw_items WHERE category = %s", (category,))
         seen = {norm_key((r["t"] or "") + (r["b"] or "")) for r in cur.fetchall()}
         cur.execute("SELECT external_id FROM raw_items WHERE category = %s", (category,))
         known = {r["external_id"] for r in cur.fetchall()}
-    fresh, dupes = [], 0
+    fresh, dupes, rule_dropped = [], 0, {}
     for it in items:
         ext = it.get("ext") or ext_id(source_key, it.get("page") or "", it.get("title") or "", it.get("body") or "")
         k = norm_key((it.get("title") or "") + (it.get("body") or ""))
@@ -412,27 +457,40 @@ def _store(conn, category: str, source_label: str, source_key: str, items: list[
             dupes += 1
             continue
         seen.add(k)
+        why = rule_reason(category, it.get("title") or "", it.get("body") or "")
+        if why:
+            rule_dropped[why] = rule_dropped.get(why, 0) + 1          # junk by rule: not stored (nothing to ask the model about)
+            continue
         pl = _payload(it, category, source_label, source_key)
         pl["norm_key"] = k
         fresh.append((ext, pl))
     left = 0
     if limit and len(fresh) > limit:
         left, fresh = len(fresh) - limit, fresh[:limit]
-    yes, no, unknown = list(fresh), [], 0
-    if judge is not None:
-        verdicts = judge([p["body"] for _, p in fresh])
-        yes = []
-        for (ext, pl), v in zip(fresh, verdicts):
-            if v is None:
-                unknown += 1
-                continue
-            pl["check"] = "yes" if v else "no"
-            (yes if v else no).append((ext, pl))
+    yes, no, unknown = [], [], 0
+    first = judge([p["body"] for _, p in fresh]) if judge is not None else [True] * len(fresh)            # the category's own yes/no (dark? a real shower thought?) when it has one
+    second = [None] * len(fresh)
+    if audience:                                                                                         # then the audience check on everything that passed it
+        ask = [i for i, v in enumerate(first) if v is True]
+        got = audience_verdicts(conn, category, [audience_text(fresh[i][1]["title"], fresh[i][1]["body"]) for i in ask])
+        for i, v in zip(ask, got):
+            second[i] = v
+    for n, ((ext, pl), v1) in enumerate(zip(fresh, first)):
+        v2 = second[n] if audience else True
+        if v1 is None or (v1 is True and v2 is None):
+            unknown += 1                                                                                 # unknown is never coded as a yes: nothing stored, the pass stays open
+            continue
+        if v1 is True and v2 is True:
+            pl["check"] = "yes"
+            yes.append((ext, pl))
+        else:
+            pl["check"] = "no" if v1 is False else "audience_no"
+            no.append((ext, pl))
     source_id = get_or_create_source(conn, category, f"wtal_{source_key}", "api", {"library": category})
     inserted = insert_raw_items_batch(conn, source_id, category, yes)
     if no:
         insert_raw_items_batch(conn, source_id, category, no, held=True)
-    return {"fetched": len(items), "new_checked": len(fresh), "duplicates_skipped": dupes, "stored_live": inserted, "no_held": len(no), "unknown_not_stored": unknown, "left_for_next_pass": left}
+    return {"fetched": len(items), "rule_dropped": rule_dropped, "new_checked": len(fresh), "duplicates_skipped": dupes, "stored_live": inserted, "no_held": len(no), "unknown_not_stored": unknown, "left_for_next_pass": left}
 
 
 def _due(conn, job: str, sources: list[str]) -> bool:
@@ -597,6 +655,62 @@ def collect_dark_history(force: bool = False, days: int = DAYS_PER_PASS, prefilt
         return counts["stored_live"]
     finally:
         conn.close()
+
+
+def recheck_filters(conn, categories: list[str] | None = None, chunk: int = 90, passes: int = 3) -> dict:
+    """ONE-OFF (2026-11-21): apply the junk rules and the audience yes/no to every LIVE item already stored in the phase-2 libraries, without fetching anything. A failing item is HELD (never deleted) with the
+    reason on its payload (`filter_dropped` for a rule, `audience_check: no` for the model); a passing one is marked `audience_check: yes`. An item already sent as a card is left alone. A verdict the model could not
+    give leaves the item unmarked and a repeat pass retries it; after `passes` passes whatever is still unknown is HELD (unknown is never coded as a yes). Resumable: marked items are skipped."""
+    import json
+    out = {}
+    for cat in categories or FILTERED_CATEGORIES:
+        res = {"live_before": 0, "dropped_by_rule": {}, "audience_no": 0, "audience_yes": 0, "unknown_held": 0, "sent_left_alone": 0}
+        with dict_cursor(conn) as cur:
+            cur.execute("SELECT COUNT(*) AS n FROM raw_items r WHERE r.category = %s AND r.held = FALSE AND NOT EXISTS (SELECT 1 FROM notifications n WHERE r.id = ANY(n.candidate_raw_item_ids))", (cat,))
+            res["live_before"] = cur.fetchone()["n"]
+            cur.execute("SELECT COUNT(*) AS n FROM raw_items r WHERE r.category = %s AND r.held = FALSE AND EXISTS (SELECT 1 FROM notifications n WHERE r.id = ANY(n.candidate_raw_item_ids))", (cat,))
+            res["sent_left_alone"] = cur.fetchone()["n"]
+        for _ in range(passes):
+            with dict_cursor(conn) as cur:
+                cur.execute("""SELECT r.id, r.payload FROM raw_items r WHERE r.category = %s AND r.held = FALSE AND r.payload->>'audience_check' IS NULL AND r.payload->>'filter_dropped' IS NULL
+                               AND NOT EXISTS (SELECT 1 FROM notifications n WHERE r.id = ANY(n.candidate_raw_item_ids)) ORDER BY r.id""", (cat,))
+                rows = cur.fetchall()
+            if not rows:
+                break
+            unknown_left = 0
+            for i in range(0, len(rows), chunk):
+                part = rows[i:i + chunk]
+                keep = []
+                with dict_cursor(conn) as cur:
+                    for r in part:
+                        pl = r["payload"]
+                        why = rule_reason(cat, pl.get("title") or "", pl.get("body") or "")
+                        if why:
+                            cur.execute("UPDATE raw_items SET held = TRUE, payload = payload || %s::jsonb WHERE id = %s", (json.dumps({"filter_dropped": why}), r["id"]))
+                            res["dropped_by_rule"][why] = res["dropped_by_rule"].get(why, 0) + 1
+                        else:
+                            keep.append(r)
+                verdicts = audience_verdicts(conn, cat, [audience_text(r["payload"].get("title") or "", r["payload"].get("body") or "") for r in keep])
+                with dict_cursor(conn) as cur:
+                    for r, v in zip(keep, verdicts):
+                        if v is None:
+                            unknown_left += 1
+                            continue
+                        cur.execute("UPDATE raw_items SET held = %s, payload = payload || %s::jsonb WHERE id = %s", (not v, json.dumps({"audience_check": "yes" if v else "no"}), r["id"]))
+                        res["audience_yes" if v else "audience_no"] += 1
+                conn.commit()
+                logger.info("recheck_filters %s: %d/%d %s", cat, min(i + chunk, len(rows)), len(rows), res)
+            if not unknown_left:
+                break
+        with dict_cursor(conn) as cur:                                       # whatever still has no verdict after the passes is held, never coded as a yes
+            cur.execute("""UPDATE raw_items r SET held = TRUE, payload = payload || '{"audience_check": "unknown"}'::jsonb WHERE r.category = %s AND r.held = FALSE AND r.payload->>'audience_check' IS NULL
+                           AND r.payload->>'filter_dropped' IS NULL AND NOT EXISTS (SELECT 1 FROM notifications n WHERE r.id = ANY(n.candidate_raw_item_ids))""", (cat,))
+            res["unknown_held"] = cur.rowcount
+            cur.execute("SELECT COUNT(*) AS n FROM raw_items r WHERE r.category = %s AND r.held = FALSE AND NOT EXISTS (SELECT 1 FROM notifications n WHERE r.id = ANY(n.candidate_raw_item_ids))", (cat,))
+            res["live_after"] = cur.fetchone()["n"]
+        conn.commit()
+        out[cat] = res
+    return out
 
 
 COLLECTORS = {
