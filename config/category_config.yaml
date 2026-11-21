@@ -863,7 +863,7 @@ earning_opportunities:
   # topic_key is the offer's landing page (or a significant-words title key for aggregators' own redirects), so the same
   # offer announced by two sources is one candidate; 72h absorbs a relay arriving late.
   cooldown_hours: 72
-  soft_daily_cap: 8        # a first guess with no operator history; pacing is 1/12 of it per 2-hour cycle
+  soft_daily_cap: 8        # a first guess with no operator history; pacing is ceil(8 / 6) = 2 cards per 4-hour cycle (group B, 2026-11-21; it was 1 per 2-hour cycle)
                             # (select_candidates.CYCLES_PER_DAY_BY_CATEGORY). Re-set after the first week of real cards.
 
   triage_model: template

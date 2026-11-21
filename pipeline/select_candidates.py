@@ -101,9 +101,9 @@ CYCLE_HOURS = 4.0
 # ceil(), not floor -- a cap of 4 with 6 cycles/day must still allow 1/cycle,
 # not round down to 0.
 CYCLES_PER_DAY = 24.0 / CYCLE_HOURS
-# earning_opportunities runs on its own 2-hour cadence (operator direction, Phase 5, 2026-11-15), so its per-cycle share
-# of the daily cap is 1/12, not 1/6.
-CYCLES_PER_DAY_BY_CATEGORY = {"earning_opportunities": 12.0}
+# earning_opportunities ran on its own 2-hour cadence (Phase 5, 2026-11-15: per-cycle share 1/12, so 1 card a cycle). On 2026-11-21 every channel moved to a 4-hour cycle in two staggered
+# groups (pipeline/cycle_groups.py), so it is back on the default: ceil(8 / 6) = 2 cards a cycle and the daily total is unchanged.
+CYCLES_PER_DAY_BY_CATEGORY: dict[str, float] = {}
 
 # A minimum on a stored score COMPONENT, in addition to review_threshold on the score itself. earning_opportunities stores
 # TWO scores that are never blended: scores.score is the VALUE (checked against review_threshold = 40), and the TRUST floor

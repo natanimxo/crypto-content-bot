@@ -186,7 +186,7 @@ def send_digest(conn, *, dry_run: bool = False, now: datetime | None = None, sin
 
 
 def run_daily(conn=None) -> dict | None:
-    """Called from every 2-hour earning cycle: sends at most once per MIN_HOURS_BETWEEN, and not before 06:00 UTC (09:00 for the operator)."""
+    """Called from every group-B cycle (every 4 hours, 02 06 10 14 18 22 UTC): sends at most once per MIN_HOURS_BETWEEN, and not before 06:00 UTC (09:00 for the operator)."""
     own = conn is None
     conn = conn or get_conn()
     try:

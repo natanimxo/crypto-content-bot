@@ -24,7 +24,8 @@ export default defineRailway(() => {
     env: { DATABASE_URL: preserve(), DEEPSEEK_API_KEY: preserve(), ETHERSCAN_API_KEY: preserve(), TELEGRAM_ALLOWED_USER_IDS: preserve(), TELEGRAM_BOT_TOKEN: preserve(), TELEGRAM_OPERATOR_CHAT_ID: preserve() },
   });
 
-  // Cron service: one collect -> score -> notify pass every 4h, then exit.
+  // GROUP A cron service (operator 2026-11-21, two staggered groups, pipeline/cycle_groups.py): Crypto Wall Street, Alpha Edge Crypto and Crypto Notebook.
+  // One collect -> score -> notify pass for those channels only, every 4h at 00 04 08 12 16 20 UTC, then exit.
   const collectCycle = service("collect-cycle", {
     source: repo,
     start: "python scripts/collect_cycle.py",
@@ -33,15 +34,15 @@ export default defineRailway(() => {
     env: { DATABASE_URL: preserve(), DEEPSEEK_API_KEY: preserve(), ETHERSCAN_API_KEY: preserve(), TELEGRAM_ALLOWED_USER_IDS: preserve(), TELEGRAM_BOT_TOKEN: preserve(), TELEGRAM_OPERATOR_CHAT_ID: preserve() },
   });
 
-  // 2-hour earning_opportunities cycle (Phase 5, 2026-11-15, operator direction): collect -> score -> notify Earn Stack only, then
-  // exit. A separate service because the main cycle's notify visits every channel and its pacing assumes 4 hours. Cron at :30 so it
-  // never overlaps the :00 main cycle. The operator created the service (and set the schedule through a preset); the schedule is
-  // defined HERE and `railway config apply` is authoritative. Secrets are preserve(): Railway keeps the existing values.
+  // GROUP B cron service (2026-11-21): Hustle to Million, Earn Stack and We Talk A Lot, collect -> score -> notify those channels only (plus the daily
+  // below-the-line digest and the source probes), every 4h at 02 06 10 14 18 22 UTC: two hours after group A, never the same hour. It was the 2-hour
+  // Earn Stack cycle (`30 */2 * * *`) until 2026-11-21; the service keeps its name and its start command, only the schedule changed. The operator
+  // created the service; the schedule is defined HERE and `railway config apply` is authoritative. Secrets are preserve(): Railway keeps the existing values.
   const collectEarning = service("collect-earning", {
     source: repo,
     start: "python scripts/collect_earning.py",
     replicas: { "sfo": 1 },
-    deploy: { cronSchedule: "30 */2 * * *", restartPolicyType: "NEVER" },
+    deploy: { cronSchedule: "0 2-23/4 * * *", restartPolicyType: "NEVER" },
     env: { DATABASE_URL: preserve(), DEEPSEEK_API_KEY: preserve(), TELEGRAM_ALLOWED_USER_IDS: preserve(), TELEGRAM_BOT_TOKEN: preserve(), TELEGRAM_OPERATOR_CHAT_ID: preserve() },
   });
 

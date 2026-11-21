@@ -1,6 +1,9 @@
-"""Orchestrates one full collect cycle: collect -> score -> notify (Section 2's
-top-level flow, minus triage/write which only run on demand). This is what
-.github/workflows/collect.yml actually invokes every 4-6h.
+"""Orchestrates one collect cycle: collect -> score -> notify (Section 2's
+top-level flow, minus triage/write which only run on demand).
+
+TWO STAGGERED GROUPS (operator 2026-11-21, pipeline/cycle_groups.py): this script is GROUP A -- Crypto Wall Street, Alpha Edge Crypto, Crypto Notebook, cron `0 */4 * * *`
+(00 04 08 12 16 20 UTC), Railway service `collect-cycle`: it collects only group A's categories and notifies only group A's channels. Group B (Hustle to Million, Earn Stack, We Talk A Lot, cron
+`0 2-23/4 * * *`) is scripts/collect_earning.py, which reuses `run_cycle` below. COLLECTORS stays the one list of every live category; the group decides which of them a run executes.
 
 COLLECTORS is the single place that lists which categories are "live" for this
 build phase (Section 16). Add a category here only once its collector, scorer
@@ -23,7 +26,7 @@ from collectors import (  # noqa: E402
     defi_yields, earning_opportunities, exchange_listings, gems_security, hacks_exploits, macro_news, news, startup_jobs, startup_news,
     rekt, technique_explainer, tool_launches, whale_alert, whale_movements, wtal_jokes, wtal_library, wtal_news, zachxbt,
 )
-from pipeline import llm_usage  # noqa: E402
+from pipeline import cycle_groups, llm_usage  # noqa: E402
 from pipeline.alerts import check_and_alert  # noqa: E402
 from pipeline.db import get_conn  # noqa: E402
 from pipeline.run_log import run_log  # noqa: E402
@@ -96,8 +99,11 @@ COLLECTORS = {
 STEP_TIMEOUT_SECONDS = 25 * 60
 
 
-def main():
+def run_cycle(group_key: str, after_notify=None):
+    """One cycle for a group ("A" or "B", pipeline/cycle_groups.py): its collectors and scorers, then notify for its channels only. `after_notify(guarded)` runs extra guarded steps after the notify
+    (group B: the daily below-the-line digest and the Railway source probes). Exits non-zero at the end when any step failed."""
     load_dotenv()
+    group = cycle_groups.GROUPS[group_key]
 
     # ISOLATION (2026-11-14, Phase 2): every step below is wrapped so one failing collector can
     # never take the rest of the cycle with it. Real incident, 2026-11-03: a single Etherscan timeout
@@ -137,7 +143,7 @@ def main():
         finally:
             conn.close()
 
-    for collector_key, collect_fn in COLLECTORS.items():
+    for collector_key, collect_fn in [(k, f) for k, f in COLLECTORS.items() if k in group["collectors"]]:
         category = SCORED_AS.get(collector_key, collector_key)
         logger.info("Collecting %s...", collector_key)
         inserted = guarded(f"collect_{collector_key}", collect_fn)
@@ -157,8 +163,10 @@ def main():
                 conn.close()
         guarded(f"score_{category}", score)
 
-    logger.info("Running notify...")
-    guarded("notify", notify.run)  # notify.run() records its own failure and alerts (bot/notify.py)
+    logger.info("Running notify for %s: %s", group["label"], ", ".join(group["channels"]))
+    guarded(group["notify_job"], lambda: notify.run(only_channels=group["channels"], job_name=group["notify_job"]))  # notify.run() records its own failure and alerts (bot/notify.py)
+    if after_notify:
+        after_notify(guarded)
 
     # LLM cost guard (pipeline/llm_usage.py): balance + daily spend/call-count
     # alerts. Never raises.
@@ -171,18 +179,24 @@ def main():
     # One summary row per cycle: what failed, so a degraded cycle is a query, not a log trawl.
     conn = get_conn()
     try:
-        with run_log(conn, "collect_cycle") as state:
+        with run_log(conn, group["summary_job"]) as state:
+            state["details"]["group"] = group_key
+            state["details"]["channels"] = group["channels"]
             state["details"]["failed_steps"] = failures
-            state["details"]["collectors"] = len(COLLECTORS)
+            state["details"]["collectors"] = len(group["collectors"])
             if failures:
                 state["status"] = "partial_failure"
     finally:
         conn.close()
 
     if failures:
-        logger.error("Collect cycle done WITH FAILURES: %s", ", ".join(failures))
+        logger.error("%s cycle done WITH FAILURES: %s", group["label"], ", ".join(failures))
         sys.exit(1)
-    logger.info("Collect cycle done.")
+    logger.info("%s cycle done.", group["label"])
+
+
+def main():
+    run_cycle("A")
 
 
 if __name__ == "__main__":

@@ -2481,3 +2481,6 @@ Open for the operator: the sentence minimum is not applied to dark history, worl
 
 ### We Talk A Lot: no spoilers, looser dark-history check (2026-11-21, operator)
 Spoilers removed everywhere (text always fully visible; datelines kept). Dark history: its own looser question; 1,033 held items re-checked, 704 released, 329 stay held, 728 live and unsent (was 25). Other libraries unchanged.
+
+### Schedule: two staggered cron groups (2026-11-21, operator)
+Group A (Crypto Wall Street, Alpha Edge Crypto, Crypto Notebook) `0 */4 * * *` on `collect-cycle`; group B (Hustle to Million, Earn Stack, We Talk A Lot) `0 2-23/4 * * *` on `collect-earning`; each run collects its own categories and notifies only its own channels. Earn Stack 2h -> 4h with a per-cycle limit of 2 (daily total 8 unchanged); below-the-line digest once a day; rolling caps unchanged. `railway config plan` before apply: 1 to change (collect-earning cronSchedule `30 */2 * * *` -> `0 2-23/4 * * *`), 0 add, 0 destroy. See HANDOFF.md for the details and the first-run confirmation.

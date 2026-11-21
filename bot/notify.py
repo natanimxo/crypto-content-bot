@@ -330,9 +330,8 @@ def notify_channel(conn, channel: str, categories: list[str], soft_daily_cap: in
 
 
 def run(only_channels: list[str] | None = None, job_name: str = "notify") -> None:
-    """`only_channels` scopes a run to some channels (the 2-hour earning_opportunities service notifies Earn Stack only --
-    running the full notify at 2 hours would double every other channel's per-cycle pacing); `job_name` keeps that run's
-    run_logs row and its 3-consecutive-failures alert separate from the main cycle's."""
+    """`only_channels` scopes a run to some channels: each of the two staggered cron groups (pipeline/cycle_groups.py) notifies only its own channels; `job_name` keeps that group's
+    run_logs row and its 3-consecutive-failures alert separate from the other group's."""
     load_dotenv()  # no-op in CI (no .env there); picks up local .env when run directly
     conn = get_conn()
     try:
