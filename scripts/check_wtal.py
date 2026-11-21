@@ -161,6 +161,20 @@ def main():
     check("article: dateline is 'Outlet, 20 Nov:' (no date -> 'Outlet:')", (AR.dateline("BBC", datetime(2026, 11, 20, tzinfo=timezone.utc)), AR.dateline("BBC", None)), ("BBC, 20 Nov:", "BBC:"))
     check("article: a page with no usable paragraph says so (paywall / bot wall) instead of inventing one", AR.from_html("<html><body><p>Short.</p><p>Please enable cookies to continue reading this article on our website today.</p></body></html>", "https://x.test/")["paragraphs"], [])
     check("article: the second paragraph is dropped when it would push the total past 900 characters", len(AR._pick(["a" * 700, "b" * 400])), 1)
+    variety = ('<html><head><meta property="og:site_name" content="Variety"></head><body><article><div class="article-header"><p class="byline-text-long">By Some Writer of the Day</p></div>'
+               '<div class="pmc-paywall"><p class="paragraph">What does an actor do in the quiet moments before the announcement that will change his life today?</p>'
+               '<p class="paragraph">For Robert Pattinson, there were about 12 hours between the call and the release. He spent it watching a film.<div class="injected-related-story"><h2>Related Stories</h2>'
+               '<div>Himalayan Story Lab Unveils Fourth Cohort</div></div><div class="admz"><script>blogherads.adq.push(1)</script></div></p></div></article></body></html>')
+    vr = AR.from_html(variety, "https://variety.com/2026/x/")
+    check("article: a body wrapped in a 'pmc-paywall' div is the article (Variety), and a Related Stories card nested inside a paragraph is not part of its words", vr["paragraphs"],
+          ["What does an actor do in the quiet moments before the announcement that will change his life today?", "For Robert Pattinson, there were about 12 hours between the call and the release. He spent it watching a film."])
+    blooloop = ('<html><body><article><div class="widget__subheadline"><h2 class="widget__subheadline-text"><p>As challenges continue to stack up for attraction operators, finding new opportunities matters.</p></h2></div>'
+                '<div class="body-description"><p>Whether you are a theme park, cultural organisation, zoo or any other visitor attraction, retail can contribute to growth.</p>'
+                '<small class="media-caption"><p>Retail offers a way for guests to get involved at the park every day</p></small></div></article></body></html>')
+    check("article: a 'body-description' container is body text (Blooloop), the standfirst above it and the caption inside it are not", AR.from_html(blooloop, "https://blooloop.com/x/")["paragraphs"],
+          ["Whether you are a theme park, cultural organisation, zoo or any other visitor attraction, retail can contribute to growth."])
+    check("article: a paywall MESSAGE block is still skipped", AR.from_html('<html><body><article><div class="paywall-message"><p>This is a long enough line that is only the subscription pitch for the reader.</p></div><p>The real first paragraph of the story, long enough to be kept as the lede.</p></article></body></html>', "https://x.test/")["paragraphs"], ["The real first paragraph of the story, long enough to be kept as the lede."])
+    check("jokes: the check prompt asks for dark AND a clear punchline, and verdicts carry check_version 2", ("clear punchline" in WJ.DARK_PROMPT, WJ.CHECK_VERSION), (True, 2))
     check("article: a feed fragment gives its own first paragraphs, 'The post X appeared first on' lines are not the lede", AR.paragraphs_from_fragment("<p>The opening paragraph of the satire piece, written in full by the outlet.</p><p>The post <a href='x'>T</a> appeared first on <a>Y</a>.</p>")[0].startswith("The opening paragraph"), True)
 
     lem_feed = rss([("META: Banning Townflex", hrs(1), "x", "https://lemmy.world/post/1"),

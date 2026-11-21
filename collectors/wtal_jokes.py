@@ -39,9 +39,14 @@ JOKEAPI = "https://v2.jokeapi.dev"
 JOKEAPI_CATEGORIES = "Dark"     # the operator's call: Dark only
 CHECK_BATCH = 12
 
-DARK_PROMPT = """You are sorting jokes for a dark-humor channel. For each numbered joke answer true ONLY if it is genuinely dark humor: the joke's humor depends on death, suicide, violence, illness, disability, abuse, war, atrocity, crime, tragedy or another grim or taboo subject.
+CHECK_VERSION = 2     # 2 = dark AND a clear punchline (operator 2026-11-21, after the first 1,500 Reddit jokes came back 81% "yes" with rambling posts and weak gags among them); 1 = dark only
+
+DARK_PROMPT = """You are sorting jokes for a dark-humor channel. For each numbered joke answer true ONLY if BOTH of these hold:
+(1) it is genuinely dark humor: the joke's humor depends on death, suicide, violence, illness, disability, abuse, war, atrocity, crime, tragedy or another grim or taboo subject;
+(2) it has a clear punchline: a setup that builds to one specific, identifiable twist or payoff line that makes the joke land, understandable on its own.
 Answer false for clean puns and wordplay, innocent or merely edgy-sounding jokes, innuendo with nothing grim in it, and absurd or silly gags with nothing dark about them.
-Do not judge whether a joke is acceptable or offensive; judge ONLY whether it is dark humor.
+Also answer false for anything that is not a finished joke: rambling stories and anecdotes, personal confessions, rants, bare statements or opinions or insults with no twist, observations, lists, riddles with no answer, text that is cut off, and jokes whose payoff depends on context that is missing.
+Do not judge whether a joke is acceptable or offensive; judge ONLY whether it is dark humor with a clear punchline.
 
 Return ONLY a JSON object: {{"verdicts": [true, false, ...]}} with exactly {n} entries, in the order of the jokes.
 
@@ -239,6 +244,7 @@ def collect(force: bool = False) -> int:
                         unknown += 1
                         continue
                     payload["dark_check"] = "yes" if v else "no"
+                    payload["check_version"] = CHECK_VERSION
                     (yes if v else no).append((ext, payload))
                 source_id = get_or_create_source(conn, CATEGORY, f"wtal_{name}", "api", {"library": name})
                 inserted = insert_raw_items_batch(conn, source_id, CATEGORY, yes)
@@ -271,8 +277,44 @@ def recheck_library(conn) -> dict:
                 continue
             done["checked"] += 1
             done["yes" if v else "no_held"] += 1
-            cur.execute("UPDATE raw_items SET payload = payload || %s::jsonb, held = %s WHERE id = %s", (json.dumps({"dark_check": "yes" if v else "no"}), not v, r["id"]))
+            cur.execute("UPDATE raw_items SET payload = payload || %s::jsonb, held = %s WHERE id = %s", (json.dumps({"dark_check": "yes" if v else "no", "check_version": CHECK_VERSION}), not v, r["id"]))
     conn.commit()
+    return done
+
+
+def recheck_v2(conn, limit: int | None = None, chunk: int = 96) -> dict:
+    """ONE-OFF (2026-11-21): put every stored joke that was judged under the old, dark-only prompt (no payload.check_version) through the current prompt (dark AND a clear punchline), without fetching any file.
+    A joke that passes is live (held = FALSE), one that fails is HELD, never deleted; the old verdict is kept in payload.dark_check_v1. A joke already sent as a card is left alone (it stays on record as it was).
+    A verdict the model could not give leaves the row untouched and counted, so a repeat run retries it: unknown is never coded as a yes. Committed per chunk, so an interrupted run resumes."""
+    done = {"checked": 0, "kept_live": 0, "newly_live": 0, "newly_held": 0, "stays_held": 0, "unknown": 0, "skipped_already_sent": 0}
+    with dict_cursor(conn) as cur:
+        cur.execute("""SELECT r.id, r.held, r.payload FROM raw_items r
+                       WHERE r.category = %s AND r.payload->>'dark_check' IN ('yes', 'no') AND r.payload->>'check_version' IS NULL
+                         AND NOT EXISTS (SELECT 1 FROM notifications n WHERE r.id = ANY(n.candidate_raw_item_ids))
+                       ORDER BY r.id""", (CATEGORY,))
+        rows = cur.fetchall()
+        cur.execute("""SELECT COUNT(*) AS n FROM raw_items r WHERE r.category = %s AND r.payload->>'dark_check' IN ('yes', 'no') AND r.payload->>'check_version' IS NULL
+                         AND EXISTS (SELECT 1 FROM notifications n WHERE r.id = ANY(n.candidate_raw_item_ids))""", (CATEGORY,))
+        done["skipped_already_sent"] = cur.fetchone()["n"]
+    if limit:
+        rows = rows[:limit]
+    for i in range(0, len(rows), chunk):
+        part = rows[i:i + chunk]
+        verdicts = dark_verdicts(conn, [r["payload"]["body"] for r in part])
+        with dict_cursor(conn) as cur:
+            for r, v in zip(part, verdicts):
+                if v is None:
+                    done["unknown"] += 1
+                    continue
+                done["checked"] += 1
+                if v:
+                    done["newly_live" if r["held"] else "kept_live"] += 1
+                else:
+                    done["newly_held" if not r["held"] else "stays_held"] += 1
+                cur.execute("UPDATE raw_items SET payload = payload || %s::jsonb, held = %s WHERE id = %s",
+                            (json.dumps({"dark_check": "yes" if v else "no", "check_version": CHECK_VERSION, "dark_check_v1": r["payload"].get("dark_check")}), not v, r["id"]))
+        conn.commit()
+        logger.info("jokes recheck_v2: %d/%d %s", min(i + chunk, len(rows)), len(rows), done)
     return done
 
 

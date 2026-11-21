@@ -28,7 +28,7 @@ MIN_PARAGRAPH_CHARS = 60          # shorter lines are bylines, captions, "Advert
 MAX_PARAGRAPHS = 2
 MAX_TOTAL_CHARS = 900             # a second paragraph is added only while the total stays within this; the first paragraph is always kept whole
 MAX_FIRST_PARAGRAPH_CHARS = 1500  # a single paragraph longer than this is a wall of text, not a lede: treated as "nothing more"
-_SKIP_CLASS = re.compile(r"related|promo|newsletter|comment|share|social|byline|author|caption|credit|advert|sponsor|signup|subscribe|breadcrumb|teaser|footer|sidebar|cookie|consent|paywall|metadata|dateline|disclaimer|standfirst|subhead|subtitle|strapline|description|text-to-speech|^dek$|summary", re.I)
+_SKIP_CLASS = re.compile(r"related|promo|newsletter|comment|share|social|byline|author|caption|credit|advert|sponsor|signup|subscribe|breadcrumb|teaser|footer|sidebar|cookie|consent|paywall-(?:message|prompt|cta|banner|overlay|gate|wall)|^paywall$|metadata|dateline|disclaimer|standfirst|subhead|subtitle|strapline|(?<!body-)description|text-to-speech|^dek$|summary", re.I)
 _BOILERPLATE = re.compile(r"^(advertisement|sign up|subscribe|follow us|read more|read also|related:|click here|copyright|all rights reserved|by |photo:|image:|\(reuters\)\s*$|updated:|published:|share this|listen to this article|story continues|this article was|we use cookies|for more|download the)", re.I)
 _BOILERPLATE_ANYWHERE = re.compile(r"(javascript is (disabled|required)|enable cookies|please enable|subscribe to (read|continue)|create a free account|already a subscriber|sign in to (read|continue)|unusual traffic|are you a robot)", re.I)
 
@@ -71,6 +71,19 @@ def _article_date(soup) -> datetime | None:
 _WP_CLASS = re.compile(r"^(category|tag|post|type|status|format|wp|hentry|entry|has|is|menu|page|taxonomy)-", re.I)
 
 
+_NESTED_BLOCKS = ["div", "aside", "section", "article", "figure", "ul", "ol", "table", "script", "style", "iframe", "form", "button", "noscript", "h1", "h2", "h3", "h4", "h5", "h6", "nav", "footer"]
+
+
+def _p_text(p) -> str:
+    """The paragraph's own words. A page whose HTML is malformed can nest block elements INSIDE a <p> (Variety puts its 'Related Stories' card and its ad slot there, Blooloop-style wrappers too): the
+    parser keeps them as children, and get_text() would print the card's words as part of the paragraph. Those nested blocks are dropped before the text is read (on a copy, the page is untouched)."""
+    import copy
+    q = copy.copy(p)
+    for el in q.find_all(_NESTED_BLOCKS):
+        el.decompose()
+    return _clean(q.get_text())
+
+
 def _skippable(p) -> bool:
     """A paragraph that is page chrome, not article body: inside a nav / footer / figure ... tag, or within its nearest four ancestors a class TOKEN that names promo / share / byline / caption / standfirst
     ... (token by token, and never WordPress's own category-/tag-/post- slugs: a whole-container class string matches almost anything)."""
@@ -102,7 +115,7 @@ def _pick(paragraphs: list[str]) -> list[str]:
 def paragraphs_from_fragment(fragment: str) -> list[str]:
     """First body paragraphs of an HTML fragment a feed carries (content:encoded / description): the source's own words, as above."""
     soup = BeautifulSoup(fragment or "", "html.parser")
-    paras = [_clean(p.get_text()) for p in soup.find_all("p") if not p.find_parent(["blockquote", "figure"])]
+    paras = [_p_text(p) for p in soup.find_all("p") if not p.find_parent(["blockquote", "figure"])]
     if not paras:   # a feed with bare text and <br> instead of <p>
         text = BeautifulSoup(re.sub(r"(?i)<br\s*/?>", "\n\n", fragment or ""), "html.parser").get_text()
         paras = [_clean(x) for x in re.split(r"\n\s*\n", text)]
@@ -118,10 +131,10 @@ def from_html(html: str, url: str = "") -> dict:
     if not outlet:
         outlet = _domain_name(url)
     root = soup.find("article") or soup.find(attrs={"itemprop": "articleBody"}) or soup.find("main") or soup.body or soup
-    paras = [_clean(p.get_text()) for p in root.find_all("p") if not _skippable(p)]
+    paras = [_p_text(p) for p in root.find_all("p") if not _skippable(p)]
     picked = _pick(paras)
     if not picked and root is not soup.body:   # the <article> tag held only chrome: try the whole page once
-        picked = _pick([_clean(p.get_text()) for p in (soup.body or soup).find_all("p") if not _skippable(p)])
+        picked = _pick([_p_text(p) for p in (soup.body or soup).find_all("p") if not _skippable(p)])
     return {"outlet": outlet, "date": _article_date(soup), "paragraphs": picked, "status": "ok" if picked else "no_paragraphs", "headline": _meta(soup, "og:title")}
 
 
