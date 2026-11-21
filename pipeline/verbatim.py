@@ -38,7 +38,18 @@ CARD_ORIGINAL_MAX_CHARS = 1100
 _SENTENCE_SPLIT_RE = re.compile(r'(?<=[.!?…])["”’)\]]*\s+(?=["“‘(\[]?[A-Z0-9])')
 _NO_SPACE_AFTER_STOP_RE = re.compile(r"([a-z0-9][.!?])([A-Z])")
 _TAG_RE = re.compile(r"^#[A-Za-z][A-Za-z0-9]{3,24}$")
+# A hashtag is WEAK when every word in it is a generic one ("#EdgyJokes", "#DarkHumorJokes", "#OffensiveComedy", "#BlackComedy", "#WeirdNews"): it says the genre, not the subject, and every humor channel uses it.
+# Operator 2026-11-21: ban those. One specific word makes a tag acceptable ("#DarkCatholicHumor", "#AcnePunchline", "#ChickenCrossing").
+_GENERIC_WORDS = ("funny", "lol", "memes", "meme", "viral", "humor", "humour", "humorous", "fun", "news", "joke", "jokes", "haha", "comedy", "weird", "satire", "satirical", "headline", "headlines", "breaking",
+                  "wtf", "odd", "bizarre", "edgy", "dark", "offensive", "punchline", "punchlines", "laugh", "laughs", "daily", "today", "absurd", "real", "story", "stories", "black", "tasteless", "sick", "twisted",
+                  "inappropriate", "irreverent", "sarcasm", "sarcastic", "one", "liner", "liners", "bad", "taste", "good", "best", "top", "new", "trending", "trend", "life", "world", "tag", "tags", "stuff", "things", "morbid", "gallows")
+_GENERIC_TAG_RE = re.compile(r"^(?:" + "|".join(sorted(_GENERIC_WORDS, key=len, reverse=True)) + r")+$")
 _GENERIC_TAGS = {"#funny", "#lol", "#memes", "#meme", "#viral", "#humor", "#humour", "#fun", "#news", "#joke", "#jokes", "#haha", "#comedy", "#weirdnews", "#satire", "#satirenews", "#satireheadline", "#headline", "#breakingnews", "#wtf", "#odd", "#oddnews", "#bizarre"}
+
+
+def is_generic_tag(tag: str) -> bool:
+    t = tag.lstrip("#").lower()
+    return ("#" + t) in _GENERIC_TAGS or bool(_GENERIC_TAG_RE.match(t))
 _ALLOWED_EDIT_TAGS = ("tg-spoiler", "b", "i", "u", "s", "code")
 
 
@@ -117,7 +128,7 @@ def _hashtag_prompt(label: str, title: str, body: str, sentences: list[str] | No
 Category: {label}
 TITLE: {title or "(none)"}
 TEXT: {body[:1500] if not sentences else "(see the numbered sentences)"}{numbered}
-Return ONLY a JSON object with "hashtags": 2 or 3 niche hashtags for this category and this text (letters and digits only, 4 to 25 characters each, nothing generic like #funny #lol #memes #viral){ask_breaks}.
+Return ONLY a JSON object with "hashtags": 2 or 3 niche hashtags for this category and this text (letters and digits only, 4 to 25 characters each, nothing generic like #funny #lol #memes #viral #edgyjokes #darkhumor #comedy: name the SUBJECT of this text, e.g. a person, place, object or event in it){ask_breaks}.
 Example: {{"hashtags": ["#BizarreHistory", "#PopeDrama"]{', "paragraph_starts": [0, 2]' if sentences else ''}}}"""
 
 
@@ -128,7 +139,7 @@ def valid_hashtags(tags) -> list[str]:
         if not t.startswith("#"):
             t = "#" + t
         t = re.sub(r"[^#A-Za-z0-9]", "", t)
-        if _TAG_RE.match(t) and t.lower() not in _GENERIC_TAGS and t.lower() not in {x.lower() for x in out}:
+        if _TAG_RE.match(t) and not is_generic_tag(t) and t.lower() not in {x.lower() for x in out}:
             out.append(t)
     return out[:3]
 
@@ -255,7 +266,12 @@ def build(conn, category: str, raw_item: dict, *, use_model: bool = True, seed: 
     if len(parts) == 1 and len(split_sentences(parts[0])) >= MIN_SENTENCES_FOR_BREAKS:
         sentences = split_sentences(parts[0])
     model = ask_model(conn, category, label, title, body_joined, sentences) if use_model else {}
-    tags = valid_hashtags(model.get("hashtags")) or default_hashtags(category)
+    tags = valid_hashtags(model.get("hashtags"))
+    for d in default_hashtags(category):                       # the model's specific tags first; the category's own defaults only to make up the 2 the format asks for
+        if len(tags) >= 2:
+            break
+        if d.lower() not in {x.lower() for x in tags}:
+            tags.append(d)
     if sentences:
         starts = valid_starts(model.get("paragraph_starts"), len(sentences)) or code_starts(len(sentences))
         parts = paragraphs_from_starts(sentences, starts)

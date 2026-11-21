@@ -154,7 +154,7 @@ def run_probe(p: dict) -> dict:
     out = {"id": p["id"], "dir": p["dir"], "url": p["url"][:110]}
     t0 = time.time()
     try:
-        headers = {"User-Agent": UA, "Accept": "application/json, application/rss+xml, text/html;q=0.8, */*;q=0.5"}
+        headers = {"User-Agent": UA, "Accept": "application/json, application/rss+xml, text/html;q=0.8, */*;q=0.5", **(p.get("headers") or {})}
         if p.get("method") == "POST":
             r = requests.post(p["url"], json=p.get("json"), headers=headers, timeout=TIMEOUT)
         else:
@@ -277,6 +277,33 @@ def probe_telegram_all() -> list[dict]:
     return res
 
 
+def probe_articles(limit: int = 14) -> dict:
+    """FROM RAILWAY: can the news-card collector open the articles it needs? Takes the article links currently in the Lemmy c/nottheonion feed (the weird-news source whose cards carry the article's own first paragraphs)
+    and runs pipeline.article.fetch on each: status, outlet, how many paragraphs. One fixed id, so the probe set does not look "changed" every run."""
+    from collectors import wtal_news
+    from pipeline import article
+    out = {"id": "article_probe", "dir": "article pages from Railway", "kind": "article", "url": "lemmy nottheonion links", "status": 200, "fetched": []}
+    try:
+        feed = wtal_news.fetch_feed(wtal_news._URLS["w_lemmy_nottheonion"])
+    except Exception as exc:
+        return {**out, "status": type(exc).__name__, "error": str(exc)[:90]}
+    seen = set()
+    for e in feed.entries:
+        url = wtal_news.lemmy_external_url(e)
+        host = wtal_news._host(url or "")
+        if not url or host in seen:
+            continue
+        seen.add(host)
+        res = article.fetch(url)
+        out["fetched"].append({"host": host, "status": res["status"], "paragraphs": len(res["paragraphs"]), "outlet": res["outlet"], "dated": bool(res["date"]), "chars": sum(len(x) for x in res["paragraphs"])})
+        time.sleep(1.0)
+        if len(out["fetched"]) >= limit:
+            break
+    out["items"] = len(out["fetched"])
+    out["opened"] = sum(1 for f in out["fetched"] if f["paragraphs"])
+    return out
+
+
 def probe_all(only: list[str] | None = None) -> list[dict]:
     results = []
     for p in PROBES:
@@ -284,6 +311,11 @@ def probe_all(only: list[str] | None = None) -> list[dict]:
             continue
         results.append(run_probe(p))
         time.sleep(0.4)
+    if not only or "article_probe" in only:
+        try:
+            results.append(probe_articles())
+        except Exception as exc:        # a probe must never take the probe run down
+            results.append({"id": "article_probe", "dir": "article pages from Railway", "status": type(exc).__name__, "error": str(exc)[:90]})
     return results
 
 

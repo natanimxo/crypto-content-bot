@@ -109,6 +109,12 @@ WTAL_PROBES = [
     # 2026-11-20 (operator: dark jokes only, "JokeAPI's Dark category and dark-joke sources"): Lemmy's API from Railway, for the two communities that could feed the dark library (each joke would go through the DeepSeek dark check)
     {"id": "j_lemmy_jokes_api", "dir": J, "url": "https://lemmy.world/api/v3/post/list?community_name=jokes&sort=New&limit=50"},
     {"id": "j_lemmy_darkhumor_api", "dir": J, "url": "https://lemmy.world/api/v3/post/list?community_name=darkhumor&sort=New&limit=50"},
+    # 2026-11-21 (operator: 68 dark jokes is too small): bulk candidates, reachable from Railway? (Range request: the size is in Content-Range, the file is not downloaded)
+    {"id": "j_taivop_reddit", "dir": J, "url": "https://raw.githubusercontent.com/taivop/joke-dataset/master/reddit_jokes.json", "headers": {"Range": "bytes=0-2000"}},
+    {"id": "j_taivop_wocka", "dir": J, "url": "https://raw.githubusercontent.com/taivop/joke-dataset/master/wocka.json", "headers": {"Range": "bytes=0-2000"}},
+    {"id": "j_taivop_stupidstuff", "dir": J, "url": "https://raw.githubusercontent.com/taivop/joke-dataset/master/stupidstuff.json", "headers": {"Range": "bytes=0-2000"}},
+    {"id": "j_hf_funnydata_rows", "dir": J, "url": "https://datasets-server.huggingface.co/rows?dataset=SajilAwale/FunnyData&config=default&split=train&offset=0&length=20"},
+    {"id": "j_mastodon_darkjokes", "dir": J, "url": "https://mastodon.social/tags/darkjokes.rss"},
     {"id": "j_jokeapi_info", "dir": J, "url": "https://v2.jokeapi.dev/info"},
     {"id": "j_chucknorris", "dir": J, "url": "https://api.chucknorris.io/jokes/random"},
     {"id": "j_chucknorris_dev", "dir": J, "url": "https://api.chucknorris.io/jokes/random?category=dev"},

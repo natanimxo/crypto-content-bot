@@ -132,9 +132,9 @@ polls:
 
 # Default hashtags when the model returns none that pass the checks (2-3, niche).
 hashtag_defaults:
-  weird_news: ["#WeirdNews", "#AbsurdButTrue"]
-  satire: ["#Satire", "#HeadlineOfTheDay"]
-  jokes: ["#DarkHumor", "#BlackComedy"]
+  weird_news: ["#AbsurdButTrue", "#RealNewsReally"]
+  satire: ["#FakeNewsDesk", "#HeadlineOfTheDay"]
+  jokes: ["#GallowsHumor", "#BadTasteClub"]
   dark_history: ["#DarkHistory", "#BizarreHistory"]
   unusual_deaths: ["#UnusualDeaths", "#DarwinWouldKnow"]
   world_records: ["#WorldRecords", "#UselessTalent"]

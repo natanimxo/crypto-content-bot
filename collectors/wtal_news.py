@@ -128,10 +128,19 @@ def lemmy_external_url(entry) -> str | None:
     own = _host(entry.get("link") or "")
     for l in entry.get("links", []):
         href = l.get("href") or ""
-        if href.startswith("http") and _host(href) != own:
+        if href.startswith("http") and _host(href) != own and not _is_media(href):
             return href
     m = re.search(r'<br\s*/?>\s*<a href="(https?://[^"]+)"', entry.get("summary") or "")
-    return m.group(1) if m and _host(m.group(1)) != own else None
+    return m.group(1) if m and _host(m.group(1)) != own and not _is_media(m.group(1)) else None
+
+
+_MEDIA_HOSTS = {"i.redd.it", "v.redd.it", "imgur.com", "i.imgur.com", "youtube.com", "youtu.be", "m.youtube.com", "tiktok.com", "x.com", "twitter.com", "instagram.com", "facebook.com", "giphy.com", "streamable.com"}
+
+
+def _is_media(url: str) -> bool:
+    """A Lemmy post that links to a picture, a video or a social post is not a news article (the 16:00 UTC Railway run opened an image file and found no paragraph, as it should)."""
+    path = urlparse(url).path.lower()
+    return bool(re.search(r"\.(jpe?g|png|gif|webp|avif|mp4|webm|mov)$", path)) or "/pictrs/" in path or _host(url) in _MEDIA_HOSTS
 
 
 def _payload(title, parts, outlet, key, url, when, body_source, extra=None):

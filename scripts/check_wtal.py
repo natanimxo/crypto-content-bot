@@ -168,6 +168,7 @@ def main():
                     ("A text post that links to no article at all, only talks", hrs(2), "submitted by a to n<p>just words</p>", "https://lemmy.world/post/3"),
                     ("Old odd story from long ago that nobody posts now", hrs(300), '<br /><a href="https://x.test/old">x</a>', "https://lemmy.world/post/4")])
     ents = WN.weird_entries("lemmy", lem_feed, now)
+    check("weird news: a Lemmy post linking to an image, video or social post is not an article", [WN._is_media(u) for u in ("https://thelemmy.club/pictrs/image/69b8.webp", "https://i.redd.it/abc.jpeg", "https://www.youtube.com/watch?v=1", "https://www.cnn.com/2026/11/13/us/story")], [True, True, True, False])
     check("weird news: Lemmy keeps only fresh LINK posts (META, text posts and stale ones are skipped)", [e["title"][:20] for e in ents], ["Woman loses suit aga"])
     ff = FakeFetcher({"https://www.channelnewsasia.com/sg/chicken": {"outlet": "CNA", "date": None, "paragraphs": ["SINGAPORE: A woman sued her driver.", "The judge dismissed it."], "status": "ok"}})
     wp = WN.weird_payload("lemmy", "Lemmy c/nottheonion", ents[0], ff)
@@ -224,6 +225,18 @@ def main():
     check("jokes: the card's original block shows the category and the flags that are set", ("Dark | flags: racist" in orig, "JokeAPI" in orig), (True, True))
     check("jokes: Dark JokeAPI scores above other sources", (SC.score_jokes(None, 1, tp | {"body": "x" * 30})["quality"], SC.score_jokes(None, 1, {"body": "x" * 30, "source_key": "jokeapi", "joke_category": "Pun"})["quality"]), (80.0, 75.0))
     check("headers: the jokes pool is the dark pool (no pun-friendly lines), one pool per category", (all(h for h in V.load_config()["headers"]["jokes"]), "jokes" in V.load_config()["headers"], "weird_news" in V.load_config()["headers"], "satire" in V.load_config()["headers"]), (True, True, True, True))
+    # hashtags (operator 2026-11-21): a tag whose every word is generic is out; one specific word makes it acceptable
+    check("hashtags: genre-only tags are rejected", [V.is_generic_tag(t) for t in ("#EdgyJokes", "#DarkHumorJokes", "#OffensiveComedy", "#BlackComedy", "#WeirdNews", "#darkhumorjokes", "#Satire")], [True] * 7)
+    check("hashtags: a tag with a specific subject word is kept", [V.is_generic_tag(t) for t in ("#DarkCatholicHumor", "#AcnePunchline", "#ChickenCrossing", "#SingaporeSuit", "#PriestJokes", "#AbsurdButTrue")], [False] * 6)
+    check("hashtags: the model's generic ones are dropped, its specific ones kept", V.valid_hashtags(["#EdgyJokes", "#DarkHumorJokes", "#PriestJokes", "#AcnePunchline", "#Extra"]), ["#PriestJokes", "#AcnePunchline", "#Extra"])
+    # Lemmy jokes
+    ok_post = {"post": {"id": 1, "name": "My therapist said time heals", "body": "Then she sent me the bill", "ap_id": "https://lemmy.world/post/1", "nsfw": True}}
+    lp = WJ.lemmy_payload(ok_post, "jokes")
+    check("lemmy jokes: title = setup, body = delivery (two parts, delivery spoilered), nsfw kept as a flag, credited to the community", (lp["body_parts"], lp["flags"], lp["source_name"], lp["joke_category"]), (["My therapist said time heals", "Then she sent me the bill"], {"nsfw": True}, "Lemmy c/jokes", "c/jokes"))
+    lb = V.build(None, "jokes", {"raw_item_id": 5, "payload": lp}, seed=0, use_model=False)
+    check("lemmy jokes: the card passes the exact-words check with the delivery in a spoiler", (lb["ok"], "<tg-spoiler>Then she sent me the bill</tg-spoiler>" in lb["text"]), (True, True))
+    check("lemmy jokes: Markdown / links / spoiler markup, mod posts and removed posts are skipped", [WJ.lemmy_payload({"post": {"id": i, "name": n, "body": b, **extra}}, "jokes") for i, (n, b, extra) in enumerate([("Joke", "see https://x.test", {}), ("Joke", "::: spoiler tap" + chr(10) + "x" + chr(10) + ":::", {}), ("META: rules", "", {}), ("Joke", "x", {"removed": True}), ("Joke", "x", {"featured_community": True})])], [None] * 5)
+    check("lemmy jokes: a changed source set makes the monthly pass due again", WJ.source_names(), ["jokeapi", "lemmy_jokes", "lemmy_darkhumor"])
     check("notify: the humor channel is limited to 2 cards per cycle in total", N.CHANNEL_PER_CYCLE_LIMIT.get("we_talk_a_lot"), 2)
 
     # ---- config
