@@ -57,7 +57,7 @@ def main():
     check("post: the title is bold and the hashtags are the LAST line of the post, not under the title", (lines[0], lines[-1]), (f"<b>{news['title']}</b>", "#WeTalkALot #WeirdNews"))
     check("post: the hashtags are the category's fixed pair (#WeTalkALot + its one tag), whatever the model says", out["tags"], ["#WeTalkALot", "#WeirdNews"])
     check("post: the model's paragraph breaks (before sentence 3) are applied to the ORIGINAL sentences", "He had paid them in 1998.\n\nA clerk confirmed the error." in text, True)
-    check("post: the final sentence is inside <tg-spoiler>, and there is NO source or credit line in the post", ("<tg-spoiler>He asked for a receipt.</tg-spoiler>" in text, "Source" in text, "UPI" in text), (True, False, False))
+    check("post: NO spoiler anywhere (the last sentence is plain, visible text), and no source or credit line in the post", ("<tg-spoiler>" in text, "He asked for a receipt." in text, "Source" in text, "UPI" in text), (False, True, False, False))
     check("post: no word was added -- the visible text minus the tags equals title + body", visible_words(text).replace(V.strip_ws("#WeTalkALot #WeirdNews"), "", 1), V.strip_ws(news["title"] + news["body"]))
 
     # if the model returns garbage, code takes over and the words are still intact
@@ -70,15 +70,15 @@ def main():
     check("paragraph starts: out of range / unsorted / missing 0 are repaired or refused", (V.valid_starts([3, 0, 9], 6), V.valid_starts([2, 4], 6), V.valid_starts([0], 6), V.valid_starts(["a"], 6)), ([0, 3], [0, 2, 4], None, None))
 
     # ---- the guarantee itself: any difference -> the original, unformatted, flagged
-    real_wrap = V._spoiler_wrap
-    V._spoiler_wrap = lambda parts, mode: [p.replace("Police said", "Police stated") for p in real_wrap(parts, mode)]       # a formatter bug that changes a word
+    real_wrap = V._format_body
+    V._format_body = lambda parts: [p.replace("Police said", "Police stated") for p in real_wrap(parts)]       # a formatter bug that changes a word
     bad = V.build(None, "weird_news", {"raw_item_id": 1, "payload": news})
-    V._spoiler_wrap = real_wrap
+    V._format_body = real_wrap
     check("guarantee: a changed word makes the check fail and the original goes out unformatted", (bad["ok"], bad["text"].startswith("Man arrests himself"), "<tg-spoiler>" in bad["text"], "On today" in bad["text"] or "[" in bad["text"]), (False, True, False, False))
     check("guarantee: the unformatted fallback is the source's text and nothing else", V.strip_ws(V.visible_text(bad["text"])), V.strip_ws(news["title"] + news["body"]))
-    V._spoiler_wrap = lambda parts, mode: [p for p in real_wrap(parts, mode)][:-1]                                               # a bug that DROPS a paragraph
+    V._format_body = lambda parts: [p for p in real_wrap(parts)][:-1]                                               # a bug that DROPS a paragraph
     dropped = V.build(None, "weird_news", {"raw_item_id": 1, "payload": news})
-    V._spoiler_wrap = real_wrap
+    V._format_body = real_wrap
     check("guarantee: a dropped paragraph is caught too", dropped["ok"], False)
 
     # ---- satire: the headline exactly, credited, no body
@@ -88,20 +88,20 @@ def main():
     check("satire: headline verbatim in bold, the fixed tags below, no source or 'via' line, no body, no spoiler", (s_out.split("\n")[0], s_out.split("\n")[-1], "via" in s_out.split("\n")[-1], "Onion" in s_out, "<tg-spoiler>" in s_out),
           (f"<b>{sat['title']}</b>", "#WeTalkALot #Satire", False, False, False))
 
-    # ---- jokes: a two-part joke keeps its parts; the delivery is the spoiler; tags close the post (no title)
+    # ---- jokes: a two-part joke keeps its parts as two paragraphs, fully visible; tags close the post (no title)
     joke = {"title": "", "body_parts": ["Why did the scarecrow win an award?", "Because he was outstanding in his field."], "source_name": "JokeAPI"}
     V.ask_model = lambda *a, **k: {}
     j_out = V.build(None, "jokes", {"raw_item_id": 3, "payload": joke})
     jt = j_out["text"]
-    check("joke: setup visible, delivery in <tg-spoiler>, and the post closes with exactly #WeTalkALot #Jokes (no source line)", ("Why did the scarecrow win an award?" in jt, "<tg-spoiler>Because he was outstanding in his field.</tg-spoiler>" in jt, jt.split("\n")[-1], "JokeAPI" in jt), (True, True, "#WeTalkALot #Jokes", False))
+    check("joke: setup and delivery both fully visible (no spoiler), and the post closes with exactly #WeTalkALot #Jokes (no source line)", ("Why did the scarecrow win an award?" in jt, "Because he was outstanding in his field." in jt and "<tg-spoiler>" not in jt, jt.split("\n")[-1], "JokeAPI" in jt), (True, True, "#WeTalkALot #Jokes", False))
     check("joke: exact words preserved", j_out["ok"], True)
     one = {"title": "", "body": "I told my wife she was drawing her eyebrows too high. She looked surprised.", "source_name": "JokeAPI"}
     o_out = V.build(None, "jokes", {"raw_item_id": 4, "payload": one})["text"]
     check("joke: a one-paragraph joke has no spoiler (the payoff is not a separate part)", "<tg-spoiler>" in o_out, False)
 
     # ---- spoilers: the operator can type them; nothing else can be injected
-    check("edit: <tg-spoiler>, <b>, <i> typed by the operator survive; any other markup is escaped", V.escape_keep_tags("a <tg-spoiler>b</tg-spoiler> <b>c</b> <script>x</script> & d"),
-          "a <tg-spoiler>b</tg-spoiler> <b>c</b> &lt;script&gt;x&lt;/script&gt; &amp; d")
+    check("edit: <b>, <i> typed by the operator survive, a typed <tg-spoiler> is unwrapped (text stays visible), any other markup is escaped", V.escape_keep_tags("a <tg-spoiler>b</tg-spoiler> <b>c</b> <script>x</script> & d"),
+          "a b <b>c</b> &lt;script&gt;x&lt;/script&gt; &amp; d")
 
     # ---- polls
     pairs = [V.poll_for("weird_news", i) for i in range(4)]
@@ -197,7 +197,7 @@ def main():
     full = V.build(None, "weird_news", {"raw_item_id": 9, "payload": wp}, use_model=False)
     lines = full["text"].split("\n")
     check("card (news): the post starts with 'CNA, 20 Nov:', then the bold title; the hashtags are the LAST line; no 'Source:' line; the check passed", (lines[0], lines[1].startswith("<b>Woman loses"), lines[-1].startswith("#"), "Source:" in full["text"], full["ok"]), ("CNA, 20 Nov:", True, True, False, True))
-    check("card (news): the article's own words follow, the last sentence in a spoiler", ("SINGAPORE: A woman sued her driver." in full["text"], "<tg-spoiler>The judge dismissed it.</tg-spoiler>" in full["text"]), (True, True))
+    check("card (news): the article's own words follow, all visible (no spoiler)", ("SINGAPORE: A woman sued her driver." in full["text"], "The judge dismissed it." in full["text"], "<tg-spoiler>" in full["text"]), (True, True, False))
     sat = V.build(None, "satire", {"raw_item_id": 10, "payload": sp}, use_model=False)
     check("card (satire): dateline on top, no 'via ..., satire' line at the bottom; the check passed", (sat["text"].split("\n")[0], "via The Onion" in sat["text"], sat["ok"]), ("The Onion, 20 Nov:", False, True))
     check("scoring: a card with an article opening outranks the same headline alone", (SC.score_weird_news(None, 1, wp | {"published_at": hrs(2).isoformat()})["quality"] > SC.score_weird_news(None, 1, wp2 | {"published_at": hrs(2).isoformat()})["quality"], SC.score_satire(None, 1, sp | {"published_at": hrs(2).isoformat()})["quality"] > SC.score_satire(None, 1, sp0 | {"published_at": hrs(2).isoformat()})["quality"]), (True, True))
@@ -231,9 +231,9 @@ def main():
     # Lemmy jokes
     ok_post = {"post": {"id": 1, "name": "My therapist said time heals", "body": "Then she sent me the bill", "ap_id": "https://lemmy.world/post/1", "nsfw": True}}
     lp = WJ.lemmy_payload(ok_post, "jokes")
-    check("lemmy jokes: title = setup, body = delivery (two parts, delivery spoilered), nsfw kept as a flag, credited to the community", (lp["body_parts"], lp["flags"], lp["source_name"], lp["joke_category"]), (["My therapist said time heals", "Then she sent me the bill"], {"nsfw": True}, "Lemmy c/jokes", "c/jokes"))
+    check("lemmy jokes: title = setup, body = delivery (two parts, delivery a second paragraph), nsfw kept as a flag, credited to the community", (lp["body_parts"], lp["flags"], lp["source_name"], lp["joke_category"]), (["My therapist said time heals", "Then she sent me the bill"], {"nsfw": True}, "Lemmy c/jokes", "c/jokes"))
     lb = V.build(None, "jokes", {"raw_item_id": 5, "payload": lp}, use_model=False)
-    check("lemmy jokes: the card passes the exact-words check with the delivery in a spoiler", (lb["ok"], "<tg-spoiler>Then she sent me the bill</tg-spoiler>" in lb["text"]), (True, True))
+    check("lemmy jokes: the card passes the exact-words check with the delivery visible, no spoiler", (lb["ok"], "Then she sent me the bill" in lb["text"], "<tg-spoiler>" in lb["text"]), (True, True, False))
     check("lemmy jokes: Markdown / links / spoiler markup, mod posts and removed posts are skipped", [WJ.lemmy_payload({"post": {"id": i, "name": n, "body": b, **extra}}, "jokes") for i, (n, b, extra) in enumerate([("Joke", "see https://x.test", {}), ("Joke", "::: spoiler tap" + chr(10) + "x" + chr(10) + ":::", {}), ("META: rules", "", {}), ("Joke", "x", {"removed": True}), ("Joke", "x", {"featured_community": True})])], [None] * 5)
     check("lemmy jokes: a changed source set makes the monthly pass due again", WJ.source_names(), ["jokeapi", "lemmy_jokes", "lemmy_darkhumor", "reddit_jokes"])
     rp = WJ.reddit_payload({"id": "a1", "title": "How many dead hookers does it take to change a light bulb?", "body": "Apparently not three because my basement is still dark.", "score": 120})
@@ -326,9 +326,9 @@ def main():
     check("written (kept for later): a category set to mode: written AND the master switch on would be written; others stay raw", (WR.live_mode("dark_history"), WR.live_mode("jokes")), ("written", "raw"))
     V.reset_config_cache()
     check("written: SKIP is recognised (with fences, punctuation, case), a real post is not", [WR.is_skip(x) for x in ("SKIP", "skip.", "**SKIP**", "`SKIP`", "SKIP - dry trivia", "Skip the line, then die")], [True, True, True, True, True, False])
-    check("written: the model's **bold** and ||spoiler|| become Telegram HTML, other markup is escaped", WR.to_html("**[SPOT IN HEAVEN: -1000 PTS]**\nHe <b>fell</b> & died. ||Gravity wins. \U0001f480||"),
-          "<b>[SPOT IN HEAVEN: -1000 PTS]</b>\nHe &lt;b&gt;fell&lt;/b&gt; &amp; died. <tg-spoiler>Gravity wins. \U0001f480</tg-spoiler>")
-    check("written: stray or mis-nested markers are removed, never sent broken", (WR.to_html("**open only and ||dangling"), WR.to_html("**a ||b** c||")), ("open only and dangling", "a b c"))
+    check("written (kept, unused): **bold** becomes Telegram HTML, ||spoiler|| markers become plain visible text, other markup is escaped", WR.to_html("**[SPOT IN HEAVEN: -1000 PTS]**\nHe <b>fell</b> & died. ||Gravity wins. \U0001f480||"),
+          "<b>[SPOT IN HEAVEN: -1000 PTS]</b>\nHe &lt;b&gt;fell&lt;/b&gt; &amp; died. Gravity wins. \U0001f480")
+    check("written: stray or mis-nested markers are removed, never sent broken", (WR.to_html("**open only and ||dangling"), WR.to_html("**a ||b** c||")), ("open only and dangling", "<b>a b</b> c"))
     check("written: hashtags and URLs the model wrote anyway are stripped (code adds the tags)", WR.clean_output("Line one #Funny https://x.test/a\n\n\n\nLine two #WTF"), "Line one  \n\nLine two".replace("  \n", "\n") if False else "Line one\n\nLine two")
     src = "17 December 546:\nSiege of Rome: The Ostrogoths under king Totila plunder the city, by bribing the Eastern Roman garrison. 3 officers took 1200 gold coins."
     good = "**[HISTORY WAS DRUNK -1000 PTS]**\nTotila walked in.\nThe Ostrogoths bribed the garrison, and 3 officers took 1200 gold coins in 546. ||Rome was open all night.||"
@@ -339,7 +339,7 @@ def main():
     check("written guard: the header is checked too (an invented 'AISLE 7' is caught) but a stock '-1000 PTS' score is not", (WR.guard_issues("**[LUCKY AISLE 7]**\nTotila walked in.", src), WR.guard_issues("**[SPOT IN HEAVEN: -1000 PTS]**\nTotila walked in.", src)), (['the number or year "7" is not in the source'], []))
     item = {"raw_item_id": 7, "payload": {"title": "", "body": "Siege of Rome: The Ostrogoths under king Totila plunder the city, by bribing the Eastern Roman garrison.", "dateline": "17 December 546:", "source_name": "Wikipedia", "source_url": "https://en.wikipedia.org/wiki/Siege_of_Rome_(546)"}}
     r_ok = WR.write(None, "dark_history", item, generate=lambda m: "**[HISTORY WAS DRUNK]**\nTotila walked in.\nThe Ostrogoths bribed the garrison. ||Rome was open all night.|| #Funny")
-    check("written: an ok post carries the fixed hashtags after it, the spoiler as HTML, and the original with its link for the card", (r_ok["status"], r_ok["text"].endswith("\n\n#WeTalkALot #DarkHistory"), "<tg-spoiler>Rome was open all night.</tg-spoiler>" in r_ok["text"], "#Funny" in r_ok["text"], "Wikipedia" in r_ok["original_html"], "Siege_of_Rome" in r_ok["original_html"]),
+    check("written: an ok post carries the fixed hashtags after it, the spoiler as HTML, and the original with its link for the card", (r_ok["status"], r_ok["text"].endswith("\n\n#WeTalkALot #DarkHistory"), "Rome was open all night." in r_ok["text"] and "<tg-spoiler>" not in r_ok["text"], "#Funny" in r_ok["text"], "Wikipedia" in r_ok["original_html"], "Siege_of_Rome" in r_ok["original_html"]),
           ("ok", True, True, False, True, True))
     check("written: SKIP from the model -> status skip", WR.write(None, "dark_history", item, generate=lambda m: "SKIP")["status"], "skip")
     calls = []
@@ -367,14 +367,14 @@ def main():
 
     # ---- the exact-words check is on for EVERY category: a formatter that changes one word -> the unformatted original, flagged
     V.reset_config_cache()
-    real_wrap2 = V._spoiler_wrap
-    V._spoiler_wrap = lambda parts, mode: [p.replace("Totila", "Totilla") for p in real_wrap2(parts, mode)]
+    real_wrap2 = V._format_body
+    V._format_body = lambda parts: [p.replace("Totila", "Totilla") for p in real_wrap2(parts)]
     changed = {}
     for c in V.load_config()["categories"]:
         pl = {"title": "A title", "body": "Siege of Rome: Totila plunders the city. The garrison was bribed. Nobody was surprised.", "source_name": "S", "source_url": "https://s.test/x"}
         r = V.build(None, c, {"raw_item_id": 1, "payload": pl}, use_model=False)
         changed[c] = (r["ok"], r["text"] == V.esc(V.original_text(pl)))
-    V._spoiler_wrap = real_wrap2
+    V._format_body = real_wrap2
     check("exact words: a one-word change in the formatter is caught in every category and the card falls back to the unformatted original", changed, {c: (False, True) for c in V.load_config()["categories"]})
 
     # ---- library junk rules (operator 2026-11-21): list / index / category pages, too few sentences, mostly a question; the audience yes/no is a filter only
@@ -391,6 +391,17 @@ def main():
     check("junk rule: a single-sentence question shower thought is dropped, a statement is kept", (WL.rule_reason("shower_thoughts", "", "Why do we say amazing when we are not amazed?"), WL.rule_reason("shower_thoughts", "", "Every ghost is a very patient tenant.")), ("mostly a question back to the reader", None))
     check("audience check: the question is the operator's and the model is only asked for yes / no (it is never asked to rewrite)", ("general audience" in WL.AUDIENCE_PROMPT, "genuinely weird, dark, or funny" in WL.AUDIENCE_PROMPT, "never suggest changes" in WL.AUDIENCE_PROMPT), (True, True, True))
     check("audience check: the text shown to the model is 'title: body' (or the body alone), the stored words are not touched", (WL.audience_text("Bookland", "The country all books come from."), WL.audience_text("", "A blast kills six.")), ("Bookland: The country all books come from.", "A blast kills six."))
+
+    # ---- dark history has its own, looser question; every other library keeps the general one
+    seen_prompts = []
+    real_yes_no = WL.yes_no
+    WL.yes_no = lambda conn, category, prompt, texts: (seen_prompts.append(prompt), [True] * len(texts))[1]
+    WL.audience_verdicts(None, "dark_history", ["x"])
+    WL.audience_verdicts(None, "weird_facts", ["x"])
+    WL.yes_no = real_yes_no
+    check("dark history question: 'Is this historical event dark, bizarre, ironic or absurd enough that someone might find it interesting or darkly funny?' for dark_history only; the general question for the others",
+          ("Is this historical event dark, bizarre, ironic or absurd enough that someone might find it interesting or darkly funny?" in seen_prompts[0], "genuinely weird, dark, or funny" in seen_prompts[1], "genuinely weird, dark, or funny" in seen_prompts[0]), (True, True, False))
+    check("no spoilers: no category sets a spoiler mode any more, and a card never carries a spoiler tag", (["spoiler" in v for v in V.load_config()["categories"].values()].count(True), "<tg-spoiler>" in V.build(None, "jokes", {"raw_item_id": 1, "payload": {"title": "", "body_parts": ["Why did the chicken cross?", "To get to the other side."], "source_name": "x"}}, use_model=False)["text"]), (0, False))
 
     if FAILS:
         print(f"{len(FAILS)} MISMATCH(ES):")

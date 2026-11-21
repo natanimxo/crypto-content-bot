@@ -402,6 +402,17 @@ Return ONLY a JSON object: {{"verdicts": [true, false, ...]}} with exactly {n} e
 {items}"""
 
 
+# DARK HISTORY ONLY (operator 2026-11-21: the general question cut 670 items to 25): its own, looser question. It replaces both the old dark-or-bizarre check and the general audience check for this category.
+DARK_HISTORY_AUDIENCE_PROMPT = """You are filtering historical events for a channel of dark and strange history. For each numbered event answer the question: Is this historical event dark, bizarre, ironic or absurd enough that someone might find it interesting or darkly funny?
+Answer true if it is; answer false only for events with nothing dark, strange, ironic or absurd about them (a plain treaty, election, founding, birth, award, sports result or routine milestone).
+You are only a filter: judge the event exactly as written and never suggest changes.
+
+Return ONLY a JSON object: {{"verdicts": [true, false, ...]}} with exactly {n} entries, in the order of the events.
+
+{items}"""
+AUDIENCE_PROMPTS = {"dark_history": DARK_HISTORY_AUDIENCE_PROMPT}
+
+
 def _sentences(text: str) -> list[str]:
     from pipeline import verbatim
     out = []
@@ -428,7 +439,7 @@ def audience_text(title: str, body: str) -> str:
 
 def audience_verdicts(conn, category: str, texts: list[str]) -> list[bool | None]:
     """DeepSeek's 'would a general audience find this genuinely weird, dark or funny?' per item. A FILTER: it only answers yes or no. None = no usable answer (never treated as yes)."""
-    return yes_no(conn, category, AUDIENCE_PROMPT, texts)
+    return yes_no(conn, category, AUDIENCE_PROMPTS.get(category, AUDIENCE_PROMPT), texts)
 
 
 # ------------------------------------------------------------------------------------------------ storing
@@ -645,7 +656,7 @@ def collect_dark_history(force: bool = False, days: int = DAYS_PER_PASS, prefilt
             if not read:
                 raise RuntimeError(f"dark_history: no day could be read ({str(errors)[:300]})")
             cand = [i for i in items if _DARK_CUES.search(i["body"])] if prefilter else items
-            counts = _store(conn, "dark_history", "Wikipedia", "wikipedia_onthisday", cand, judge=lambda texts: yes_no(conn, "dark_history", DARK_HISTORY_PROMPT, texts))
+            counts = _store(conn, "dark_history", "Wikipedia", "wikipedia_onthisday", cand)        # the audience check below is the dark-history question; the older dark-or-bizarre check is no longer asked
             all_done = sorted(done | set(read))
             counts["events_read"] = len(items)
             counts["passed_prefilter"] = len(cand)
@@ -711,6 +722,47 @@ def recheck_filters(conn, categories: list[str] | None = None, chunk: int = 90, 
         conn.commit()
         out[cat] = res
     return out
+
+
+def recheck_dark_history_held(conn, chunk: int = 90, passes: int = 3) -> dict:
+    """ONE-OFF (2026-11-21): put every HELD dark-history item that a model said no to (the old dark-or-bizarre check or the general audience check) through the looser dark-history question, without fetching anything.
+    A yes is released (held = FALSE, `audience_check: yes`, `dark_recheck: v2`), a no stays held (`dark_recheck: v2`). An item already sent as a card is left alone. An unknown answer leaves the item for the next pass."""
+    import json
+    res = {"held_checked_before": 0, "released": 0, "stay_held": 0, "unknown": 0}
+    with dict_cursor(conn) as cur:
+        cur.execute("""SELECT COUNT(*) AS n FROM raw_items r WHERE r.category = 'dark_history' AND r.held = TRUE AND (r.payload->>'check' IN ('no', 'audience_no') OR r.payload->>'audience_check' = 'no')
+                       AND r.payload->>'dark_recheck' IS NULL AND NOT EXISTS (SELECT 1 FROM notifications n WHERE r.id = ANY(n.candidate_raw_item_ids))""")
+        res["held_checked_before"] = cur.fetchone()["n"]
+    for _ in range(passes):
+        with dict_cursor(conn) as cur:
+            cur.execute("""SELECT r.id, r.payload FROM raw_items r WHERE r.category = 'dark_history' AND r.held = TRUE AND (r.payload->>'check' IN ('no', 'audience_no') OR r.payload->>'audience_check' = 'no')
+                           AND r.payload->>'dark_recheck' IS NULL AND NOT EXISTS (SELECT 1 FROM notifications n WHERE r.id = ANY(n.candidate_raw_item_ids)) ORDER BY r.id""")
+            rows = cur.fetchall()
+        if not rows:
+            break
+        unknown = 0
+        for i in range(0, len(rows), chunk):
+            part = rows[i:i + chunk]
+            verdicts = audience_verdicts(conn, "dark_history", [audience_text(r["payload"].get("title") or "", r["payload"].get("body") or "") for r in part])
+            with dict_cursor(conn) as cur:
+                for r, v in zip(part, verdicts):
+                    if v is None:
+                        unknown += 1
+                        continue
+                    mark = {"dark_recheck": "v2", **({"audience_check": "yes", "check": "yes"} if v else {})}
+                    cur.execute("UPDATE raw_items SET held = %s, payload = payload || %s::jsonb WHERE id = %s", (not v, json.dumps(mark), r["id"]))
+                    res["released" if v else "stay_held"] += 1
+            conn.commit()
+            logger.info("recheck_dark_history_held: %d/%d %s", min(i + chunk, len(rows)), len(rows), res)
+        if not unknown:
+            break
+    with dict_cursor(conn) as cur:
+        cur.execute("""SELECT COUNT(*) AS n FROM raw_items r WHERE r.category = 'dark_history' AND r.held = TRUE AND (r.payload->>'check' IN ('no', 'audience_no') OR r.payload->>'audience_check' = 'no')
+                       AND r.payload->>'dark_recheck' IS NULL AND NOT EXISTS (SELECT 1 FROM notifications n WHERE r.id = ANY(n.candidate_raw_item_ids))""")
+        res["unknown"] = cur.fetchone()["n"]
+        cur.execute("SELECT COUNT(*) AS n FROM raw_items r WHERE r.category = 'dark_history' AND r.held = FALSE AND NOT EXISTS (SELECT 1 FROM notifications n WHERE r.id = ANY(n.candidate_raw_item_ids))")
+        res["live_after"] = cur.fetchone()["n"]
+    return res
 
 
 COLLECTORS = {

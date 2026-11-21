@@ -76,7 +76,7 @@ def clean_output(output: str) -> str:
     return re.sub(r"\n{3,}", "\n\n", t).strip()
 
 
-_TAG_TOKEN = re.compile(r"</?(b|tg-spoiler)>")
+_TAG_TOKEN = re.compile(r"</?(b)>")
 
 
 def _balanced(h: str) -> bool:
@@ -94,7 +94,7 @@ def to_html(text: str) -> str:
     """The model's **bold** and ||spoiler|| -> Telegram HTML (parse mode HTML); everything else is escaped. Mis-nested or stray markers are removed rather than sent broken."""
     t = html.escape(text, quote=False)
     t = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", t, flags=re.S)
-    t = re.sub(r"\|\|(.+?)\|\|", r"<tg-spoiler>\1</tg-spoiler>", t, flags=re.S)
+    t = re.sub(r"\|\|(.+?)\|\|", r"\1", t, flags=re.S)                  # no spoilers anywhere (operator 2026-11-21): ||x|| is plain text
     t = t.replace("**", "").replace("||", "")
     if not _balanced(t):
         t = _TAG_TOKEN.sub("", t)

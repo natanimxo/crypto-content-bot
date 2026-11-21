@@ -2,7 +2,7 @@
 
 What this module does, and the one thing it must never do:
   * FORMATS only: the title in bold, paragraph breaks where the text naturally divides, clean
-    spacing after full stops, an optional <tg-spoiler> around the payoff and the fixed hashtags as the LAST line of the post. All of that is CODE. NO episode header (operator 2026-11-21: the post starts with the title or the text). NO source or credit line and no warning/flag line in the post (operator 2026-11-21: he adds the
+    spacing after full stops and the fixed hashtags as the LAST line of the post. NO spoilers (operator 2026-11-21: the text is always fully visible). All of that is CODE. NO episode header (operator 2026-11-21: the post starts with the title or the text). NO source or credit line and no warning/flag line in the post (operator 2026-11-21: he adds the
     source himself); the source name and link live only in the reference block under the draft.
   * DeepSeek is used for exactly one thing and is handed no way to change a word: where the paragraph breaks go -- it sees the source's sentences NUMBERED and returns the indices where a
     new paragraph starts, and the code slices the ORIGINAL text there. If the model fails, code breaks paragraphs every few sentences. (Hashtags are NOT the model's: operator 2026-11-21, jokes carry
@@ -29,8 +29,6 @@ logger = logging.getLogger(__name__)
 CHANNEL = "we_talk_a_lot"
 CONFIG_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config", "wtal.yaml")
 
-# categories whose final sentence (or a joke's delivery) is wrapped in <tg-spoiler> by default (operator: "spoilers, for every category")
-SPOILER_DEFAULT = True
 # a body with this many sentences or more, in a single block, is offered to the model for paragraph breaks
 MIN_SENTENCES_FOR_BREAKS = 4
 FALLBACK_SENTENCES_PER_PARAGRAPH = 3
@@ -39,7 +37,7 @@ CARD_ORIGINAL_MAX_CHARS = 1100
 
 _SENTENCE_SPLIT_RE = re.compile(r'(?<=[.!?…])["”’)\]]*\s+(?=["“‘(\[]?[A-Z0-9])')
 _NO_SPACE_AFTER_STOP_RE = re.compile(r"([a-z0-9][.!?])([A-Z])")
-_ALLOWED_EDIT_TAGS = ("tg-spoiler", "b", "i", "u", "s", "code")
+_ALLOWED_EDIT_TAGS = ("b", "i", "u", "s", "code")
 
 
 # ------------------------------------------------------------------ config
@@ -92,8 +90,9 @@ def esc(s: str) -> str:
 
 
 def escape_keep_tags(text: str) -> str:
-    """The operator's typed text -> Telegram HTML: everything is escaped EXCEPT the few formatting tags he may type by hand (<tg-spoiler>, <b>, <i>, <u>, <s>, <code>)."""
-    out = html.escape(text or "", quote=False)
+    """The operator's typed text -> Telegram HTML: everything is escaped EXCEPT the few formatting tags he may type by hand (<b>, <i>, <u>, <s>, <code>; a <tg-spoiler> is unwrapped)."""
+    text = re.sub(r"</?tg-spoiler>", "", text or "")            # no spoilers anywhere (operator 2026-11-21): a typed spoiler tag is unwrapped so the text stays fully visible
+    out = html.escape(text, quote=False)
     for tag in _ALLOWED_EDIT_TAGS:
         out = out.replace(f"&lt;{tag}&gt;", f"<{tag}>").replace(f"&lt;/{tag}&gt;", f"</{tag}>")
     return out
@@ -170,24 +169,6 @@ def category_settings(category: str) -> dict:
 
 
 # ------------------------------------------------------------------ building the post
-def _spoiler_wrap(paragraphs: list[str], mode: str) -> list[str]:
-    """Return paragraph HTML (already escaped) with the payoff inside <tg-spoiler>. mode: 'last_sentence' | 'last_paragraph' | 'none'."""
-    html_paras = [esc(p) for p in paragraphs]
-    if mode == "none" or not paragraphs:
-        return html_paras
-    if mode == "last_paragraph":
-        if len(paragraphs) >= 2:
-            html_paras[-1] = f"<tg-spoiler>{html_paras[-1]}</tg-spoiler>"
-        return html_paras
-    sents = split_sentences(paragraphs[-1])
-    total = sum(len(split_sentences(p)) for p in paragraphs)
-    if total >= 2 and len(sents) >= 1:
-        head = " ".join(sents[:-1])
-        last = sents[-1]
-        html_paras[-1] = (esc(head) + " " if head else "") + f"<tg-spoiler>{esc(last)}</tg-spoiler>"
-    return html_paras
-
-
 def original_text(payload: dict) -> str:
     """The item as the source gave it (title, then body): what the card shows below the draft, and what the exact-match check compares against."""
     parts = [payload.get("title") or "", payload.get("body") or ""]
@@ -200,8 +181,13 @@ def exact_match(payload: dict, post_title_html: str | None, post_body_paragraph_
     return title_ok and body_ok
 
 
+def _format_body(parts: list[str]) -> list[str]:
+    """The body paragraphs as Telegram HTML: escaped, nothing else. No spoiler, no tag, no word touched (the exact-words check runs on this output)."""
+    return [esc(p) for p in parts]
+
+
 def unformatted(payload: dict) -> str:
-    """The fallback: the source's text with nothing added or arranged -- no header, no tags, no spoiler."""
+    """The fallback: the source's text with nothing added or arranged -- no tags."""
     return esc(original_text(payload))
 
 
@@ -228,8 +214,7 @@ def build(conn, category: str, raw_item: dict, *, use_model: bool = True) -> dic
         starts = valid_starts(model.get("paragraph_starts"), len(sentences)) or code_starts(len(sentences))
         parts = paragraphs_from_starts(sentences, starts)
 
-    spoiler_mode = cfg.get("spoiler", "last_sentence" if SPOILER_DEFAULT else "none")
-    body_html = _spoiler_wrap(parts, spoiler_mode) if parts else []
+    body_html = _format_body(parts)                             # always fully visible: no spoiler anywhere
     title_html = f"<b>{esc(title)}</b>" if title else None
 
     ok = exact_match(original, title_html, body_html)

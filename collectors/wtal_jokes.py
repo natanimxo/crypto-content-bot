@@ -12,7 +12,7 @@ NOT used: icanhazdadjoke (clean dad jokes) and JokeAPI's Pun / Misc / Programmin
                  setup and its body (if any) the delivery; EVERY one goes through the same DeepSeek check (c/jokes is mostly clean jokes: only the yeses join the library). Posts with Markdown or a link in them are skipped (the
                  words would not be the plain text of a joke), as are removed, mod and over-long posts. nsfw is kept as a flag.
 
-The words are the source's own and are stored untouched (a JokeAPI two-part joke keeps its setup and delivery as two parts so the delivery can be spoilered).
+The words are the source's own and are stored untouched (a JokeAPI two-part joke keeps its setup and delivery as two parts so the delivery can be shown as its own paragraph).
 DEDUPE on normalized text (lowercase letters and digits only), also against what is already stored. REFRESH: a full pass runs when no successful `collect_jokes` full pass exists in the last 30 days.
 """
 

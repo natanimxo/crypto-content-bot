@@ -41,46 +41,34 @@ written_live: false
 
 # Per-category format switches.
 #   label        what the model is told the category is (for the paragraph breaks)
-#   spoiler      last_sentence = the final sentence goes inside <tg-spoiler>; last_paragraph = the final paragraph (a joke's delivery); none = no spoiler.
-#                The operator can also type <tg-spoiler>...</tg-spoiler> himself when he taps Edit.
 categories:
   weird_news:
     label: "weird and absurd real news"
     mode: raw
-    spoiler: last_sentence
   satire:
     label: "satire article"
     mode: raw
-    spoiler: last_sentence
   jokes:
     label: "dark jokes"
     mode: raw
-    spoiler: last_paragraph
   dark_history:
     label: "dark and bizarre history"
     mode: raw
-    spoiler: last_sentence
   unusual_deaths:
     label: "unusual deaths"
     mode: raw
-    spoiler: last_sentence
   world_records:
     label: "absurd world records"
     mode: raw
-    spoiler: last_sentence
   conspiracies:
     label: "conspiracy theories (true and hilariously wrong)"
     mode: raw
-    spoiler: last_sentence
   weird_facts:
     label: "weird facts"
     mode: raw
-    spoiler: last_sentence
   shower_thoughts:
     label: "shower thoughts"
     mode: raw
-    spoiler: none
   trending_jokes:
     label: "trending topic"
     mode: raw
-    spoiler: none
