@@ -32,7 +32,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from dotenv import load_dotenv  # noqa: E402
 
-from pipeline import verbatim  # noqa: E402
+from pipeline import verbatim, written  # noqa: E402
 from pipeline.alerts import check_and_alert  # noqa: E402
 from pipeline.channel_router import SHARED_CATEGORY_CHANNELS  # noqa: E402
 from pipeline.db import dict_cursor, get_conn  # noqa: E402
@@ -176,7 +176,7 @@ def _try_draft(conn, category: str, channel: str, row: dict) -> str | None:
         return None
 
 
-def _send_draft_cards(conn, channel: str, candidates: list) -> tuple[list, int | None]:
+def _send_draft_cards(conn, channel: str, candidates: list, prebuilt: dict | None = None) -> tuple[list, int | None]:
     """Write and send a finished-draft card per candidate. Returns (the candidates that still need an ordinary card, the id of the last draft notification or None)."""
     operator_chat_id = os.environ.get("TELEGRAM_OPERATOR_CHAT_ID")
     if not operator_chat_id:
@@ -185,7 +185,12 @@ def _send_draft_cards(conn, channel: str, candidates: list) -> tuple[list, int |
     rest, last_id = [], None
     for category, row in candidates:
         extra = {}
-        if channel == verbatim.CHANNEL:
+        if prebuilt and row["raw_item_id"] in prebuilt:
+            # WRITTEN mode (pipeline/written.py): the model wrote this post before the card was assembled; the original source text and link go below the draft
+            w = prebuilt[row["raw_item_id"]]
+            draft = w["text"]
+            extra = {"original_html": w["original_html"], "note": None}
+        elif channel == verbatim.CHANNEL:
             # the source's exact words, formatted by code (pipeline/verbatim.py): never "no draft" -- a failed exact-words check returns the original unformatted, flagged on the card
             built = verbatim.build(conn, category, {"raw_item_id": row["raw_item_id"], "payload": row["payload"]})
             draft = built["text"]
@@ -215,6 +220,7 @@ def _send_draft_cards(conn, channel: str, candidates: list) -> tuple[list, int |
 
 def notify_channel(conn, channel: str, categories: list[str], soft_daily_cap: int | None = None) -> int | None:
     all_candidates = []  # list of (category, row)
+    prebuilt: dict = {}  # raw_item_id -> written post (written categories only)
     for category in categories:
         # channel_config can list categories from a future build phase (Section
         # 16) before their collector/scorer/config exist — skip rather than
@@ -224,6 +230,20 @@ def notify_channel(conn, channel: str, categories: list[str], soft_daily_cap: in
                 "channel=%s lists category=%s but it has no category_config row yet "
                 "(not built/seeded) — skipping.", channel, category,
             )
+            continue
+        if channel == verbatim.CHANNEL and written.live_mode(category) == "written":
+            # WRITTEN category (operator 2026-11-21): the model writes the post and may SKIP a boring item; a SKIP drops it (held) and the next candidate is tried, at most
+            # written.MAX_SKIPS_PER_CATEGORY_PER_CYCLE drops per category per cycle. Only what the caps allow is kept; the rest are spares for replacements.
+            cap_out: list = []
+            pool = get_new_candidates(conn, category, channel, spare=written.MAX_SKIPS_PER_CATEGORY_PER_CYCLE, capacity_out=cap_out)
+            capacity = cap_out[0] if cap_out else len(pool)
+            if capacity <= 0:
+                continue
+            accepted, wstats = written.draw(conn, category, pool, capacity)
+            logger.info("notify: written category=%s %s", category, wstats)
+            for row, res in accepted:
+                prebuilt[row["raw_item_id"]] = res
+                all_candidates.append((category, row))
             continue
         for row in get_new_candidates(conn, category, channel):
             all_candidates.append((category, row))
@@ -269,7 +289,7 @@ def notify_channel(conn, channel: str, categories: list[str], soft_daily_cap: in
 
     draft_notification_id = None
     if channel in DRAFT_FIRST_CHANNELS:
-        all_candidates, draft_notification_id = _send_draft_cards(conn, channel, all_candidates)
+        all_candidates, draft_notification_id = _send_draft_cards(conn, channel, all_candidates, prebuilt)
         if not all_candidates:
             return draft_notification_id
 

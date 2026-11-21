@@ -146,6 +146,12 @@ hashtags:
 # The "Outlet, 20 Nov:" line under the header on news and satire cards (it names the outlet; set false for a post with nothing source-related in it).
 show_dateline: true
 
+# WRITTEN MODE (operator 2026-11-21): per category, `mode: raw` = the source's exact words formatted by code (pipeline/verbatim.py; the operator writes the jokes); `mode: written` = DeepSeek writes the whole
+# post from the raw facts in the operator's system prompt (pipeline/written.py: temperature 0.9, may answer SKIP for a boring item, at most 5 drops per category per cycle, hashtags added by code, an
+# invented-names / numbers / years guard, the original shown below the draft). `written_live` is the MASTER SWITCH: while it is false every category takes the raw path, whatever its mode says, so sample
+# cards can be judged first. Flip it to true to go live.
+written_live: false
+
 # Per-category format switches.
 #   label        what the model is told the category is (for the paragraph breaks)
 #   spoiler      last_sentence = the final sentence goes inside <tg-spoiler>; last_paragraph = the final paragraph (a joke's delivery); none = no spoiler.
@@ -153,31 +159,41 @@ show_dateline: true
 categories:
   weird_news:
     label: "weird and absurd real news"
+    mode: written
     spoiler: last_sentence
   satire:
     label: "satire article"
+    mode: raw
     spoiler: last_sentence
   jokes:
     label: "dark jokes"
+    mode: raw
     spoiler: last_paragraph
   dark_history:
     label: "dark and bizarre history"
+    mode: written
     spoiler: last_sentence
   unusual_deaths:
     label: "unusual deaths"
+    mode: written
     spoiler: last_sentence
   world_records:
     label: "absurd world records"
+    mode: written
     spoiler: last_sentence
   conspiracies:
     label: "conspiracy theories (true and hilariously wrong)"
+    mode: written
     spoiler: last_sentence
   weird_facts:
     label: "weird facts"
+    mode: written
     spoiler: last_sentence
   shower_thoughts:
     label: "shower thoughts"
+    mode: raw
     spoiler: none
   trending_jokes:
     label: "trending topic"
+    mode: raw
     spoiler: none

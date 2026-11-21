@@ -327,6 +327,55 @@ def main():
     check("phase 2 card: header, then the 'date, country:' line, the bold name, the fixed tags; no source line; the check passed", (wl_lines[2], wl_lines[3], wl_lines[4], "Wikipedia" in wl_card["text"], wl_card["ok"]), ("25 September 1900, Cuba:", "<b>Jesse William Lazear</b>", "#WeTalkALot #UnusualDeaths", False, True))
     check("phase 2 card: the reference block names the source and links it", ("Wikipedia" in wl_card["original_html"], "https://en.wikipedia.org/wiki/X" in wl_card["original_html"]), (True, True))
 
+    # ---- written mode (pipeline/written.py): the model writes the post; SKIP, the facts guard, code-added hashtags
+    from pipeline import written as WR
+    wcfg = V.load_config()
+    check("written: configured modes -- written for the six, raw for jokes, shower thoughts and satire", {c: WR.configured_mode(c) for c in ("weird_news", "dark_history", "unusual_deaths", "world_records", "conspiracies", "weird_facts", "jokes", "shower_thoughts", "satire")},
+          {"weird_news": "written", "dark_history": "written", "unusual_deaths": "written", "world_records": "written", "conspiracies": "written", "weird_facts": "written", "jokes": "raw", "shower_thoughts": "raw", "satire": "raw"})
+    check("written: the master switch is OFF in the checked-in config, so every category still takes the raw path until the operator says go", (wcfg.get("written_live"), WR.live_mode("dark_history")), (False, "raw"))
+    V._CFG_CACHE = dict(wcfg, written_live=True)
+    check("written: with the master switch on, a written category is written and a raw one stays raw", (WR.live_mode("dark_history"), WR.live_mode("jokes")), ("written", "raw"))
+    V.reset_config_cache()
+    check("written: SKIP is recognised (with fences, punctuation, case), a real post is not", [WR.is_skip(x) for x in ("SKIP", "skip.", "**SKIP**", "`SKIP`", "SKIP - dry trivia", "Skip the line, then die")], [True, True, True, True, True, False])
+    check("written: the model's **bold** and ||spoiler|| become Telegram HTML, other markup is escaped", WR.to_html("**[SPOT IN HEAVEN: -1000 PTS]**\nHe <b>fell</b> & died. ||Gravity wins. \U0001f480||"),
+          "<b>[SPOT IN HEAVEN: -1000 PTS]</b>\nHe &lt;b&gt;fell&lt;/b&gt; &amp; died. <tg-spoiler>Gravity wins. \U0001f480</tg-spoiler>")
+    check("written: stray or mis-nested markers are removed, never sent broken", (WR.to_html("**open only and ||dangling"), WR.to_html("**a ||b** c||")), ("open only and dangling", "a b c"))
+    check("written: hashtags and URLs the model wrote anyway are stripped (code adds the tags)", WR.clean_output("Line one #Funny https://x.test/a\n\n\n\nLine two #WTF"), "Line one  \n\nLine two".replace("  \n", "\n") if False else "Line one\n\nLine two")
+    src = "17 December 546:\nSiege of Rome: The Ostrogoths under king Totila plunder the city, by bribing the Eastern Roman garrison. 3 officers took 1200 gold coins."
+    good = "**[HISTORY WAS DRUNK -1000 PTS]**\nTotila walked in.\nThe Ostrogoths bribed the garrison, and 3 officers took 1200 gold coins in 546. ||Rome was open all night.||"
+    check("written guard: a post using only the source's names and numbers is clean (the header line is exempt)", WR.guard_issues(good, src), [])
+    bad = "**[X]**\nTotila walked in.\nGeneral Belisarius paid 5000 gold coins in 548. ||Nobody told Napoleon.||"
+    check("written guard: an invented number, year or name is caught", sorted(WR.guard_issues(bad, src)), sorted(['the number or year "5000" is not in the source', 'the number or year "548" is not in the source',
+          'the name "Belisarius" is not in the source', 'the name "Napoleon" is not in the source']))
+    check("written guard: the header is checked too (an invented 'AISLE 7' is caught) but a stock '-1000 PTS' score is not", (WR.guard_issues("**[LUCKY AISLE 7]**\nTotila walked in.", src), WR.guard_issues("**[SPOT IN HEAVEN: -1000 PTS]**\nTotila walked in.", src)), (['the number or year "7" is not in the source'], []))
+    item = {"raw_item_id": 7, "payload": {"title": "", "body": "Siege of Rome: The Ostrogoths under king Totila plunder the city, by bribing the Eastern Roman garrison.", "dateline": "17 December 546:", "source_name": "Wikipedia", "source_url": "https://en.wikipedia.org/wiki/Siege_of_Rome_(546)"}}
+    r_ok = WR.write(None, "dark_history", item, generate=lambda m: "**[HISTORY WAS DRUNK]**\nTotila walked in.\nThe Ostrogoths bribed the garrison. ||Rome was open all night.|| #Funny")
+    check("written: an ok post carries the fixed hashtags after it, the spoiler as HTML, and the original with its link for the card", (r_ok["status"], r_ok["text"].endswith("\n\n#WeTalkALot #DarkHistory"), "<tg-spoiler>Rome was open all night.</tg-spoiler>" in r_ok["text"], "#Funny" in r_ok["text"], "Wikipedia" in r_ok["original_html"], "Siege_of_Rome" in r_ok["original_html"]),
+          ("ok", True, True, False, True, True))
+    check("written: SKIP from the model -> status skip", WR.write(None, "dark_history", item, generate=lambda m: "SKIP")["status"], "skip")
+    calls = []
+    def flaky(m):
+        calls.append(m)
+        return "**[X]**\nGeneral Belisarius did it. ||Oops.||" if len(calls) == 1 else "**[X]**\nTotila did it. ||Oops.||"
+    r_retry = WR.write(None, "dark_history", item, generate=flaky)
+    check("written guard: one retry that names the invented details, then ok", (r_retry["status"], len(calls), "Belisarius" in calls[1]), ("ok", 2, True))
+    r_fail = WR.write(None, "dark_history", item, generate=lambda m: "**[X]**\nGeneral Belisarius did it in 548. ||Oops.||")
+    check("written guard: a second failure drops the item (status guard, no text)", (r_fail["status"], r_fail["text"]), ("guard", ""))
+    r_err = WR.write(None, "dark_history", item, generate=lambda m: (_ for _ in ()).throw(RuntimeError("api down")))
+    check("written: a model error is status error, not a skip", r_err["status"], "error")
+    held = []
+    rows = [{"raw_item_id": i, "payload": {"title": "", "body": f"item {i} Totila", "dateline": ""}} for i in range(1, 9)]
+    acc, st = WR.draw(None, "dark_history", rows, 1, writer=lambda c, cat, it: {"status": "skip"}, hold=lambda c, i, why: held.append(i))
+    check("written draw: seven candidates that all SKIP -> the category stops after 5 skips, 5 items held, nothing written, the loop is bounded", (len(acc), st["skips"], st["tried"], held), (0, 5, 5, [1, 2, 3, 4, 5]))
+    held2, seq = [], iter(["skip", "skip", "ok", "ok"])
+    acc2, st2 = WR.draw(None, "dark_history", rows, 1, writer=lambda c, cat, it: {"status": next(seq), "text": "t", "original_html": "o"}, hold=lambda c, i, why: held2.append(i))
+    check("written draw: two SKIPs then a post -> the third candidate is used, capacity 1 respected, the skipped two are held", ([r["raw_item_id"] for r, _ in acc2], st2["skips"], st2["written"], held2), ([3], 2, 1, [1, 2]))
+    acc3, st3 = WR.draw(None, "dark_history", rows, 2, writer=lambda c, cat, it: {"status": "guard", "issues": ["x"]}, hold=lambda c, i, why: None)
+    check("written draw: guard failures count toward the same 5-drop budget", (len(acc3), st3["guard_failures"], st3["tried"]), (0, 5, 5))
+    acc4, st4 = WR.draw(None, "dark_history", rows, 2, writer=lambda c, cat, it: {"status": "error"}, hold=lambda c, i, why: None)
+    check("written draw: a model error stops the category at once", (len(acc4), st4["tried"], st4["errors"]), (0, 1, 1))
+    check("written: the system prompt is the operator's (temperature 0.9, skip rule, spoiler structure present)", (WR.TEMPERATURE, "Reject 85% of inputs." in WR.SYSTEM_PROMPT, "||this||" in WR.SYSTEM_PROMPT, WR.SYSTEM_PROMPT.startswith("You are the unhinged, darkly comedic writer")), (0.9, True, True, True))
+
     if FAILS:
         print(f"{len(FAILS)} MISMATCH(ES):")
         for f_ in FAILS:

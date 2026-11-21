@@ -14,7 +14,7 @@ from pipeline.http import post_json
 API_URL = "https://api.deepseek.com/chat/completions"
 
 
-def generate_with_usage(prompt: str, *, system: str | None = None, max_tokens: int = 800) -> tuple[str, dict]:
+def generate_with_usage(prompt: str, *, system: str | None = None, max_tokens: int = 800, temperature: float = 0.4) -> tuple[str, dict]:
     """(text, usage) -- usage is what pipeline/llm_usage.py meters. The
     response's `usage` block used to be discarded, which is why a six-day
     runaway retry loop could not be measured after the fact."""
@@ -32,7 +32,7 @@ def generate_with_usage(prompt: str, *, system: str | None = None, max_tokens: i
         "model": model,
         "messages": messages,
         "max_tokens": max_tokens,
-        "temperature": 0.4,
+        "temperature": temperature,
     }
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -57,5 +57,5 @@ def generate_with_usage(prompt: str, *, system: str | None = None, max_tokens: i
     return resp["choices"][0]["message"]["content"].strip(), usage
 
 
-def generate(prompt: str, *, system: str | None = None, max_tokens: int = 800) -> str:
-    return generate_with_usage(prompt, system=system, max_tokens=max_tokens)[0]
+def generate(prompt: str, *, system: str | None = None, max_tokens: int = 800, temperature: float = 0.4) -> str:
+    return generate_with_usage(prompt, system=system, max_tokens=max_tokens, temperature=temperature)[0]

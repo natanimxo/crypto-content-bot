@@ -357,13 +357,16 @@ def _earning_still_valid(payload: dict, now: datetime) -> bool:
     return (now - published).total_seconds() <= EARNING_UNDATED_MAX_AGE_HOURS * 3600
 
 
-def get_new_candidates(conn, category: str, channel: str) -> list[dict]:
+def get_new_candidates(conn, category: str, channel: str, *, spare: int = 0, capacity_out: list | None = None) -> list[dict]:
     """Return raw_items (with score + breakdown + collected_at) that are new,
     clear threshold, aren't in cooldown, and still fit under this channel's
     rolling-window soft_daily_cap for the category — ordered by EFFECTIVE
     score (real score + age bonus) descending, highest first. The stored/
     returned `score` field is always the real one; the age bonus only
-    affects this ordering, see _age_bonus's docstring."""
+    affects this ordering, see _age_bonus's docstring.
+
+    `spare` (written mode, pipeline/written.py): return up to `spare` MORE candidates than the caps allow, so a SKIPped item can be replaced by the next one; the cap itself is appended to `capacity_out`
+    when a list is passed. With the defaults the behaviour is exactly what it always was."""
     cfg = load_category_config(conn, category)
     threshold = float(cfg["review_threshold"])
     cooldown_hours = float(cfg["cooldown_hours"])
@@ -493,6 +496,7 @@ def get_new_candidates(conn, category: str, channel: str) -> list[dict]:
         # EARNING_COMPETITIONS_PER_DAY in any rolling 24 hours.
         candidates = prioritise_earning(candidates, max(0, EARNING_COMPETITIONS_PER_DAY - _earning_competitions_notified_recent(conn, channel)))
 
+    capacity = len(candidates)
     soft_cap = cfg.get("soft_daily_cap")
     if soft_cap is not None:
         # A category shared between channels (news: Wall Street / Alpha Edge)
@@ -517,11 +521,13 @@ def get_new_candidates(conn, category: str, channel: str) -> list[dict]:
                 conn, channel, category, SHARED_CYCLE_WINDOW_HOURS, all_channels=True)
             per_cycle_cap = max(0, per_cycle_cap - this_cycle)
         remaining = min(remaining_24h, per_cycle_cap)
-        candidates = candidates[:remaining]
+        capacity = min(capacity, remaining)
 
     weekly = WEEKLY_CAPS.get(category)
     if weekly is not None:
         used_7d = _category_notified_recent_count(conn, channel, category, WEEKLY_WINDOW_HOURS)
-        candidates = candidates[:max(0, weekly - used_7d)]
+        capacity = min(capacity, max(0, weekly - used_7d))
 
-    return candidates
+    if capacity_out is not None:
+        capacity_out.append(capacity)
+    return candidates[:capacity + max(0, spare)]

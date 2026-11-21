@@ -42,7 +42,7 @@ def generate_triage(conn, category: str, raw_item: dict) -> str:
     )
 
 
-def generate_write(conn, category: str, prompt: str, *, model_override: str | None = None) -> str:
+def generate_write(conn, category: str, prompt: str, *, model_override: str | None = None, system: str | None = None, temperature: float | None = None, max_tokens: int | None = None) -> str:
     """Final post write (Section 8, step 2). Only ever called on operator-approved
     items. Pass model_override to force a specific model — used by write_post.py
     to force a specific model for a single call (tests, one-off comparisons)
@@ -56,7 +56,8 @@ def generate_write(conn, category: str, prompt: str, *, model_override: str | No
     provider_name, with_usage = PROVIDERS_WITH_USAGE[model]
     prompt_hash = llm_usage.prompt_fingerprint(prompt)
     try:
-        text, usage = with_usage(prompt)
+        extra = {k: v for k, v in (("system", system), ("temperature", temperature), ("max_tokens", max_tokens)) if v is not None}      # only what the caller asked for: every other call is unchanged
+        text, usage = with_usage(prompt, **extra)
     except Exception:
         # A failed call still counts toward the daily call-count guard: a loop
         # of failing calls is exactly the runaway it exists to catch.
