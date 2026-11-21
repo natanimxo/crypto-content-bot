@@ -24,7 +24,7 @@ from dotenv import load_dotenv  # noqa: E402
 from bot import notify  # noqa: E402
 from collectors import (  # noqa: E402
     defi_yields, earning_opportunities, exchange_listings, gems_security, hacks_exploits, macro_news, news, startup_jobs, startup_news,
-    rekt, technique_explainer, tool_launches, whale_alert, whale_movements, wtal_jokes, wtal_library, wtal_news, zachxbt,
+    rekt, technique_explainer, tool_launches, whale_alert, whale_movements, wtal_curated, wtal_jokes, wtal_library, wtal_news, zachxbt,
 )
 from pipeline import cycle_groups, llm_usage  # noqa: E402
 from pipeline.alerts import check_and_alert  # noqa: E402
@@ -37,6 +37,23 @@ logger = logging.getLogger(__name__)
 
 # A collector that feeds ANOTHER category's items (a second source for the same category) is scored as that category.
 SCORED_AS = {"whale_alert": "whale_movements", "zachxbt": "hacks_exploits", "rekt": "hacks_exploits"}
+
+def _with_curated(category: str, other_leg):
+    """A We Talk A Lot library category is fed by the editor-curated sources (collectors/wtal_curated.py, 2026-11-21) AND by `other_leg` (the older source: Wikipedia, or RecordSetter). Both legs always run; a failure of
+    either is raised after the other has finished, so one source never costs the category the other."""
+    def run():
+        total, failed = 0, None
+        for leg in (other_leg, lambda: wtal_curated.collect_for(category)):
+            try:
+                total += leg() or 0
+            except Exception as exc:
+                logger.exception("collect cycle: a source of %s failed", category)
+                failed = failed or exc
+        if failed:
+            raise failed
+        return total
+    return run
+
 
 COLLECTORS = {
     "defi_yields": defi_yields.collect,
@@ -74,11 +91,11 @@ COLLECTORS = {
     "satire": wtal_news.collect_satire,
     "jokes": wtal_jokes.collect,
     # We Talk A Lot phase 2 (2026-11-21): six libraries from Wikipedia lists / On This Day, Lemmy c/showerthoughts and RecordSetter (collectors/wtal_library.py); each is a no-op until due (30 days; dark_history reads 40 calendar days a cycle until all 366 are done).
-    "dark_history": wtal_library.collect_dark_history,
-    "unusual_deaths": wtal_library.collect_unusual_deaths,
-    "world_records": wtal_library.collect_world_records,
-    "conspiracies": wtal_library.collect_conspiracies,
-    "weird_facts": wtal_library.collect_weird_facts,
+    "dark_history": _with_curated("dark_history", wtal_library.collect_dark_history),
+    "unusual_deaths": _with_curated("unusual_deaths", wtal_library.collect_unusual_deaths),
+    "world_records": _with_curated("world_records", wtal_library.collect_world_records),
+    "conspiracies": _with_curated("conspiracies", wtal_library.collect_conspiracies),
+    "weird_facts": _with_curated("weird_facts", wtal_library.collect_weird_facts),
     "shower_thoughts": wtal_library.collect_shower_thoughts,
     # startup_news (Phase 6, 2026-11-16) -> Hustle to Million: Tech.eu / Sifted / TechCrunch Venture RSS, funding with a stated amount and acquisitions.
     "startup_news": startup_news.collect,

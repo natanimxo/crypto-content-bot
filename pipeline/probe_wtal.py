@@ -154,6 +154,30 @@ WTAL_PROBES = [
     {"id": "p2_lemmy_showerthoughts_api", "dir": L, "url": "https://lemmy.world/api/v3/post/list?community_name=showerthoughts&sort=TopAll&limit=50&page=2"},
     {"id": "p2_recordsetter_index", "dir": H, "url": "https://recordsetter.com/world-records"},
     {"id": "p2_recordsetter_food", "dir": H, "url": "https://recordsetter.com/food-and-drink-world-records"},
+    # ---- 2026-11-21 EDITOR-CURATED sources (operator: replace Wikipedia in dark history / unusual deaths / weird facts / world records / conspiracies): the exact endpoints collectors/wtal_curated.py reads,
+    # so Railway confirms each one (feeds and their older pages, the article pages the excerpt-only feeds need, the Darwin Awards archive, the Snopes tag the operator named, the Ranker lists).
+    {"id": "c_futilitycloset_feed", "dir": H, "url": "https://www.futilitycloset.com/feed/"},
+    {"id": "c_futilitycloset_feed_p6", "dir": H, "url": "https://www.futilitycloset.com/feed/?paged=6"},
+    {"id": "c_damninteresting_feed", "dir": H, "url": "https://www.damninteresting.com/feed"},
+    {"id": "c_damninteresting_feed_p3", "dir": H, "url": "https://www.damninteresting.com/feed?paged=3"},
+    {"id": "c_damninteresting_article", "dir": H, "url": "https://www.damninteresting.com/there-once-was-a-man-called-curley/"},
+    {"id": "c_ati_feed", "dir": H, "url": "https://allthatsinteresting.com/feed"},
+    {"id": "c_ati_feed_p6", "dir": H, "url": "https://allthatsinteresting.com/feed?paged=6"},
+    {"id": "c_tifo_feed_p3", "dir": H, "url": "https://www.todayifoundout.com/index.php/feed/?paged=3"},
+    {"id": "c_listverse_feed_p3", "dir": H, "url": "https://listverse.com/feed/?paged=3"},
+    {"id": "c_listverse_article", "dir": H, "url": "https://listverse.com/2026/11/18/10-bizarre-things-that-happened-during-the-siege-of-paris/"},
+    {"id": "c_atlas_articles_feed", "dir": H, "url": "https://www.atlasobscura.com/feeds/articles"},
+    {"id": "c_mentalfloss_article", "dir": H, "url": "https://www.mentalfloss.com/crime/burke-hare-murders-chilling-facts"},
+    {"id": "c_improbable_feed", "dir": H, "url": "https://www.improbable.com/feed/"},
+    {"id": "c_improbable_article", "dir": H, "url": "https://improbable.com/2026/10/27/detecting-kissing-in-movies/"},
+    {"id": "c_darwin_index", "dir": H, "url": "https://darwinawards.com/darwin/"},
+    {"id": "c_darwin_year", "dir": H, "url": "https://darwinawards.com/darwin/darwin2012.html"},
+    {"id": "c_darwin_entry", "dir": H, "url": "https://darwinawards.com/darwin/darwin2006-10.html"},
+    {"id": "c_snopes_freakish_fatalities_page", "dir": H, "url": "https://www.snopes.com/tag/freakish-fatalities/"},
+    {"id": "c_snopes_freakish_fatalities_feed", "dir": H, "url": "https://www.snopes.com/tag/freakish-fatalities/feed/"},
+    {"id": "c_ranker_strange_deaths", "dir": H, "url": "https://www.ranker.com/list/strange-deaths/"},
+    {"id": "c_ranker_weirdest_deaths", "dir": H, "url": "https://www.ranker.com/list/weirdest-deaths-in-history/ranker-history"},
+    {"id": "c_tg_mistic_history_before", "dir": H, "url": "https://t.me/s/mistic_history?before=1200"},
 ]
 
 # Telegram: the two content channels the operator named plus the six meme channels (trend signals only -- never reposted).
@@ -166,4 +190,7 @@ WTAL_TELEGRAM = {
     "funny_videotg": "@funny_videotg (trend signal)",
     "memesouterspace1": "@memesouterspace1 (trend signal)",
     "talesofthedark": "@talesofthedark (dark stories candidate)",
+    # 2026-11-21 (operator): the two curated Telegram channels. Never to be added: @GlobalHistoryDaily, @Real_History_01, @secretscope, @forbiddenhist.
+    "SHOCKING_FACTSS": "@SHOCKING_FACTSS (curated facts candidate)",
+    "mistic_history": "@mistic_history (curated dark history: Horror History)",
 }

@@ -421,13 +421,15 @@ def _sentences(text: str) -> list[str]:
     return out
 
 
-def rule_reason(category: str, title: str, body: str) -> str | None:
-    """Why this item is junk by RULE (None = it passes): a list / index / category page, too few full sentences for its category, or mostly a question put back to the reader."""
+def rule_reason(category: str, title: str, body: str, min_sentences: int | None = None) -> str | None:
+    """Why this item is junk by RULE (None = it passes): a list / index / category page, too few full sentences for its category (`min_sentences` overrides the category's own floor: the curated sources
+    use 2 for every category), or mostly a question put back to the reader."""
     if _LIST_PAGE.match(title or "") or _LIST_PAGE.match(body or ""):
         return "list, index or category page"
     sents = _sentences(body)
-    if len(sents) < MIN_SENTENCES.get(category, 1):
-        return f"under {MIN_SENTENCES.get(category, 1)} full sentences"
+    floor = min_sentences if min_sentences is not None else MIN_SENTENCES.get(category, 1)
+    if len(sents) < floor:
+        return f"under {floor} full sentences"
     if sents and sum(1 for x in sents if x.rstrip().endswith("?")) * 2 >= len(sents):
         return "mostly a question back to the reader"
     return None
@@ -447,14 +449,16 @@ def _payload(item: dict, category: str, source_name: str, source_key: str) -> di
     p = {"title": item.get("title") or "", "body": item.get("body") or "", "source_name": source_name, "source_key": source_key, "source_url": item.get("source_url") or "", "library": category}
     if item.get("dateline"):
         p["dateline"] = item["dateline"]
-    for k in ("year", "page", "score"):
+    for k in ("year", "page", "score", "tags"):
         if item.get(k) is not None:
             p[k] = item[k]
     return p
 
 
-def _store(conn, category: str, source_label: str, source_key: str, items: list[dict], judge=None, limit: int | None = None, audience: bool = True) -> dict:
-    """Dedupe against what is stored, optionally ask the model (yes -> live, no -> held with the verdict, unknown -> nothing stored), insert. Returns the per-source counts."""
+def _store(conn, category: str, source_label: str, source_key: str, items: list[dict], judge=None, limit: int | None = None, audience: bool = True, min_sentences: int | None = None, curated: bool = False) -> dict:
+    """Dedupe against what is stored, optionally ask the model (yes -> live, no -> held with the verdict, unknown -> nothing stored), insert. Returns the per-source counts.
+    `curated` (operator 2026-11-21: editor-picked sources are already weird, dark or funny): structural filters only (dedupe, list pages, too short), never a model check; the rows are marked so that a later
+    recheck_filters pass leaves them alone."""
     with dict_cursor(conn) as cur:
         cur.execute("SELECT payload->>'title' AS t, payload->>'body' AS b FROM raw_items WHERE category = %s", (category,))
         seen = {norm_key((r["t"] or "") + (r["b"] or "")) for r in cur.fetchall()}
@@ -468,12 +472,15 @@ def _store(conn, category: str, source_label: str, source_key: str, items: list[
             dupes += 1
             continue
         seen.add(k)
-        why = rule_reason(category, it.get("title") or "", it.get("body") or "")
+        why = rule_reason(category, it.get("title") or "", it.get("body") or "", min_sentences)
         if why:
             rule_dropped[why] = rule_dropped.get(why, 0) + 1          # junk by rule: not stored (nothing to ask the model about)
             continue
         pl = _payload(it, category, source_label, source_key)
         pl["norm_key"] = k
+        if curated:
+            pl["curated"] = True
+            pl["audience_check"] = "skipped_curated"
         fresh.append((ext, pl))
     left = 0
     if limit and len(fresh) > limit:

@@ -100,9 +100,44 @@ def _skippable(p) -> bool:
     return False
 
 
+def good_paragraphs(paragraphs: list[str]) -> list[str]:
+    """The paragraphs that are article body: long enough, and not a byline, an advert, a sign-up line or a paywall notice."""
+    return [p for p in paragraphs if len(p) >= MIN_PARAGRAPH_CHARS and not _BOILERPLATE.match(p) and not _BOILERPLATE_ANYWHERE.search(p)]
+
+
+def fragment_paragraphs(fragment: str) -> list[str]:
+    """EVERY paragraph of an HTML fragment a feed carries, in order (paragraphs_from_fragment keeps only the first one or two of them). Nothing is dropped here: the caller picks."""
+    soup = BeautifulSoup(fragment or "", "html.parser")
+    paras = [_p_text(p) for p in soup.find_all("p") if not p.find_parent(["blockquote", "figure"]) and not _is_caption(p)]
+    if not paras:   # a feed with bare text and <br> instead of <p>
+        text = BeautifulSoup(re.sub(r"(?i)<br\s*/?>", "\n\n", fragment or ""), "html.parser").get_text()
+        paras = [_clean(x) for x in re.split(r"\n\s*\n", text)]
+    return [p for p in paras if p]
+
+
+def _is_caption(p) -> bool:
+    """A photo caption or its credit (WordPress: <div class="wp-caption"><p class="wp-caption-text"><span class="credit">...): it is the picture's words, not the story's."""
+    for el in [p] + list(p.parents):
+        if any("caption" in c.lower() or c.lower() in ("credit", "image-credit", "photo-credit") for c in (el.get("class") or [])):
+            return True
+    return False
+
+
+def page_paragraphs(html: str) -> list[str]:
+    """EVERY body paragraph of a fetched page, in order (from_html keeps only the first one or two): the <article> / main body, page chrome (nav, share, byline, caption ...) left out."""
+    soup = BeautifulSoup(html or "", "html.parser")
+    for tag in soup(["script", "style", "noscript", "template", "svg"]):
+        tag.decompose()
+    root = soup.find("article") or soup.find(attrs={"itemprop": "articleBody"}) or soup.find("main") or soup.body or soup
+    paras = [_p_text(p) for p in root.find_all("p") if not _skippable(p)]
+    if not good_paragraphs(paras) and root is not soup.body:
+        paras = [_p_text(p) for p in (soup.body or soup).find_all("p") if not _skippable(p)]
+    return [p for p in paras if p]
+
+
 def _pick(paragraphs: list[str]) -> list[str]:
     """The first body paragraph, whole, and the second while the total stays inside MAX_TOTAL_CHARS. [] when the first is missing or a wall of text."""
-    good = [p for p in paragraphs if len(p) >= MIN_PARAGRAPH_CHARS and not _BOILERPLATE.match(p) and not _BOILERPLATE_ANYWHERE.search(p)]
+    good = good_paragraphs(paragraphs)
     if not good or len(good[0]) > MAX_FIRST_PARAGRAPH_CHARS:
         return []
     out = [good[0]]
