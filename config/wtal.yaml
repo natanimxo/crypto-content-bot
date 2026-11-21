@@ -146,10 +146,9 @@ hashtags:
 # The "Outlet, 20 Nov:" line under the header on news and satire cards (it names the outlet; set false for a post with nothing source-related in it).
 show_dateline: true
 
-# WRITTEN MODE (operator 2026-11-21): per category, `mode: raw` = the source's exact words formatted by code (pipeline/verbatim.py; the operator writes the jokes); `mode: written` = DeepSeek writes the whole
-# post from the raw facts in the operator's system prompt (pipeline/written.py: temperature 0.9, may answer SKIP for a boring item, at most 5 drops per category per cycle, hashtags added by code, an
-# invented-names / numbers / years guard, the original shown below the draft). `written_live` is the MASTER SWITCH: while it is false every category takes the raw path, whatever its mode says, so sample
-# cards can be judged first. Flip it to true to go live.
+# MODE (operator 2026-11-21): every category is `mode: raw` = the source's exact words in the source's order; DeepSeek never changes, adds, removes or reorders a word, it only picks paragraph breaks
+# (code does the bold title and spacing), and the exact-words check (pipeline/verbatim.py) sends the unformatted original if any word differs. A `written` mode (pipeline/written.py: DeepSeek writes the whole
+# post, SKIP loop) exists in the code but is OUT of use (operator 2026-11-21, 'in case I change my mind'): it only runs for a category set to `mode: written` AND with `written_live: true`.
 written_live: false
 
 # Per-category format switches.
@@ -159,7 +158,7 @@ written_live: false
 categories:
   weird_news:
     label: "weird and absurd real news"
-    mode: written
+    mode: raw
     spoiler: last_sentence
   satire:
     label: "satire article"
@@ -171,23 +170,23 @@ categories:
     spoiler: last_paragraph
   dark_history:
     label: "dark and bizarre history"
-    mode: written
+    mode: raw
     spoiler: last_sentence
   unusual_deaths:
     label: "unusual deaths"
-    mode: written
+    mode: raw
     spoiler: last_sentence
   world_records:
     label: "absurd world records"
-    mode: written
+    mode: raw
     spoiler: last_sentence
   conspiracies:
     label: "conspiracy theories (true and hilariously wrong)"
-    mode: written
+    mode: raw
     spoiler: last_sentence
   weird_facts:
     label: "weird facts"
-    mode: written
+    mode: raw
     spoiler: last_sentence
   shower_thoughts:
     label: "shower thoughts"

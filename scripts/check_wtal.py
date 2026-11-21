@@ -330,11 +330,13 @@ def main():
     # ---- written mode (pipeline/written.py): the model writes the post; SKIP, the facts guard, code-added hashtags
     from pipeline import written as WR
     wcfg = V.load_config()
-    check("written: configured modes -- written for the six, raw for jokes, shower thoughts and satire", {c: WR.configured_mode(c) for c in ("weird_news", "dark_history", "unusual_deaths", "world_records", "conspiracies", "weird_facts", "jokes", "shower_thoughts", "satire")},
-          {"weird_news": "written", "dark_history": "written", "unusual_deaths": "written", "world_records": "written", "conspiracies": "written", "weird_facts": "written", "jokes": "raw", "shower_thoughts": "raw", "satire": "raw"})
-    check("written: the master switch is OFF in the checked-in config, so every category still takes the raw path until the operator says go", (wcfg.get("written_live"), WR.live_mode("dark_history")), (False, "raw"))
+    allcats = list((wcfg.get("categories") or {}).keys())
+    check("mode: EVERY category is raw (operator 2026-11-21: written mode is out, DeepSeek only formats; the written code stays in place unused)", {c: WR.configured_mode(c) for c in allcats}, {c: "raw" for c in allcats})
+    check("mode: the written master switch is OFF in the checked-in config", (wcfg.get("written_live"), WR.live_mode("dark_history")), (False, "raw"))
     V._CFG_CACHE = dict(wcfg, written_live=True)
-    check("written: with the master switch on, a written category is written and a raw one stays raw", (WR.live_mode("dark_history"), WR.live_mode("jokes")), ("written", "raw"))
+    check("mode: even with the written master switch on, a raw category stays raw -- nothing reaches the written path", {c: WR.live_mode(c) for c in allcats}, {c: "raw" for c in allcats})
+    V._CFG_CACHE = dict(wcfg, written_live=True, categories=dict(wcfg["categories"], dark_history=dict(wcfg["categories"]["dark_history"], mode="written")))
+    check("written (kept for later): a category set to mode: written AND the master switch on would be written; others stay raw", (WR.live_mode("dark_history"), WR.live_mode("jokes")), ("written", "raw"))
     V.reset_config_cache()
     check("written: SKIP is recognised (with fences, punctuation, case), a real post is not", [WR.is_skip(x) for x in ("SKIP", "skip.", "**SKIP**", "`SKIP`", "SKIP - dry trivia", "Skip the line, then die")], [True, True, True, True, True, False])
     check("written: the model's **bold** and ||spoiler|| become Telegram HTML, other markup is escaped", WR.to_html("**[SPOT IN HEAVEN: -1000 PTS]**\nHe <b>fell</b> & died. ||Gravity wins. \U0001f480||"),
@@ -375,6 +377,18 @@ def main():
     acc4, st4 = WR.draw(None, "dark_history", rows, 2, writer=lambda c, cat, it: {"status": "error"}, hold=lambda c, i, why: None)
     check("written draw: a model error stops the category at once", (len(acc4), st4["tried"], st4["errors"]), (0, 1, 1))
     check("written: the system prompt is the operator's (temperature 0.9, skip rule, spoiler structure present)", (WR.TEMPERATURE, "Reject 85% of inputs." in WR.SYSTEM_PROMPT, "||this||" in WR.SYSTEM_PROMPT, WR.SYSTEM_PROMPT.startswith("You are the unhinged, darkly comedic writer")), (0.9, True, True, True))
+
+    # ---- the exact-words check is on for EVERY category: a formatter that changes one word -> the unformatted original, flagged
+    V.reset_config_cache()
+    real_wrap2 = V._spoiler_wrap
+    V._spoiler_wrap = lambda parts, mode: [p.replace("Totila", "Totilla") for p in real_wrap2(parts, mode)]
+    changed = {}
+    for c in V.load_config()["headers"]:
+        pl = {"title": "A title", "body": "Siege of Rome: Totila plunders the city. The garrison was bribed. Nobody was surprised.", "source_name": "S", "source_url": "https://s.test/x"}
+        r = V.build(None, c, {"raw_item_id": 1, "payload": pl}, seed=0, use_model=False)
+        changed[c] = (r["ok"], r["text"] == V.esc(V.original_text(pl)))
+    V._spoiler_wrap = real_wrap2
+    check("exact words: a one-word change in the formatter is caught in every category and the card falls back to the unformatted original", changed, {c: (False, True) for c in V.load_config()["headers"]})
 
     if FAILS:
         print(f"{len(FAILS)} MISMATCH(ES):")
