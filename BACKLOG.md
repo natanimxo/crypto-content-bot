@@ -2439,3 +2439,11 @@ Verified from Railway first (`rekt_rss`, `rekt_home`, run_logs `source_probe` 10
 4. Headers: one pool per category already; the dad joke got a dark header only because dad jokes were in the library.
 Dropped: Google News "florida man" (bare headline, redirect link that cannot be opened). Dark-joke sources to verify from Railway: Lemmy c/jokes (315 posts) and c/darkhumor (12 posts), probes `j_lemmy_jokes_api` / `j_lemmy_darkhumor_api` (added 2026-11-20).
 The three cards from 12:10 UTC were approved by the operator (13:01-13:02) before they were regenerated; the regenerated cards (notifications 866-868) are separate pending approvals.
+
+### We Talk A Lot: more dark jokes, hashtags, outlets from Railway (2026-11-21, operator)
+- Railway probe 2026-11-21 08:35 UTC: Lemmy c/jokes API 200 (50 posts), c/darkhumor 200 (12), taivop reddit_jokes.json 206 (reachable, 22 MB), wocka 206, stupidstuff 206, Hugging Face FunnyData rows 200, Mastodon #darkjokes 200 (7 posts). The article_probe ran but its per-outlet list was dropped by the stored-key whitelist (fixed; it runs once more on the next earning cycle).
+- First Railway pass with Lemmy (08:12 UTC): lemmy_jokes 204 usable, 27 dark yes, 172 held; lemmy_darkhumor 11 usable, 2 yes, 9 held; library 97 unheld. The JokeAPI sweep failed that pass (HTTP 400 / code 106 on an id range with no Dark joke): fixed, `full_pass` stayed false so the pass repeats.
+- Reddit r/Jokes switched ON after Railway reached the file: first pass in the next main cycle (12:00 UTC); counts in `collect_jokes` details.by_source.reddit_jokes.
+- Not used: Hugging Face FunnyData (573K rows; its "offensiveness" label is profanity, not darkness), Mastodon #darkjokes (5-7 posts), Wocka / StupidStuff (about 90 dark-keyword jokes between them), chucknorris.io, other Lemmy communities (none with dark jokes).
+- Hashtag rule: a tag whose every word is generic is rejected (#EdgyJokes, #DarkHumorJokes, #OffensiveComedy, #BlackComedy, #WeirdNews); one specific word makes it acceptable.
+- News: a Lemmy post whose link is an image, video or social post is skipped. Railway had opened exactly one page since 16:00 UTC on 2026-11-20 (an image file, no paragraphs), so the outlet success rate is unmeasured until article_probe reports.

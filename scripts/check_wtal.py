@@ -236,7 +236,29 @@ def main():
     lb = V.build(None, "jokes", {"raw_item_id": 5, "payload": lp}, seed=0, use_model=False)
     check("lemmy jokes: the card passes the exact-words check with the delivery in a spoiler", (lb["ok"], "<tg-spoiler>Then she sent me the bill</tg-spoiler>" in lb["text"]), (True, True))
     check("lemmy jokes: Markdown / links / spoiler markup, mod posts and removed posts are skipped", [WJ.lemmy_payload({"post": {"id": i, "name": n, "body": b, **extra}}, "jokes") for i, (n, b, extra) in enumerate([("Joke", "see https://x.test", {}), ("Joke", "::: spoiler tap" + chr(10) + "x" + chr(10) + ":::", {}), ("META: rules", "", {}), ("Joke", "x", {"removed": True}), ("Joke", "x", {"featured_community": True})])], [None] * 5)
-    check("lemmy jokes: a changed source set makes the monthly pass due again", WJ.source_names(), ["jokeapi", "lemmy_jokes", "lemmy_darkhumor"])
+    check("lemmy jokes: a changed source set makes the monthly pass due again", WJ.source_names(), ["jokeapi", "lemmy_jokes", "lemmy_darkhumor", "reddit_jokes"])
+    rp = WJ.reddit_payload({"id": "a1", "title": "How many dead hookers does it take to change a light bulb?", "body": "Apparently not three because my basement is still dark.", "score": 120})
+    check("reddit jokes: a dark-keyword joke with enough upvotes becomes a two-part joke credited to r/Jokes with a link to the post", (rp["body_parts"][1], rp["source_name"], rp["source_url"]), ("Apparently not three because my basement is still dark.", "Reddit r/Jokes", "https://www.reddit.com/comments/a1"))
+    check("reddit jokes: clean, low-score, EDIT:, removed and over-long ones are not candidates", [WJ.reddit_payload(x) for x in ({"id": "b", "title": "A pun", "body": "Cows go moo", "score": 300}, {"id": "c", "title": "Dead", "body": "x", "score": 1}, {"id": "d", "title": "Dead", "body": "x" + chr(10) + chr(10) + "EDIT: gold", "score": 50}, {"id": "e", "title": "Dead", "body": "[removed]", "score": 50}, {"id": "f", "title": "Dead " + "x" * 500, "body": "y", "score": 50})], [None] * 5)
+    check("reddit jokes: on (Railway reached the file), and part of the source set", (WJ.REDDIT_ENABLED, "reddit_jokes" in WJ.source_names()), (True, True))
+    import requests as _rq
+    class _Resp:
+        def __init__(self, code, body): self.status_code, self._b = code, body
+        def json(self): return self._b
+        def raise_for_status(self):
+            if self.status_code >= 400: raise RuntimeError(f"HTTP {self.status_code}")
+    _real_get = _rq.get
+    try:
+        def fake_get(url, params=None, **kw):
+            if url.endswith("/info"): return _Resp(200, {"jokes": {"idRange": {"en": [0, 19]}}})
+            if params["idRange"] == "0-9": return _Resp(400, {"error": True, "code": 106, "message": "No matching joke found"})
+            return _Resp(200, {"error": False, "jokes": [{"id": 12, "category": "Dark", "type": "single", "joke": "A dark one.", "flags": {}}]})
+        WJ.requests.get = fake_get
+        WJ.time.sleep = lambda s: None
+        sweep = WJ.fetch_jokeapi()
+    finally:
+        WJ.requests.get = _real_get
+    check("jokes: an id range with no Dark joke (JokeAPI answers HTTP 400, code 106) is skipped, not a failure", [e for e, _ in sweep], ["jokeapi:12"])
     check("notify: the humor channel is limited to 2 cards per cycle in total", N.CHANNEL_PER_CYCLE_LIMIT.get("we_talk_a_lot"), 2)
 
     # ---- config

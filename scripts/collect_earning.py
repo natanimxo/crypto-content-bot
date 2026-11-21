@@ -70,11 +70,14 @@ def main():
             with conn.cursor() as cur:
                 cur.execute("SELECT details FROM run_logs WHERE job_name = 'source_probe' AND started_at > now() - interval '20 hours' ORDER BY started_at DESC LIMIT 1")
                 row = cur.fetchone()
-                done_ids = {r.get("id") for r in ((row[0] or {}).get("results") or [])} if row else None
-                if done_ids is not None and done_ids == {p["id"] for p in source_probe.PROBES}:
+                results_prev = ((row[0] or {}).get("results") or []) if row else []
+                done_ids = {r.get("id") for r in results_prev} if row else None
+                article_row = next((r for r in results_prev if r.get("id") == "article_probe"), None)
+                # probe_all() also appends the dynamic "article_probe" (not in PROBES): it is part of the expected set, and a stored one without its per-outlet list is the old format, probed again once
+                if done_ids is not None and done_ids == {p["id"] for p in source_probe.PROBES} | {"article_probe"} and article_row and "fetched" in article_row:
                     return                  # probed within 20h AND with the same probe set; a new probe is verified at the next cycle
             results = source_probe.probe_all()
-            keep = ("id", "dir", "status", "kind", "items", "newest", "bytes", "secs", "auth_or_blocked", "login_wall", "error", "sample", "html_title", "snippet", "articles", "newest_post")
+            keep = ("id", "dir", "status", "kind", "items", "newest", "bytes", "secs", "auth_or_blocked", "login_wall", "error", "sample", "html_title", "snippet", "articles", "newest_post", "content_range", "fetched", "opened")
             with run_log(conn, "source_probe") as state:
                 state["details"]["results"] = [{k: r[k] for k in keep if k in r} for r in results]
         finally:

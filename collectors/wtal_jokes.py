@@ -72,6 +72,9 @@ def fetch_jokeapi() -> list[tuple[str, dict]]:
     out = []
     for a in range(lo, hi + 1, 10):
         r = requests.get(f"{JOKEAPI}/joke/{JOKEAPI_CATEGORIES}", params={"lang": "en", "idRange": f"{a}-{min(a + 9, hi)}", "amount": 10}, headers=HEADERS, timeout=25)
+        if r.status_code == 400 and (r.json() or {}).get("code") == 106:      # "No matching joke found": this id range has no Dark joke (found on Railway 2026-11-21: it answers HTTP 400, not an empty list)
+            time.sleep(0.55)
+            continue
         r.raise_for_status()
         j = r.json()
         for x in (j.get("jokes") or ([j] if "id" in j else [])):
@@ -117,6 +120,43 @@ def fetch_lemmy(community: str, pages: int) -> list[tuple[str, dict]]:
     return out
 
 
+# BULK: the taivop/joke-dataset r/Jokes scrape (operator 2026-11-21: "68 jokes is too small"). One static JSON file of Reddit's r/Jokes (title = setup, body = delivery, score = upvotes). It is user-written text
+# credited to r/Jokes with a link to the post; the repo calls the data "for research purposes" -- the operator posts jokes as they are with the source credited, so this is flagged to him, not hidden.
+# THE FILTER, cheapest first: score >= 5 (a joke people upvoted), at most 400 characters, plain text only, [removed] / [deleted] / EDIT: lines out, then a KEYWORD pre-filter for grim subjects (a 65,000-joke file is mostly
+# not dark, and the model is asked about the ones that could be), then the same DeepSeek yes/no as every other source. A dark joke with none of the keywords is lost: that is the price of not asking the model 65,000 times.
+REDDIT_JOKES_URL = "https://raw.githubusercontent.com/taivop/joke-dataset/master/reddit_jokes.json"
+REDDIT_MIN_SCORE = 5
+REDDIT_ENABLED = True       # ON 2026-11-21: Railway's source_probe (j_taivop_reddit, 08:35 UTC) reached the file (206 in 6 s)
+REDDIT_MAX_PER_PASS = 1500  # new candidates sent to the model per pass, highest score first; a truncated pass is not 'full', so the next cycle carries on (a first pass stays inside the 25-minute step limit)
+_GRIM = re.compile(r"\b(dead|death|dies|died|dying|die|kill\w*|murder\w*|suicid\w*|cancer|rap(?:e|ed|ist|ing)|holocaust|nazi\w*|hitler|auschwitz|cemetery|funeral|coffin|grave|corpse|abort\w*|orphan\w*|dementia|alzheimer\w*|aids|cripple\w*|wheelchair|paraly\w*|genocide|slave\w*|stillborn|miscarriage|overdose|hanged|hanging|lynch\w*|9/11|massacre|molest\w*|pedophil\w*|cannibal\w*|amputee|decapitat\w*|executed|electric chair|chemo\w*|hospice|widow\w*|gas chamber|ovens?|terminal|bury|buried|autopsy|morgue|hearse|noose|cult|school shoot\w*|bomb\w*|terror\w*)\b", re.I)
+_EDIT_LINE = re.compile(r"(?im)^\s*(edit|update)\b")
+
+
+def reddit_payload(x: dict) -> dict | None:
+    title, body = (x.get("title") or "").strip(), (x.get("body") or "").strip()
+    text = title + "\n" + body
+    if not title or (x.get("score") or 0) < REDDIT_MIN_SCORE or len(title) + len(body) > MAX_JOKE_CHARS - 200:
+        return None
+    if body.lower() in ("[removed]", "[deleted]") or _EDIT_LINE.search(text) or _MARKDOWN.search(text) or "&amp;" in text or "&#" in text:
+        return None
+    if not _GRIM.search(text):
+        return None
+    parts = [title] + [p.strip() for p in re.split(r"\r?\n", body) if p.strip()]
+    return {"title": "", "body_parts": parts, "body": "\n\n".join(parts), "source_name": "Reddit r/Jokes", "source_key": "reddit_jokes", "source_url": f"https://www.reddit.com/comments/{x.get('id')}",
+            "joke_category": "r/Jokes", "flags": {"nsfw": bool(re.search(r"nsfw", title, re.I))}, "reddit_score": x.get("score")}
+
+
+def fetch_reddit_jokes() -> list[tuple[str, dict]]:
+    r = requests.get(REDDIT_JOKES_URL, headers=HEADERS, timeout=(20, 180))
+    r.raise_for_status()
+    out = []
+    for x in sorted(r.json(), key=lambda j: -(j.get("score") or 0)):
+        pl = reddit_payload(x)
+        if pl:
+            out.append((f"reddit:{x['id']}", pl))
+    return out
+
+
 def dark_verdicts(conn, texts: list[str]) -> list[bool | None]:
     """DeepSeek's yes/no per joke, in order. None = no usable answer for that joke (never treated as yes)."""
     from pipeline import llm, post_format
@@ -137,7 +177,7 @@ def dark_verdicts(conn, texts: list[str]) -> list[bool | None]:
 
 
 def source_names() -> list[str]:
-    return ["jokeapi"] + [f"lemmy_{c}" for c, _ in LEMMY_COMMUNITIES]
+    return ["jokeapi"] + [f"lemmy_{c}" for c, _ in LEMMY_COMMUNITIES] + (["reddit_jokes"] if REDDIT_ENABLED else [])
 
 
 def due(conn) -> bool:
@@ -158,6 +198,8 @@ def collect(force: bool = False) -> int:
             return 0
         with run_log(conn, JOB) as state:
             sources = [("jokeapi", fetch_jokeapi)] + [(f"lemmy_{c}", (lambda c=c, n=n: fetch_lemmy(c, n))) for c, n in LEMMY_COMMUNITIES]
+            if REDDIT_ENABLED:
+                sources.append(("reddit_jokes", fetch_reddit_jokes))
             fetched_by, failed = {}, []
             for name, fn in sources:
                 try:
@@ -186,6 +228,10 @@ def collect(force: bool = False) -> int:
                     seen.add(k)
                     payload["norm_key"] = k
                     fresh.append((ext, payload))
+                truncated = 0
+                if name == "reddit_jokes" and len(fresh) > REDDIT_MAX_PER_PASS:
+                    truncated = len(fresh) - REDDIT_MAX_PER_PASS
+                    fresh = fresh[:REDDIT_MAX_PER_PASS]
                 verdicts = dark_verdicts(conn, [p["body"] for _, p in fresh])
                 yes, no, unknown = [], [], 0
                 for (ext, payload), v in zip(fresh, verdicts):
@@ -198,8 +244,8 @@ def collect(force: bool = False) -> int:
                 inserted = insert_raw_items_batch(conn, source_id, CATEGORY, yes)
                 insert_raw_items_batch(conn, source_id, CATEGORY, no, held=True)
                 inserted_total += inserted
-                unknown_total += unknown
-                per_source[name] = {"fetched": len(fetched), "new_checked": len(fresh), "duplicates_skipped": dupes, "dark_yes": len(yes), "dark_no_held": len(no), "unknown_not_stored": unknown}
+                unknown_total += unknown + truncated
+                per_source[name] = {"fetched": len(fetched), "new_checked": len(fresh), "duplicates_skipped": dupes, "dark_yes": len(yes), "dark_no_held": len(no), "unknown_not_stored": unknown, "left_for_next_pass": truncated}
             state["details"].update({"full_pass": unknown_total == 0 and not failed, "sources": source_names(), "failed": failed, "by_source": per_source, "inserted": inserted_total})
             logger.info("jokes: %s failed=%s inserted=%d", per_source, failed, inserted_total)
         return inserted_total
