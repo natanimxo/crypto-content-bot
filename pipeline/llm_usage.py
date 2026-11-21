@@ -56,6 +56,7 @@ so the call-count guard is the one that still protects it).
 """
 
 import hashlib
+from contextlib import contextmanager
 import logging
 import os
 from datetime import datetime, timedelta, timezone
@@ -103,6 +104,20 @@ def tag_session(source: str | None) -> None:
     Never call this from the collect cycle or the poller."""
     global _SOURCE
     _SOURCE = source or None
+
+
+@contextmanager
+def tagged(source: str):
+    """Mark the LLM calls made inside the `with` block (and only those) as deliberate BULK traffic, exactly like tag_session() does for a whole process. For a batch classification pass (a library
+    collector sending a few hundred items to the model in groups) the rate alert's 20-calls-in-15-minutes is a false alarm by construction: such a pass makes one call per group by design. The calls still count toward the spend guard
+    and a tagged burst of 10x the threshold still alerts. Production traffic outside the block stays watched exactly as before."""
+    global _SOURCE
+    prev = _SOURCE
+    _SOURCE = source
+    try:
+        yield
+    finally:
+        _SOURCE = prev
 
 
 def _env_float(name: str, default: float) -> float:

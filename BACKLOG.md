@@ -2447,3 +2447,22 @@ The three cards from 12:10 UTC were approved by the operator (13:01-13:02) befor
 - Not used: Hugging Face FunnyData (573K rows; its "offensiveness" label is profanity, not darkness), Mastodon #darkjokes (5-7 posts), Wocka / StupidStuff (about 90 dark-keyword jokes between them), chucknorris.io, other Lemmy communities (none with dark jokes).
 - Hashtag rule: a tag whose every word is generic is rejected (#EdgyJokes, #DarkHumorJokes, #OffensiveComedy, #BlackComedy, #WeirdNews); one specific word makes it acceptable.
 - News: a Lemmy post whose link is an image, video or social post is skipped. Railway had opened exactly one page since 16:00 UTC on 2026-11-20 (an image file, no paragraphs), so the outlet success rate is unmeasured until article_probe reports.
+
+### We Talk A Lot: card format changes and PHASE 2 (2026-11-21, operator)
+Operator after the phase-1 cards: remove warning/flag lines; no source or credit line in the post (sources stay in the reference block under the draft); hashtags fixed (jokes `#WeTalkALot #Jokes`, others `#WeTalkALot` + one category tag), DeepSeek hashtag step dropped; build phase 2 from the sources Railway verified and report each library's size.
+
+| Category | Source (endpoint) | Railway verification (run_logs `source_probe`) | Built | First collection |
+|---|---|---|---|---|
+| unusual_deaths | Wikipedia `List of unusual deaths in <antiquity / Middle Ages / Renaissance / early modern period / 19th / 20th / 21st century>` (action=parse, table rows) + `List of inventors killed by their own invention` | action=parse on en.wikipedia.org 200 (hub page: 302 links); the individual pages get `p2_wiki_ud_*` probes (next earning cycle) | yes | 383 (8 pages, no errors) |
+| weird_facts | `Wikipedia:Unusual articles` (table rows: title + description) | 200, 104 sections (`h_wiki_unusual_articles`); `p2_wiki_unusual_articles_text` | yes | 3,897 |
+| conspiracies | `List of conspiracy theories` (h3/h4 + paragraphs) | 200, 102 sections; `p2_wiki_conspiracies_text`. `List of political conspiracies` is two short sections: not used | yes | 68 |
+| dark_history | Wikipedia On This Day events (api.wikimedia.org `feed/v1/.../onthisday/events/MM/DD`) + DeepSeek yes/no | 200, 208 items (`h_wikimedia_onthisday`, 10:35 UTC); this machine cannot resolve api.wikimedia.org, so the first slice used en.wikipedia.org/api/rest_v1 (same feed); probes `p2_otd_events_wikimedia` / `_enwiki` | yes | 40 of 366 days: 2,017 events, 1,061 past the prefilter, 673 yes, 388 held |
+| shower_thoughts | Lemmy c/showerthoughts API (lemmy.world, best first) + DeepSeek yes/no | feed 200, 20 items (`l_showerthoughts_lemmy_world`); the API is the one c/jokes uses (200); `p2_lemmy_showerthoughts_api` | yes | 295 candidates, 202 yes, 93 held |
+| world_records | RecordSetter category and topic pages (title + one-sentence description) | homepage 200 (`h_recordsetter`, 53 KB); category pages not yet seen from Railway: `p2_recordsetter_index` / `_food` | yes | 1,811 read, 176 held (site notices in the text), 1,635 live |
+| world_records (Guinness) | guinnessworldrecords.com news / records pages | 200 HTML from Railway; the host does not resolve from the developer machine, so no Railway-side HTML to build a parser on | NOT built | - |
+| unusual_deaths (Darwin Awards) | darwinawards.com home | 200 HTML (22 KB) | NOT built (Wikipedia covers it) | - |
+| not used | Telegram @shockingfact (newest post 2026-06-25), @dark_storys (2025-04), @talesofthedark (fiction episodes); History Collection / Atlas Obscura / Strange Co / Listverse / Mental Floss feeds (article ledes, not self-contained items); Numbers API, uselessfacts, Cracked, Reddit RSS | stale or dead | no | - |
+
+Cadence: dark_history / weird_facts / shower_thoughts 1 a day; unusual_deaths / world_records / conspiracies 3 a week (`WEEKLY_CAPS`); channel cap 9, at most 2 cards per 4-hour cycle.
+Open for the operator: (1) the 'Outlet, 20 Nov:' line on news and satire cards is kept (`show_dateline` in config/wtal.yaml); (2) RecordSetter is used word for word (the Guinness / Darwin 'rewritten in our own words' pass was not built); (3) 'true conspiracies' have no verified source yet; (4) the dark-history and shower-thought checks were lenient (63% and 68% yes), tightening is a prompt change.
+Not done: phase 3 (trending_jokes); the 24h / weekly caps for the new categories have not run a live cycle yet (first Railway cycle 16:00 UTC).

@@ -164,8 +164,14 @@ def fetch_reddit_jokes() -> list[tuple[str, dict]]:
 
 def dark_verdicts(conn, texts: list[str]) -> list[bool | None]:
     """DeepSeek's yes/no per joke, in order. None = no usable answer for that joke (never treated as yes)."""
-    from pipeline import llm, post_format
+    from pipeline import llm, llm_usage, post_format
     out: list[bool | None] = []
+    with llm_usage.tagged("wtal_jokes_bulk"):          # a bulk pass makes one call per group by design: not a runaway (pipeline/llm_usage.tagged)
+        _check_batches(conn, texts, out, llm, post_format)
+    return out
+
+
+def _check_batches(conn, texts, out, llm, post_format):
     for i in range(0, len(texts), CHECK_BATCH):
         batch = texts[i:i + CHECK_BATCH]
         numbered = "\n\n".join(f"{n + 1}. {t}" for n, t in enumerate(batch))
@@ -178,7 +184,6 @@ def dark_verdicts(conn, texts: list[str]) -> list[bool | None]:
         except Exception:
             logger.exception("jokes: the dark check could not rule on a batch of %d", len(batch))
             out.extend([None] * len(batch))
-    return out
 
 
 def source_names() -> list[str]:

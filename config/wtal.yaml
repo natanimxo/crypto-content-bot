@@ -130,63 +130,54 @@ polls:
     - {question: "Rate the joke", options: ["Spot in heaven", "Spot in hell"]}
     - {question: "Too dark?", options: ["Not dark enough", "Too far"]}
 
-# Default hashtags when the model returns none that pass the checks (2-3, niche).
-hashtag_defaults:
-  weird_news: ["#AbsurdButTrue", "#RealNewsReally"]
-  satire: ["#FakeNewsDesk", "#HeadlineOfTheDay"]
-  jokes: ["#GallowsHumor", "#BadTasteClub"]
-  dark_history: ["#DarkHistory", "#BizarreHistory"]
-  unusual_deaths: ["#UnusualDeaths", "#DarwinWouldKnow"]
-  world_records: ["#WorldRecords", "#UselessTalent"]
-  conspiracies: ["#Conspiracies", "#TinfoilTimes"]
-  weird_facts: ["#WeirdFacts", "#UselessKnowledge"]
-  shower_thoughts: ["#ShowerThoughts", "#DeepThoughts"]
-  trending_jokes: ["#TrendingNow", "#TimelineWatch"]
+# Hashtags (operator 2026-11-21): jokes carry exactly #WeTalkALot #Jokes; every other category #WeTalkALot plus its one category tag. Fixed, no model involved.
+hashtags:
+  weird_news: ["#WeTalkALot", "#WeirdNews"]
+  satire: ["#WeTalkALot", "#Satire"]
+  jokes: ["#WeTalkALot", "#Jokes"]
+  dark_history: ["#WeTalkALot", "#DarkHistory"]
+  unusual_deaths: ["#WeTalkALot", "#UnusualDeaths"]
+  world_records: ["#WeTalkALot", "#WorldRecords"]
+  conspiracies: ["#WeTalkALot", "#Conspiracies"]
+  weird_facts: ["#WeTalkALot", "#WeirdFacts"]
+  shower_thoughts: ["#WeTalkALot", "#ShowerThoughts"]
+  trending_jokes: ["#WeTalkALot", "#TrendingJokes"]
+
+# The "Outlet, 20 Nov:" line under the header on news and satire cards (it names the outlet; set false for a post with nothing source-related in it).
+show_dateline: true
 
 # Per-category format switches.
-#   label        what the model is told the category is (for the hashtags)
-#   source_line  the credit line at the bottom ({source} = the source's name)
+#   label        what the model is told the category is (for the paragraph breaks)
 #   spoiler      last_sentence = the final sentence goes inside <tg-spoiler>; last_paragraph = the final paragraph (a joke's delivery); none = no spoiler.
 #                The operator can also type <tg-spoiler>...</tg-spoiler> himself when he taps Edit.
 categories:
   weird_news:
     label: "weird and absurd real news"
-    source_line: "Source: {source}"      # dropped on a card that has the "Outlet, 20 Nov:" line on top (that line names the outlet)
     spoiler: last_sentence
   satire:
     label: "satire article"
-    source_line: "via {source}, satire"      # kept even though the card also has the "Outlet, 20 Nov:" line on top: it is what says "satire"
-    source_line_with_dateline: true
     spoiler: last_sentence
   jokes:
     label: "dark jokes"
-    source_line: "Source: {source}"
     spoiler: last_paragraph
   dark_history:
     label: "dark and bizarre history"
-    source_line: "Source: {source}"
     spoiler: last_sentence
   unusual_deaths:
     label: "unusual deaths"
-    source_line: "Source: {source}"
     spoiler: last_sentence
   world_records:
     label: "absurd world records"
-    source_line: "Source: {source}"
     spoiler: last_sentence
   conspiracies:
     label: "conspiracy theories (true and hilariously wrong)"
-    source_line: "Source: {source}"
     spoiler: last_sentence
   weird_facts:
     label: "weird facts"
-    source_line: "Source: {source}"
     spoiler: last_sentence
   shower_thoughts:
     label: "shower thoughts"
-    source_line: "via {source}"
     spoiler: none
   trending_jokes:
     label: "trending topic"
-    source_line: "Source: {source}"
     spoiler: none

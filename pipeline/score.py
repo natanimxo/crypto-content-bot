@@ -946,6 +946,16 @@ def score_jokes(conn, raw_item_id: int, payload: dict) -> dict:
     return {"quality": 80.0 if payload.get("joke_category") == "Dark" else 75.0 if payload.get("source_key") == "jokeapi" else 70.0}
 
 
+# We Talk A Lot phase 2 (2026-11-21): the six libraries are drawn at random, so scoring is only a floor: a stub or an essay is not a card.
+def _wtal_library_quality(payload: dict, lo: int = 25, hi: int = 900) -> dict:
+    n = len(((payload.get("title") or "") + (payload.get("body") or "")).strip())
+    return {"quality": 80.0 if lo <= n <= hi else 30.0}
+
+
+for _wtal_cat in ("dark_history", "unusual_deaths", "world_records", "conspiracies", "weird_facts", "shower_thoughts"):
+    register_scorer(_wtal_cat)(lambda conn, raw_item_id, payload: _wtal_library_quality(payload))
+
+
 # exchange_listings (2026-11-15, operator-approved: spot token listings on Binance / OKX / Bybit / KuCoin).
 # Pure function of the stored payload -- the collector already resolved everything (prior listings on the
 # other tracked exchanges, the trading start time), so scoring needs no query.

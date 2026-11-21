@@ -21,7 +21,7 @@ from dotenv import load_dotenv  # noqa: E402
 from bot import notify  # noqa: E402
 from collectors import (  # noqa: E402
     defi_yields, earning_opportunities, exchange_listings, gems_security, hacks_exploits, macro_news, news, startup_jobs, startup_news,
-    rekt, technique_explainer, tool_launches, whale_alert, whale_movements, wtal_jokes, wtal_news, zachxbt,
+    rekt, technique_explainer, tool_launches, whale_alert, whale_movements, wtal_jokes, wtal_library, wtal_news, zachxbt,
 )
 from pipeline import llm_usage  # noqa: E402
 from pipeline.alerts import check_and_alert  # noqa: E402
@@ -70,6 +70,13 @@ COLLECTORS = {
     "weird_news": wtal_news.collect_weird_news,
     "satire": wtal_news.collect_satire,
     "jokes": wtal_jokes.collect,
+    # We Talk A Lot phase 2 (2026-11-21): six libraries from Wikipedia lists / On This Day, Lemmy c/showerthoughts and RecordSetter (collectors/wtal_library.py); each is a no-op until due (30 days; dark_history reads 40 calendar days a cycle until all 366 are done).
+    "dark_history": wtal_library.collect_dark_history,
+    "unusual_deaths": wtal_library.collect_unusual_deaths,
+    "world_records": wtal_library.collect_world_records,
+    "conspiracies": wtal_library.collect_conspiracies,
+    "weird_facts": wtal_library.collect_weird_facts,
+    "shower_thoughts": wtal_library.collect_shower_thoughts,
     # startup_news (Phase 6, 2026-11-16) -> Hustle to Million: Tech.eu / Sifted / TechCrunch Venture RSS, funding with a stated amount and acquisitions.
     "startup_news": startup_news.collect,
     # exchange_listings, added 2026-11-15 (Phase 4) -- four keyless exchange announcement APIs, no GoPlus/rate-limit

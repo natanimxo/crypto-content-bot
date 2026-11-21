@@ -179,6 +179,10 @@ NO_AGE_BONUS_CATEGORIES = {"news", "macro_news", "whale_movements", "hacks_explo
 
 # LIBRARY categories (We Talk A Lot, operator 2026-11-20): evergreen items collected in bulk once and refreshed monthly. They are NOT ranked by score -- a card is a RANDOM unused item (an item that was ever in a
 # notification never returns, even if skipped), no freshness window, no cross-cycle dedup (done once when the library is built).
+# "3 a week" categories (operator 2026-11-20): at most this many cards in any rolling 7 days, on top of the daily cap of 1.
+WEEKLY_CAPS = {"unusual_deaths": 3, "world_records": 3, "conspiracies": 3}
+WEEKLY_WINDOW_HOURS = 168.0
+
 LIBRARY_CATEGORIES = {"jokes", "dark_history", "unusual_deaths", "world_records", "conspiracies", "weird_facts", "shower_thoughts"}
 # hacks_exploits added 2026-09-30 -- a confirmed past incident is the same
 # "older is worse, not owed a turn" shape as news/macro_news/whale_movements,
@@ -514,5 +518,10 @@ def get_new_candidates(conn, category: str, channel: str) -> list[dict]:
             per_cycle_cap = max(0, per_cycle_cap - this_cycle)
         remaining = min(remaining_24h, per_cycle_cap)
         candidates = candidates[:remaining]
+
+    weekly = WEEKLY_CAPS.get(category)
+    if weekly is not None:
+        used_7d = _category_notified_recent_count(conn, channel, category, WEEKLY_WINDOW_HOURS)
+        candidates = candidates[:max(0, weekly - used_7d)]
 
     return candidates

@@ -47,7 +47,7 @@ def main():
     # ---- the post: header, bold title, hashtags below the title, source's words, source line
     news = {"title": "Man arrests himself after hearing his own warrant", "body": "A man in Ohio turned himself in on Tuesday. Police said the warrant was for unpaid parking tickets. He had paid them in 1998. "
             "A clerk confirmed the error. The charges were dropped. He asked for a receipt.", "source_name": "UPI Odd News", "source_url": "https://upi.example/1", "source_key": "upi"}
-    V.ask_model = lambda conn, category, label, title, body, sentences: {"hashtags": ["#OhioMan", "#Funny", "#ParkingTickets", "#lol"], "paragraph_starts": [0, 3]}
+    V.ask_model = lambda conn, category, label, title, sentences: {"paragraph_starts": [0, 3]}
     out = V.build(None, "weird_news", {"raw_item_id": 1, "payload": news}, seed=0)
     text = out["text"]
     check("post: the exact-words check passes on a normal item", out["ok"], True)
@@ -55,19 +55,19 @@ def main():
     lines = text.split("\n")
     header = V.pick_header("weird_news", 0)
     check("post: the episode header is on top, from the category's pool, picked by code", (lines[0], lines[0] in cfg["headers"]["weird_news"]), (header, True))
-    check("post: the title is bold and the hashtags are on the line directly below it", (lines[2], lines[3]), (f"<b>{news['title']}</b>", "#OhioMan #ParkingTickets"))
-    check("post: generic or invalid hashtags from the model are dropped (#Funny, #lol)", out["tags"], ["#OhioMan", "#ParkingTickets"])
+    check("post: the title is bold and the hashtags are on the line directly below it", (lines[2], lines[3]), (f"<b>{news['title']}</b>", "#WeTalkALot #WeirdNews"))
+    check("post: the hashtags are the category's fixed pair (#WeTalkALot + its one tag), whatever the model says", out["tags"], ["#WeTalkALot", "#WeirdNews"])
     check("post: the model's paragraph breaks (before sentence 3) are applied to the ORIGINAL sentences", "He had paid them in 1998.\n\nA clerk confirmed the error." in text, True)
-    check("post: the final sentence is inside <tg-spoiler> and the source line closes the post", ("<tg-spoiler>He asked for a receipt.</tg-spoiler>" in text, lines[-1]), (True, "Source: UPI Odd News"))
-    check("post: no word was added -- the visible text minus header, tags and source line equals title + body", visible_words(text).replace(V.strip_ws(header), "", 1).replace(V.strip_ws("#OhioMan #ParkingTickets"), "", 1).replace(V.strip_ws("Source: UPI Odd News"), "", 1), V.strip_ws(news["title"] + news["body"]))
+    check("post: the final sentence is inside <tg-spoiler>, and there is NO source or credit line in the post", ("<tg-spoiler>He asked for a receipt.</tg-spoiler>" in text, "Source" in text, "UPI" in text), (True, False, False))
+    check("post: no word was added -- the visible text minus header and tags equals title + body", visible_words(text).replace(V.strip_ws(header), "", 1).replace(V.strip_ws("#WeTalkALot #WeirdNews"), "", 1), V.strip_ws(news["title"] + news["body"]))
 
     # if the model returns garbage, code takes over and the words are still intact
     V.ask_model = lambda *a, **k: {}
     out2 = V.build(None, "weird_news", {"raw_item_id": 1, "payload": news}, seed=1)
-    check("fallback: a model that returns nothing -> default hashtags, code paragraph breaks, same words", (out2["ok"], out2["tags"], visible_words(out2["text"]).count(V.strip_ws(news["body"]))), (True, V.default_hashtags("weird_news"), 1))
+    check("fallback: a model that returns nothing -> the same fixed hashtags, code paragraph breaks, same words", (out2["ok"], out2["tags"], visible_words(out2["text"]).count(V.strip_ws(news["body"]))), (True, V.hashtags_for("weird_news"), 1))
     V.ask_model = lambda *a, **k: {"hashtags": "not a list", "paragraph_starts": ["x", None]}
     out3 = V.build(None, "weird_news", {"raw_item_id": 1, "payload": news}, seed=1)
-    check("fallback: malformed model output is survived", (out3["ok"], out3["tags"]), (True, V.default_hashtags("weird_news")))
+    check("fallback: malformed model output is survived", (out3["ok"], out3["tags"]), (True, V.hashtags_for("weird_news")))
     check("paragraph starts: out of range / unsorted / missing 0 are repaired or refused", (V.valid_starts([3, 0, 9], 6), V.valid_starts([2, 4], 6), V.valid_starts([0], 6), V.valid_starts(["a"], 6)), ([0, 3], [0, 2, 4], None, None))
 
     # ---- the guarantee itself: any difference -> the original, unformatted, flagged
@@ -84,17 +84,17 @@ def main():
 
     # ---- satire: the headline exactly, credited, no body
     sat = {"title": "Area Man Fully Aware This Is Not A Good Idea", "body": "", "source_name": "The Onion", "source_key": "onion"}
-    V.ask_model = lambda *a, **k: {"hashtags": ["#AreaMan", "#HeadlineOfTheDay"]}
+    V.ask_model = lambda *a, **k: {}
     s_out = V.build(None, "satire", {"raw_item_id": 2, "payload": sat}, seed=0)["text"]
-    check("satire: headline verbatim in bold, tags below, 'via <source>, satire' at the end, no body, no spoiler", (s_out.split("\n")[2], s_out.split("\n")[3], s_out.split("\n")[-1], "<tg-spoiler>" in s_out),
-          (f"<b>{sat['title']}</b>", "#AreaMan #HeadlineOfTheDay", "via The Onion, satire", False))
+    check("satire: headline verbatim in bold, the fixed tags below, no source or 'via' line, no body, no spoiler", (s_out.split("\n")[2], s_out.split("\n")[3], "via" in s_out.split("\n")[-1], "Onion" in s_out, "<tg-spoiler>" in s_out),
+          (f"<b>{sat['title']}</b>", "#WeTalkALot #Satire", False, False, False))
 
     # ---- jokes: a two-part joke keeps its parts; the delivery is the spoiler; tags close the post (no title)
     joke = {"title": "", "body_parts": ["Why did the scarecrow win an award?", "Because he was outstanding in his field."], "source_name": "JokeAPI"}
-    V.ask_model = lambda *a, **k: {"hashtags": ["#DadJokes", "#Scarecrow"]}
+    V.ask_model = lambda *a, **k: {}
     j_out = V.build(None, "jokes", {"raw_item_id": 3, "payload": joke}, seed=2)
     jt = j_out["text"]
-    check("joke: setup visible, delivery in <tg-spoiler>, tags then the source line at the end", ("Why did the scarecrow win an award?" in jt, "<tg-spoiler>Because he was outstanding in his field.</tg-spoiler>" in jt, jt.split("\n")[-3], jt.split("\n")[-1]), (True, True, "#DadJokes #Scarecrow", "Source: JokeAPI"))
+    check("joke: setup visible, delivery in <tg-spoiler>, and the post closes with exactly #WeTalkALot #Jokes (no source line)", ("Why did the scarecrow win an award?" in jt, "<tg-spoiler>Because he was outstanding in his field.</tg-spoiler>" in jt, jt.split("\n")[-1], "JokeAPI" in jt), (True, True, "#WeTalkALot #Jokes", False))
     check("joke: exact words preserved", j_out["ok"], True)
     one = {"title": "", "body": "I told my wife she was drawing her eyebrows too high. She looked surprised.", "source_name": "JokeAPI"}
     o_out = V.build(None, "jokes", {"raw_item_id": 4, "payload": one}, seed=0)["text"]
@@ -211,7 +211,7 @@ def main():
     check("card (news): header, then 'CNA, 20 Nov:', then the bold title, then the hashtags; no bottom 'Source:' line; the check passed", (lines[2], lines[3].startswith("<b>Woman loses"), lines[4].startswith("#"), "Source:" in full["text"], full["ok"]), ("CNA, 20 Nov:", True, True, False, True))
     check("card (news): the article's own words follow, the last sentence in a spoiler", ("SINGAPORE: A woman sued her driver." in full["text"], "<tg-spoiler>The judge dismissed it.</tg-spoiler>" in full["text"]), (True, True))
     sat = V.build(None, "satire", {"raw_item_id": 10, "payload": sp}, seed=0, use_model=False)
-    check("card (satire): dateline on top AND the 'via The Onion, satire' label at the bottom; the check passed", (sat["text"].split("\n")[2], sat["text"].endswith("via The Onion, satire"), sat["ok"]), ("The Onion, 20 Nov:", True, True))
+    check("card (satire): dateline on top, no 'via ..., satire' line at the bottom; the check passed", (sat["text"].split("\n")[2], "via The Onion" in sat["text"], sat["ok"]), ("The Onion, 20 Nov:", False, True))
     check("scoring: a card with an article opening outranks the same headline alone", (SC.score_weird_news(None, 1, wp | {"published_at": hrs(2).isoformat()})["quality"] > SC.score_weird_news(None, 1, wp2 | {"published_at": hrs(2).isoformat()})["quality"], SC.score_satire(None, 1, sp | {"published_at": hrs(2).isoformat()})["quality"] > SC.score_satire(None, 1, sp0 | {"published_at": hrs(2).isoformat()})["quality"]), (True, True))
     # dark jokes
     tp = WJ.jokeapi_payload({"id": 1, "category": "Dark", "type": "twopart", "setup": "Why?", "delivery": "Because.", "flags": {"racist": True, "nsfw": False}})
@@ -236,13 +236,11 @@ def main():
     check("jokes: the DeepSeek check keeps yes / no per joke in order", ok3, [True, False, True])
     check("jokes: a wrong-length, unparseable or failed answer is UNKNOWN (None), never a yes", (short, junk, down), ([None, None, None], [None, None], [None]))
     orig = V.original_block(tp)
-    check("jokes: the card's original block shows the category and the flags that are set", ("Dark | flags: racist" in orig, "JokeAPI" in orig), (True, True))
+    check("jokes: the reference block names the source and shows NO flag / warning line", ("flags" in orig, "racist" in orig, "JokeAPI" in orig), (False, False, True))
     check("jokes: Dark JokeAPI scores above other sources", (SC.score_jokes(None, 1, tp | {"body": "x" * 30})["quality"], SC.score_jokes(None, 1, {"body": "x" * 30, "source_key": "jokeapi", "joke_category": "Pun"})["quality"]), (80.0, 75.0))
     check("headers: the jokes pool is the dark pool (no pun-friendly lines), one pool per category", (all(h for h in V.load_config()["headers"]["jokes"]), "jokes" in V.load_config()["headers"], "weird_news" in V.load_config()["headers"], "satire" in V.load_config()["headers"]), (True, True, True, True))
-    # hashtags (operator 2026-11-21): a tag whose every word is generic is out; one specific word makes it acceptable
-    check("hashtags: genre-only tags are rejected", [V.is_generic_tag(t) for t in ("#EdgyJokes", "#DarkHumorJokes", "#OffensiveComedy", "#BlackComedy", "#WeirdNews", "#darkhumorjokes", "#Satire")], [True] * 7)
-    check("hashtags: a tag with a specific subject word is kept", [V.is_generic_tag(t) for t in ("#DarkCatholicHumor", "#AcnePunchline", "#ChickenCrossing", "#SingaporeSuit", "#PriestJokes", "#AbsurdButTrue")], [False] * 6)
-    check("hashtags: the model's generic ones are dropped, its specific ones kept", V.valid_hashtags(["#EdgyJokes", "#DarkHumorJokes", "#PriestJokes", "#AcnePunchline", "#Extra"]), ["#PriestJokes", "#AcnePunchline", "#Extra"])
+    # hashtags (operator 2026-11-21): fixed per category, no model
+    check("hashtags: jokes exactly #WeTalkALot #Jokes; every other category #WeTalkALot plus one tag", (V.hashtags_for("jokes"), [V.hashtags_for(c)[0] for c in V.load_config()["headers"]], [len(V.hashtags_for(c)) for c in V.load_config()["headers"]]), (["#WeTalkALot", "#Jokes"], ["#WeTalkALot"] * len(V.load_config()["headers"]), [2] * len(V.load_config()["headers"])))
     # Lemmy jokes
     ok_post = {"post": {"id": 1, "name": "My therapist said time heals", "body": "Then she sent me the bill", "ap_id": "https://lemmy.world/post/1", "nsfw": True}}
     lp = WJ.lemmy_payload(ok_post, "jokes")
@@ -278,12 +276,56 @@ def main():
     # ---- config
     chans = yaml.safe_load(open(os.path.join(ROOT, "config", "channel_config.yaml"), encoding="utf-8"))
     ch = chans["we_talk_a_lot"]
-    check("channel: id, name, phase-1 categories, cap = sum of the categories' caps", (ch["chat_id"], ch["display_name"], ch["categories"], ch["soft_daily_cap"], sum(w[c]["soft_daily_cap"] for c in ch["categories"])),
-          ("-1004376927203", "We Talk A Lot", ["weird_news", "satire", "jokes"], 4, 4))
+    check("channel: id, name, phase 1 + 2 categories, channel cap 9 (operator) below the sum of the categories' own caps (10)", (ch["chat_id"], ch["display_name"], ch["categories"], ch["soft_daily_cap"], sum(w[c]["soft_daily_cap"] for c in ch["categories"])),
+          ("-1004376927203", "We Talk A Lot", ["weird_news", "satire", "jokes", "dark_history", "unusual_deaths", "world_records", "conspiracies", "weird_facts", "shower_thoughts"], 9, 10))
     check("channel: it has no voice profile on purpose (the builder is code, not a voice)", "we_talk_a_lot" in yaml.safe_load(open(os.path.join(ROOT, "config", "channel_voices.yaml"), encoding="utf-8")), False)
     check("triage: every humor category has a card line", all(c in TPL.TEMPLATES for c in ("weird_news", "satire", "jokes")), True)
     check("generate_post routes the humor channel to the builder", 'channel == "we_talk_a_lot"' in open(os.path.join(ROOT, "pipeline", "write_post.py"), encoding="utf-8").read(), True)
     check("the copy guard is not on this path (the builder never calls it)", "_find_reproduction_issues" in open(os.path.join(ROOT, "pipeline", "verbatim.py"), encoding="utf-8").read().split('"""', 2)[1] and "import" not in "", True)
+
+    # ---- phase 2: the six libraries (collectors/wtal_library.py), parsers on small fixtures
+    from collectors import wtal_library as WL
+    from datetime import date
+    ud_html = ('<div class="mw-parser-output"><table class="wikitable sortable"><tbody><tr><th>Name of person</th><th>Image</th><th>Date of death</th><th>Country</th><th>Details</th></tr>'
+               '<tr><th>Jesse William Lazear</th><td></td><td>25 September 1900</td><td>Cuba</td><td>The 34-year-old American physician was convinced that <a>mosquitoes</a> were carriers for yellow fever.<sup class="reference">[3]</sup> He allowed himself to be bitten.</td></tr>'
+               '<tr><th>Short</th><td></td><td>1901</td><td>X</td><td>Too short.</td></tr></tbody></table></div>')
+    ud = WL.parse_unusual_deaths_tables(ud_html, "https://en.wikipedia.org/wiki/X")
+    check("unusual_deaths: a table row -> name = title, details = body (citation mark dropped, words kept), 'date, country:' on top; a stub row is skipped",
+          [(d["title"], d["body"], d["dateline"]) for d in ud], [("Jesse William Lazear", "The 34-year-old American physician was convinced that mosquitoes were carriers for yellow fever. He allowed himself to be bitten.", "25 September 1900, Cuba:")])
+    li_html = ('<div class="mw-parser-output"><h2>List</h2><ul><li>Sylvester H. Roper (1823\u20131896), inventor of the Roper steam velocipede, died of a heart attack or crash in 1896.</li><li>Short one 1900</li></ul>'
+               '<h2>See also</h2><ul><li>Somebody else (1900-1999), a long enough line about something that must not be taken from the closing sections of the page.</li></ul></div>')
+    check("unusual_deaths: a list-style page gives its entries whole as body-only items and stops at 'See also'", [d["body"][:30] for d in WL.parse_li_entries(li_html, "u")], ["Sylvester H. Roper (1823\u20131896)"])
+    ua = WL.parse_unusual_articles('<div class="mw-parser-output"><table class="wikitable"><tr><th>Article</th><th>Description</th></tr><tr><td>Bookland</td><td>The quasi-fictional country all books come from, according to barcodes.</td></tr></table></div>', "u")
+    check("weird_facts: an Unusual articles row -> the article title is the title, the one-line description the body", [(d["title"], d["body"]) for d in ua], [("Bookland", "The quasi-fictional country all books come from, according to barcodes.")])
+    cons_html = ('<div class="mw-parser-output"><h2>Contents</h2><h2>Aviation</h2><p>A group paragraph that is long enough to be kept as text but belongs to a group heading, not to a theory at all.</p><h3>Chemtrails</h3>'
+                 '<p>This theory alleges that water condensation trails from aircraft consist of chemical or biological agents under secret government policies.</p><p>Scientists have repeatedly rejected the claim and found no evidence for it at all.</p><h2>See also</h2><p>Nothing that long enough to count as a paragraph here at all, honestly.</p></div>')
+    cs = WL.parse_conspiracies(cons_html, "https://en.wikipedia.org/wiki/List_of_conspiracy_theories")
+    check("conspiracies: an h3 heading is the title and the paragraph under it the body (a group h2 and the closing sections are not items)", [(c["title"], c["body"].count("\n\n"), c["source_url"].endswith("#Chemtrails")) for c in cs], [("Chemtrails", 1, True)])
+    check("dark_history: an On This Day event -> body = its text, the day as the top line (BC years too), the page link kept", (tuple(WL.parse_otd([{"text": "The Columbine Mine massacre: striking coal miners are attacked with machine guns by state police.", "year": 1927, "pages": [{"content_urls": {"desktop": {"page": "https://en.wikipedia.org/wiki/Columbine_Mine_massacre"}}}]},
+                                                                                                          {"text": "Judas Maccabeus rededicates the Temple in Jerusalem, an event commemorated each year by the festival.", "year": -164}], 11, 21)[i][k] for i, k in ((0, "dateline"), (0, "source_url"), (1, "dateline")))),
+          ("21 November 1927:", "https://en.wikipedia.org/wiki/Columbine_Mine_massacre", "21 November 164 BC:"))
+    check("dark_history: the grim-word prefilter keeps a massacre and drops a treaty", (bool(WL._DARK_CUES.search("Striking miners are killed in a massacre")), bool(WL._DARK_CUES.search("Two countries sign a trade treaty"))), (True, False))
+    check("dark_history: the calendar is read in slices from today's date, skipping the days done", WL.next_days({"11-21", "11-22"}, date(2026, 11, 21), 3), ["11-23", "11-24", "11-25"])
+    check("dark_history: a calendar has 366 days (02-29 included)", len(WL._calendar()), 366)
+    posts = [{"post": {"id": 1, "name": "Brushing your teeth is the only time we clean a part of our own skeleton.", "body": "", "ap_id": "https://lemmy.world/post/1"}, "counts": {"score": 400}},
+             {"post": {"id": 2, "name": "A thought with a body text attached to it that goes on", "body": "more", "ap_id": "x"}, "counts": {"score": 400}},
+             {"post": {"id": 3, "name": "Low scoring shower thought that nobody upvoted at all", "body": "", "ap_id": "y"}, "counts": {"score": 3}},
+             {"post": {"id": 4, "name": "A link post pretending to be a thought about something online", "body": "", "url": "https://x.test", "ap_id": "z"}, "counts": {"score": 500}}]
+    check("shower_thoughts: only a title-only, un-removed, well-scored post counts; the title is the body", [(x["body"][:19], x["ext"]) for x in WL.parse_shower_posts(posts)], [("Brushing your teeth", "lemmy_showerthoughts:1")])
+    rs_html = ('<a class="video-item" href="https://recordsetter.com/world-record/potatoes-held-hand/46606?autoplay=false"><div class="video-item-content"><span class="video-item-time">03:14</span></div>'
+               '<div class="video-item-outer-content"><h2>Most Potatoes Held In Hand</h2><h3>Peter Durdik</h3></div><div class="video-item-description"><p><text>Peter Durdik held 27 potatoes in his hand at once.</text></p></div></a>'
+               '<a href="/eating-world-records">eating</a><a href="/about">about</a>')
+    recs, topics = WL.parse_recordsetter(rs_html)
+    check("world_records: a record -> its title (h2) and the one-sentence description, link without the autoplay query; topic links are collected", ([(r["title"], r["body"], r["source_url"]) for r in recs], topics),
+          ([("Most Potatoes Held In Hand", "Peter Durdik held 27 potatoes in his hand at once.", "https://recordsetter.com/world-record/potatoes-held-hand/46606")], ["/eating-world-records"]))
+    check("phase 2: every library has a scorer, a category_config row and a channel slot; the 3-a-week categories have a weekly cap", ([c in SC.SCORERS for c in WL.COLLECTORS], [c in yaml.safe_load(open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config", "category_config.yaml"), encoding="utf-8")) for c in WL.COLLECTORS],
+          [c in yaml.safe_load(open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config", "channel_config.yaml"), encoding="utf-8"))["we_talk_a_lot"]["categories"] for c in WL.COLLECTORS], SEL.WEEKLY_CAPS),
+          ([True] * 6, [True] * 6, [True] * 6, {"unusual_deaths": 3, "world_records": 3, "conspiracies": 3}))
+    check("phase 2: all six are library categories (random, no repeats)", all(c in SEL.LIBRARY_CATEGORIES for c in WL.COLLECTORS), True)
+    wl_card = V.build(None, "unusual_deaths", {"raw_item_id": 11, "payload": {"title": ud[0]["title"], "body": ud[0]["body"], "dateline": ud[0]["dateline"], "source_name": "Wikipedia", "source_url": "https://en.wikipedia.org/wiki/X"}}, seed=0, use_model=False)
+    wl_lines = wl_card["text"].split("\n")
+    check("phase 2 card: header, then the 'date, country:' line, the bold name, the fixed tags; no source line; the check passed", (wl_lines[2], wl_lines[3], wl_lines[4], "Wikipedia" in wl_card["text"], wl_card["ok"]), ("25 September 1900, Cuba:", "<b>Jesse William Lazear</b>", "#WeTalkALot #UnusualDeaths", False, True))
+    check("phase 2 card: the reference block names the source and links it", ("Wikipedia" in wl_card["original_html"], "https://en.wikipedia.org/wiki/X" in wl_card["original_html"]), (True, True))
 
     if FAILS:
         print(f"{len(FAILS)} MISMATCH(ES):")

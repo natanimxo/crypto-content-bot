@@ -679,6 +679,98 @@ jokes:
   voice: verbatim
   prompt_notes: "Library category: posted from the library exactly as stored, with hashtags added and nothing rewritten."
 
+# We Talk A Lot phase 2 (2026-11-21): six LIBRARY categories (collectors/wtal_library.py), drawn at random without repeats. unusual_deaths / world_records / conspiracies are 3 a week: soft_daily_cap 1 plus WEEKLY_CAPS in pipeline/select_candidates.py.
+
+dark_history:
+  score_weights:
+    quality: 1.0
+  review_threshold: 50
+  cooldown_hours: 0
+  soft_daily_cap: 1
+  triage_model: template
+  write_model: deepseek-v4-flash      # used only for paragraph breaks
+  label: "🕯 DARK HISTORY"
+  emoji: ""
+  display_label: "Dark History"
+  hashtags: []
+  voice: verbatim
+  prompt_notes: "Library category: the source's exact words, formatted by code (pipeline/verbatim.py)."
+
+unusual_deaths:
+  score_weights:
+    quality: 1.0
+  review_threshold: 50
+  cooldown_hours: 0
+  soft_daily_cap: 1
+  triage_model: template
+  write_model: deepseek-v4-flash      # used only for paragraph breaks
+  label: "⚰️ UNUSUAL DEATH"
+  emoji: ""
+  display_label: "Unusual Deaths"
+  hashtags: []
+  voice: verbatim
+  prompt_notes: "Library category: the source's exact words, formatted by code (pipeline/verbatim.py)."
+
+world_records:
+  score_weights:
+    quality: 1.0
+  review_threshold: 50
+  cooldown_hours: 0
+  soft_daily_cap: 1
+  triage_model: template
+  write_model: deepseek-v4-flash      # used only for paragraph breaks
+  label: "🏆 WORLD RECORD"
+  emoji: ""
+  display_label: "World Records"
+  hashtags: []
+  voice: verbatim
+  prompt_notes: "Library category: the source's exact words, formatted by code (pipeline/verbatim.py)."
+
+conspiracies:
+  score_weights:
+    quality: 1.0
+  review_threshold: 50
+  cooldown_hours: 0
+  soft_daily_cap: 1
+  triage_model: template
+  write_model: deepseek-v4-flash      # used only for paragraph breaks
+  label: "🛸 CONSPIRACY"
+  emoji: ""
+  display_label: "Conspiracies"
+  hashtags: []
+  voice: verbatim
+  prompt_notes: "Library category: the source's exact words, formatted by code (pipeline/verbatim.py)."
+
+weird_facts:
+  score_weights:
+    quality: 1.0
+  review_threshold: 50
+  cooldown_hours: 0
+  soft_daily_cap: 1
+  triage_model: template
+  write_model: deepseek-v4-flash      # used only for paragraph breaks
+  label: "🧠 WEIRD FACT"
+  emoji: ""
+  display_label: "Weird Facts"
+  hashtags: []
+  voice: verbatim
+  prompt_notes: "Library category: the source's exact words, formatted by code (pipeline/verbatim.py)."
+
+shower_thoughts:
+  score_weights:
+    quality: 1.0
+  review_threshold: 50
+  cooldown_hours: 0
+  soft_daily_cap: 1
+  triage_model: template
+  write_model: deepseek-v4-flash      # used only for paragraph breaks
+  label: "🚿 SHOWER THOUGHT"
+  emoji: ""
+  display_label: "Shower Thoughts"
+  hashtags: []
+  voice: verbatim
+  prompt_notes: "Library category: the source's exact words, formatted by code (pipeline/verbatim.py)."
+
 technique_explainer:
   # Added 2026-11-20 (operator direction) -- ONE post a week to Crypto Notebook explaining an attack type (DefiLlama's own classification: Key Compromise, Oracle Manipulation, Bridge &
   # Cross-Chain ...) with real incidents from the stored tracker data as examples. No new source: collectors/technique_explainer.py picks the type and the examples from the incidents

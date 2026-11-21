@@ -1,10 +1,12 @@
 """We Talk A Lot's post builder (operator 2026-11-20): the card carries the SOURCE'S EXACT WORDS, in order -- not rewritten, not shortened, not summarised.
 
 What this module does, and the one thing it must never do:
-  * FORMATS only: the episode header from a pool at the top, the title in bold, 2-3 niche hashtags on the line below the title, paragraph breaks where the text naturally divides, clean
-    spacing after full stops, an optional <tg-spoiler> around the payoff, and a source line. All of that is CODE.
-  * DeepSeek is used for exactly two things and is handed no way to change a word: (1) where the paragraph breaks go -- it sees the source's sentences NUMBERED and returns the indices where a
-    new paragraph starts, and the code slices the ORIGINAL text there; (2) the hashtags. If the model fails, code breaks paragraphs every few sentences and uses the category's default tags.
+  * FORMATS only: the episode header from a pool at the top, the title in bold, the fixed hashtags on the line below the title, paragraph breaks where the text naturally divides, clean
+    spacing after full stops and an optional <tg-spoiler> around the payoff. All of that is CODE. NO source or credit line and no warning/flag line in the post (operator 2026-11-21: he adds the
+    source himself); the source name and link live only in the reference block under the draft.
+  * DeepSeek is used for exactly one thing and is handed no way to change a word: where the paragraph breaks go -- it sees the source's sentences NUMBERED and returns the indices where a
+    new paragraph starts, and the code slices the ORIGINAL text there. If the model fails, code breaks paragraphs every few sentences. (Hashtags are NOT the model's: operator 2026-11-21, jokes carry
+    exactly #WeTalkALot #Jokes, every other category #WeTalkALot plus its one category tag, from config/wtal.yaml `hashtags`.)
   * VERIFIES, always: the title and body as they appear in the finished post, with tags and whitespace removed, must equal the title and body as the source gave them, character for character.
     If anything differs the operator gets the ORIGINAL TEXT UNFORMATTED instead, and the card says so. The check runs on every item; it is cheap and it is the whole guarantee.
   * The copy guard (write_post._find_reproduction_issues) is NOT used on this channel: the text is the source's own words by design.
@@ -37,19 +39,6 @@ CARD_ORIGINAL_MAX_CHARS = 1100
 
 _SENTENCE_SPLIT_RE = re.compile(r'(?<=[.!?…])["”’)\]]*\s+(?=["“‘(\[]?[A-Z0-9])')
 _NO_SPACE_AFTER_STOP_RE = re.compile(r"([a-z0-9][.!?])([A-Z])")
-_TAG_RE = re.compile(r"^#[A-Za-z][A-Za-z0-9]{3,24}$")
-# A hashtag is WEAK when every word in it is a generic one ("#EdgyJokes", "#DarkHumorJokes", "#OffensiveComedy", "#BlackComedy", "#WeirdNews"): it says the genre, not the subject, and every humor channel uses it.
-# Operator 2026-11-21: ban those. One specific word makes a tag acceptable ("#DarkCatholicHumor", "#AcnePunchline", "#ChickenCrossing").
-_GENERIC_WORDS = ("funny", "lol", "memes", "meme", "viral", "humor", "humour", "humorous", "fun", "news", "joke", "jokes", "haha", "comedy", "weird", "satire", "satirical", "headline", "headlines", "breaking",
-                  "wtf", "odd", "bizarre", "edgy", "dark", "offensive", "punchline", "punchlines", "laugh", "laughs", "daily", "today", "absurd", "real", "story", "stories", "black", "tasteless", "sick", "twisted",
-                  "inappropriate", "irreverent", "sarcasm", "sarcastic", "one", "liner", "liners", "bad", "taste", "good", "best", "top", "new", "trending", "trend", "life", "world", "tag", "tags", "stuff", "things", "morbid", "gallows")
-_GENERIC_TAG_RE = re.compile(r"^(?:" + "|".join(sorted(_GENERIC_WORDS, key=len, reverse=True)) + r")+$")
-_GENERIC_TAGS = {"#funny", "#lol", "#memes", "#meme", "#viral", "#humor", "#humour", "#fun", "#news", "#joke", "#jokes", "#haha", "#comedy", "#weirdnews", "#satire", "#satirenews", "#satireheadline", "#headline", "#breakingnews", "#wtf", "#odd", "#oddnews", "#bizarre"}
-
-
-def is_generic_tag(tag: str) -> bool:
-    t = tag.lstrip("#").lower()
-    return ("#" + t) in _GENERIC_TAGS or bool(_GENERIC_TAG_RE.match(t))
 _ALLOWED_EDIT_TAGS = ("tg-spoiler", "b", "i", "u", "s", "code")
 
 
@@ -116,32 +105,17 @@ def visible_text(post_html: str) -> str:
 
 
 # ------------------------------------------------------------------ the model's two jobs
-def _hashtag_prompt(label: str, title: str, body: str, sentences: list[str] | None) -> str:
-    numbered = ""
-    ask_breaks = ""
-    if sentences:
-        numbered = "\nSENTENCES (numbered from 0):\n" + "\n".join(f"{i}: {s}" for i, s in enumerate(sentences)) + "\n"
-        ask_breaks = (' and "paragraph_starts": the 0-based sentence numbers where a NEW paragraph begins, in increasing order, starting with 0, at most 4 paragraphs, '
-                      "breaking only where the text naturally changes subject or beat")
-    return f"""You are formatting one post for a Telegram humor channel. The post is the source's own text and you must not change, add or remove any word: you only choose formatting.
+def _breaks_prompt(label: str, title: str, sentences: list[str]) -> str:
+    numbered = "\n".join(f"{i}: {x}" for i, x in enumerate(sentences))
+    return f"""You are formatting one post for a Telegram humor channel. The post is the source's own text and you must not change, add or remove any word: you only choose where the paragraphs break.
 
 Category: {label}
 TITLE: {title or "(none)"}
-TEXT: {body[:1500] if not sentences else "(see the numbered sentences)"}{numbered}
-Return ONLY a JSON object with "hashtags": 2 or 3 niche hashtags for this category and this text (letters and digits only, 4 to 25 characters each, nothing generic like #funny #lol #memes #viral #edgyjokes #darkhumor #comedy: name the SUBJECT of this text, e.g. a person, place, object or event in it){ask_breaks}.
-Example: {{"hashtags": ["#BizarreHistory", "#PopeDrama"]{', "paragraph_starts": [0, 2]' if sentences else ''}}}"""
+SENTENCES (numbered from 0):
+{numbered}
 
-
-def valid_hashtags(tags) -> list[str]:
-    out = []
-    for t in tags if isinstance(tags, list) else []:
-        t = str(t).strip()
-        if not t.startswith("#"):
-            t = "#" + t
-        t = re.sub(r"[^#A-Za-z0-9]", "", t)
-        if _TAG_RE.match(t) and not is_generic_tag(t) and t.lower() not in {x.lower() for x in out}:
-            out.append(t)
-    return out[:3]
+Return ONLY a JSON object with "paragraph_starts": the 0-based sentence numbers where a NEW paragraph begins, in increasing order, starting with 0, at most 4 paragraphs, breaking only where the text naturally changes subject or beat.
+Example: {{"paragraph_starts": [0, 2]}}"""
 
 
 def valid_starts(starts, n: int) -> list[int] | None:
@@ -158,15 +132,15 @@ def valid_starts(starts, n: int) -> list[int] | None:
     return s[:MAX_PARAGRAPHS] if len(s) >= 2 else None
 
 
-def ask_model(conn, category: str, label: str, title: str, body: str, sentences: list[str] | None) -> dict:
-    """{'hashtags': [...], 'paragraph_starts': [...]|None}. Any failure returns {} and the code falls back -- formatting must never block a card."""
+def ask_model(conn, category: str, label: str, title: str, sentences: list[str]) -> dict:
+    """{'paragraph_starts': [...]}. Any failure returns {} and the code falls back -- formatting must never block a card."""
     from pipeline import llm, post_format
     try:
-        raw = llm.generate_write(conn, category, _hashtag_prompt(label, title, body, sentences))
+        raw = llm.generate_write(conn, category, _breaks_prompt(label, title, sentences))
         parsed = post_format.parse_llm_json(raw)
         return parsed if isinstance(parsed, dict) else {}
     except Exception:
-        logger.exception("verbatim: the model could not be used for %s -- falling back to code defaults", category)
+        logger.exception("verbatim: the model could not be used for %s -- falling back to code paragraph breaks", category)
         return {}
 
 
@@ -190,8 +164,9 @@ def pick_header(category: str, seed: int) -> str | None:
     return pool[seed % len(pool)]
 
 
-def default_hashtags(category: str) -> list[str]:
-    return list((load_config().get("hashtag_defaults") or {}).get(category) or [])
+def hashtags_for(category: str) -> list[str]:
+    """The category's fixed hashtags (config/wtal.yaml `hashtags`): the model has no say."""
+    return list((load_config().get("hashtags") or {}).get(category) or [])
 
 
 def poll_for(category: str, seed: int) -> dict | None:
@@ -221,14 +196,6 @@ def _spoiler_wrap(paragraphs: list[str], mode: str) -> list[str]:
         last = sents[-1]
         html_paras[-1] = (esc(head) + " " if head else "") + f"<tg-spoiler>{esc(last)}</tg-spoiler>"
     return html_paras
-
-
-def source_line(category: str, payload: dict) -> str:
-    name = (payload.get("source_name") or "").strip()
-    if not name:
-        return ""
-    template = category_settings(category).get("source_line") or "Source: {source}"
-    return template.format(source=name)
 
 
 def original_text(payload: dict) -> str:
@@ -265,13 +232,8 @@ def build(conn, category: str, raw_item: dict, *, use_model: bool = True, seed: 
     sentences = None
     if len(parts) == 1 and len(split_sentences(parts[0])) >= MIN_SENTENCES_FOR_BREAKS:
         sentences = split_sentences(parts[0])
-    model = ask_model(conn, category, label, title, body_joined, sentences) if use_model else {}
-    tags = valid_hashtags(model.get("hashtags"))
-    for d in default_hashtags(category):                       # the model's specific tags first; the category's own defaults only to make up the 2 the format asks for
-        if len(tags) >= 2:
-            break
-        if d.lower() not in {x.lower() for x in tags}:
-            tags.append(d)
+    model = ask_model(conn, category, label, title, sentences) if (use_model and sentences) else {}
+    tags = hashtags_for(category)
     if sentences:
         starts = valid_starts(model.get("paragraph_starts"), len(sentences)) or code_starts(len(sentences))
         parts = paragraphs_from_starts(sentences, starts)
@@ -290,10 +252,7 @@ def build(conn, category: str, raw_item: dict, *, use_model: bool = True, seed: 
         seed = _category_counter(conn, category)
     header = pick_header(category, seed)
     tag_line = esc(" ".join(tags)) if tags else ""
-    src = source_line(category, payload)
-    dateline = (payload.get("dateline") or "").strip()
-    if dateline and not cfg.get("source_line_with_dateline"):
-        src = ""                                                # "BBC, 20 Nov:" at the top already names the outlet (satire keeps its "via X, satire" label)
+    dateline = (payload.get("dateline") or "").strip() if load_config().get("show_dateline", True) else ""
     blocks = []
     if header:
         blocks.append(esc(header))
@@ -308,9 +267,7 @@ def build(conn, category: str, raw_item: dict, *, use_model: bool = True, seed: 
         blocks.append("\n".join(top))
     blocks.extend(body_html)
     if tag_line and not title_html:
-        blocks.append(tag_line)                                 # no title: the tags close the post, above the source line
-    if src:
-        blocks.append(esc(src))
+        blocks.append(tag_line)                                 # no title: the tags close the post
     return {"text": "\n\n".join(blocks), "ok": True, "original_html": original_html, "tags": tags}
 
 
@@ -331,9 +288,4 @@ def original_block(payload: dict) -> str:
         text = text[:CARD_ORIGINAL_MAX_CHARS].rstrip() + " [cut for the card]"
     src = payload.get("source_name") or "source"
     link = payload.get("source_url") or payload.get("link") or ""
-    flags = payload.get("flags") if isinstance(payload.get("flags"), dict) else {}
-    marks = [k for k, v in flags.items() if v]
-    extra = ""
-    if payload.get("joke_category") or marks:
-        extra = "\n<i>" + esc(" | ".join(x for x in [payload.get("joke_category") or "", ("flags: " + ", ".join(marks)) if marks else "no flags"] if x)) + "</i>"
-    return f"<b>Original</b> ({esc(src)})\n{esc(text)}" + extra + (f"\n{esc(link)}" if link else "")
+    return f"<b>Original</b> ({esc(src)})\n{esc(text)}" + (f"\n{esc(link)}" if link else "")

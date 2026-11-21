@@ -142,6 +142,18 @@ WTAL_PROBES = [
     {"id": "l_lemmy_jokes", "dir": J, "url": "https://lemmy.world/feeds/c/jokes.xml?sort=TopMonth"},
     {"id": "l_lemmy_historymemes", "dir": H, "url": "https://lemmy.world/feeds/c/historymemes.xml?sort=TopMonth"},
     {"id": "l_lemmy_unexpected", "dir": W, "url": "https://lemmy.world/feeds/c/unexpected.xml?sort=TopMonth"},
+    # ---- 2026-11-21 phase 2: the exact endpoints the libraries read (collectors/wtal_library.py), so Railway confirms each before the monthly refresh relies on it
+    {"id": "p2_wiki_ud_antiquity", "dir": H, "url": "https://en.wikipedia.org/w/api.php?action=parse&page=List_of_unusual_deaths_in_antiquity&prop=sections&format=json&redirects=1"},
+    {"id": "p2_wiki_ud_20th", "dir": H, "url": "https://en.wikipedia.org/w/api.php?action=parse&page=List_of_unusual_deaths_in_the_20th_century&prop=sections&format=json&redirects=1"},
+    {"id": "p2_wiki_ud_21st", "dir": H, "url": "https://en.wikipedia.org/w/api.php?action=parse&page=List_of_unusual_deaths_in_the_21st_century&prop=sections&format=json&redirects=1"},
+    {"id": "p2_wiki_inventors", "dir": H, "url": "https://en.wikipedia.org/w/api.php?action=parse&page=List_of_inventors_killed_by_their_own_invention&prop=sections&format=json&redirects=1"},
+    {"id": "p2_wiki_unusual_articles_text", "dir": H, "url": "https://en.wikipedia.org/w/api.php?action=parse&page=Wikipedia:Unusual_articles&prop=sections&format=json&redirects=1"},
+    {"id": "p2_wiki_conspiracies_text", "dir": H, "url": "https://en.wikipedia.org/w/api.php?action=parse&page=List_of_conspiracy_theories&prop=sections&format=json&redirects=1"},
+    {"id": "p2_otd_events_wikimedia", "dir": H, "url": "https://api.wikimedia.org/feed/v1/wikipedia/en/onthisday/events/11/21"},
+    {"id": "p2_otd_events_enwiki", "dir": H, "url": "https://en.wikipedia.org/api/rest_v1/feed/onthisday/events/11/21"},
+    {"id": "p2_lemmy_showerthoughts_api", "dir": L, "url": "https://lemmy.world/api/v3/post/list?community_name=showerthoughts&sort=TopAll&limit=50&page=2"},
+    {"id": "p2_recordsetter_index", "dir": H, "url": "https://recordsetter.com/world-records"},
+    {"id": "p2_recordsetter_food", "dir": H, "url": "https://recordsetter.com/food-and-drink-world-records"},
 ]
 
 # Telegram: the two content channels the operator named plus the six meme channels (trend signals only -- never reposted).
