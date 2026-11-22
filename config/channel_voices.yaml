@@ -161,7 +161,7 @@ coincraft:
   name: how_to
   summary: >-
     A short, practical pick for readers anywhere in the world: one opportunity chosen because it is worth
-    the reader's time -- what you can get, why this one is worth a look, whether you can take part, and exactly how.
+    the reader's time -- what you can get, whether you can take part, and exactly how. Real facts only: what is not known is left out.
   tone: >-
     Practical and direct, in the second person, like a person who picked this one for you and can say why in one plain
     clause -- not a notice that something exists. Plain words a reader who is not a native English speaker can follow;
@@ -174,17 +174,14 @@ coincraft:
   title_check: null
   paragraphs:
     - >-
-      What it is and what you get: the reward, who can take part (countries, requirements) and the deadline, exactly as
-      the facts give them -- plus ONE short clause on why this one is worth a look, taken only from the facts' "What
-      stands out" line (for example "only 7 entrants so far" or "nothing is needed up front"). Never invent a reason.
+      What it is and what you get: the reward, then who can take part, the deadline and any minimum to qualify -- only those the facts give,
+      in the facts' own currency and numbers. If the facts give a "why this one is worth the reader's time" reason, add it as ONE short clause in
+      your own words; if they do not, add nothing.
     - >-
-      How to do it: the steps from the facts as a numbered list (1. 2. 3.), one action each --
-      or, if the facts say no steps are available, one sentence saying the steps are on the
-      offer's page.
-    - >-
-      The catch: what it costs or requires (money up front, documents or ID checks, time), any
-      limits the facts state, and anything that is not stated -- plain, never alarmist.
-  length: {min: 400, max: 750}      # was 650 until 2026-11-16: the "why this one" clause (curated-find voice) needs room (at 700, 2 of 6 platform cards still gave up after 9 tries); Nov 23 --drafts decides whether it is right
+      What taking part involves: the steps from the facts as a numbered list (1. 2. 3.), one action per line, then any cost, deposit, ID check,
+      exclusion or limit the facts state. Write only what the facts give. If the facts give no steps, write the conditions and limits as plain
+      sentences. Never say that anything is missing, unknown or on another page, and never tell the reader to check anywhere.
+  length: {min: 200, max: 750}      # was 650 until 2026-11-16: the "why this one" clause (curated-find voice) needs room (at 700, 2 of 6 platform cards still gave up after 9 tries); Nov 23 --drafts decides whether it is right
   person: second
   hashtags: true
   keep_context_lines: true

@@ -1089,6 +1089,22 @@ def _find_explainer_issues(parsed: dict, payload: dict) -> list[str]:
     return issues
 
 
+# Filler the operator banned (2026-11-22): a fact the sources do not give is LEFT OUT, never announced as missing, and the reader is never sent to "check the page".
+_EARN_FILLER = [
+    (re.compile(r"\bnot\s+(?:been\s+)?(?:stated|specified|listed|given|mentioned|disclosed|provided|available)\b|\b(?:isn|aren|wasn|weren|hasn|haven)'?t\s+(?:been\s+)?(?:stated|specified|listed|given|mentioned|disclosed|provided)\b", re.I), "not stated"),
+    (re.compile(r"\bnothing\s+(?:is\s+)?stated\b|\bstated\s+as\s+required\b", re.I), "nothing is stated as required up front"),
+    (re.compile(r"\bworth\s+a\s+look\b", re.I), "worth a look"),
+    (re.compile(r"\bcheck\s+(?:out\s+)?(?:the\s+)?(?:offer'?s?\s+)?(?:page|link|details|terms)\b|\b(?:see|visit|read|open)\s+the\s+(?:offer'?s?\s+)?(?:page|link)\s+(?:for|to\s+see)\b", re.I), "check the offer's page"),
+    (re.compile(r"\b(?:steps?|details|terms|rules|rest)\s+(?:are|is)\s+(?:listed\s+)?(?:on|at|in)\s+(?:the\s+)?(?:offer'?s?\s+)?(?:page|link)\b", re.I), "the steps are on the offer's page"),
+    (re.compile(r"\b(?:is|are)\s+unknown\b", re.I), "unknown"),
+]
+
+
+def earning_filler(text: str) -> list[str]:
+    """The banned filler phrases a text uses (empty = clean)."""
+    return [label for rx, label in _EARN_FILLER if rx.search(text or "")]
+
+
 def _earn_words(text: str) -> set[str]:
     stop = {"the", "and", "you", "your", "for", "with", "that", "this", "then", "into", "from", "will", "are", "can", "any", "all"}
     return {w for w in re.findall(r"[a-z0-9]{3,}", (text or "").lower()) if w not in stop}
@@ -1105,6 +1121,9 @@ def _find_earning_issues(parsed: dict, payload: dict) -> list[str]:
         issues.append("it mentions a referral / invite / promo code -- the operator adds referral links by hand; remove it")
     if _EARN_URL_RE.search(text):
         issues.append("it contains a URL -- the link is added when the post is forwarded; say 'the link' instead")
+    for label in earning_filler(text):
+        issues.append(f"it uses banned filler (\"{label}\"): a fact the facts do not give is left out silently -- never say it is not stated, never send the reader to check the page, never write 'worth a look'; "
+                      f"say only what the facts say")
     headline = payload.get("headline_max_usd")
     if headline and any(abs(a - headline) < 0.5 for a in earning.extract_amounts_usd(title)):
         issues.append(f"the title leads with the listing's headline maximum (${headline:,.0f}); that is a ceiling, not the reward -- lead with the reward figure in the facts")
@@ -1955,8 +1974,8 @@ def generate_post_with_report(conn, category: str, channel: str, raw_item: dict,
     if category == "earning_opportunities":
         # The how-to needs the offer's REAL steps: read from the landing page (or the source's own instructions) before
         # the prompt is built, stored on the item, and treated as the only source of steps.
-        from pipeline import enrich_landing
-        enrich_landing.enrich_item(conn, raw_item)
+        from pipeline import offer_reader
+        offer_reader.enrich_offer(conn, raw_item)         # source post -> landing page (+ plain fetch) -> official-domain search; see pipeline/offer_reader.py
     cfg = load_category_config(conn, category)
     production = profile is None        # a caller-supplied profile is a review / test run: not counted in the draft statistics
     profile = profile or channel_voice.load_profile(conn, channel)
@@ -1984,6 +2003,14 @@ def generate_post_with_report(conn, category: str, channel: str, raw_item: dict,
             hashtags=(cfg.get("hashtags") or []) if (final and profile.hashtags) else [],
             context_line=context_line,
         )
+
+    if category == "earning_opportunities":
+        from pipeline import fallback_card, offer_reader
+        if offer_reader.is_thin(raw_item["payload"]):
+            # After every stage there is nothing but a title and (maybe) an amount: a SHORT card with just those -- no writer, no filler. "terms unverified" goes on the operator's header line only.
+            reward = fallback_card.reward_text(raw_item["payload"])
+            text = assemble(fallback_card.title_of(raw_item["payload"]), [reward] if reward else [], final=True)
+            return {"text": text, "attempts": 0, "retry_issues": [], "prompt": "", "channel": channel, "chars": channel_voice.measure(text), "terms_unverified": True}
 
     # Everything in the post the writer does NOT control (emoji, context lines, risk
     # flag) is measured once, up front, and subtracted from the length budget the
@@ -2027,6 +2054,14 @@ def generate_post_with_report(conn, category: str, channel: str, raw_item: dict,
         "text": text, "attempts": attempts, "retry_issues": retry_issues, "prompt": prompt, "channel": channel,
         "chars": channel_voice.measure(assemble(parsed["title"], parsed["paragraphs"], final=False)),
     }
+
+
+def generate_post_with_note(conn, category: str, channel: str, raw_item: dict) -> tuple[str, str | None]:
+    """(post text, an OPERATOR-ONLY note or None). The note goes on the routing header, never into the text he forwards: 'terms unverified' for an Earn Stack card that has only a title and an amount."""
+    if channel != "we_talk_a_lot" and category in FACT_SPECS and channel_voice.load_profile(conn, channel) is not None:
+        res = generate_post_with_report(conn, category, channel, raw_item)
+        return res["text"], ("terms unverified" if res.get("terms_unverified") else None)
+    return generate_post(conn, category, channel, raw_item), None
 
 
 def generate_post(conn, category: str, channel: str, raw_item: dict) -> str:

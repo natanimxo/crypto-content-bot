@@ -37,7 +37,7 @@ from pipeline.run_log import run_log  # noqa: E402
 from pipeline.score import load_category_config  # noqa: E402
 from pipeline import verbatim  # noqa: E402
 from pipeline.telegram_api import answer_callback_query, edit_message_text, get_updates, send_message, send_poll  # noqa: E402
-from pipeline.write_post import generate_post  # noqa: E402
+from pipeline.write_post import generate_post, generate_post_with_note  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -211,7 +211,7 @@ def _label_header(conn, category: str, channel: str) -> str:
 
 
 def _send_preview_and_store(conn, approval_id: int, channel: str, category: str, score,
-                             variant_a_model: str, variant_a_text: str) -> int:
+                             variant_a_model: str, variant_a_text: str, header_note: str | None = None) -> int:
     """Sends TWO separate Telegram messages
     (2026-09-10, STEP 1 of the delivery/formatting overhaul):
       1. A routing header — operator-only: label, channel, score, and the
@@ -235,7 +235,7 @@ def _send_preview_and_store(conn, approval_id: int, channel: str, category: str,
     label_line = html.escape(_label_header(conn, category, channel))
     score_line = f"Score {score}/100" if score is not None else ""
 
-    header_text = f"<b>{label_line}</b>\n{score_line}"
+    header_text = f"<b>{label_line}</b>\n{score_line}" + (f"\n⚠️ <i>{html.escape(header_note)}</i>" if header_note else "")      # operator-only: the text below is what he forwards
     keyboard = [[
         {"text": "✅ Mark as sent", "callback_data": f"mark_sent_a:{preview_id}"},
         {"text": "❌ Discard", "callback_data": f"discard:{preview_id}"},
@@ -271,9 +271,13 @@ def _generate_and_preview(conn, approval: dict):
         "score_breakdown": approval["score_breakdown"],
     }
     # A channel whose candidates arrive as finished drafts (bot/notify.py DRAFT_FIRST_CHANNELS) already holds the post: the operator approved THAT text, so it is sent as is, no second model call.
-    text = approval.get("draft_text") or generate_post(conn, category, channel, raw_item)
+    note = None
+    if approval.get("draft_text"):
+        text = approval["draft_text"]
+    else:
+        text, note = generate_post_with_note(conn, category, channel, raw_item)
     _send_preview_and_store(conn, approval["approval_id"], channel, category, approval["score"],
-                             cfg["write_model"], text)
+                             cfg["write_model"], text, header_note=note)
 
 
 def _is_config_error(exc: Exception) -> bool:
@@ -337,8 +341,10 @@ def _send_fallback_card(conn, approval: dict, exc: Exception) -> None:
     """earning_opportunities only (operator 2026-11-17): the guards stay, but a draft that cannot pass them must not leave the operator with nothing -- send a PLAIN FACTS card built
     from the stored facts (pipeline/fallback_card.py, no model) as an ordinary preview, with the Edit button, so he can always post it."""
     from pipeline.fallback_card import plain_facts_card
+    from pipeline import offer_reader
     text = plain_facts_card(approval["payload"], approval.get("score_breakdown"), get_channel_display_name(conn, approval["channel"]))
-    _send_preview_and_store(conn, approval["approval_id"], approval["channel"], approval["category"], approval["score"], "plain_facts_card", text)
+    note = "plain facts card: the writer could not produce a checked draft" + ("; terms unverified" if offer_reader.is_thin(approval["payload"]) else "")
+    _send_preview_and_store(conn, approval["approval_id"], approval["channel"], approval["category"], approval["score"], "plain_facts_card", text, header_note=note)
     logger.warning("poll: approval_id=%s draft failed its guards after the retries -- sent the plain facts card instead: %s", approval["approval_id"], str(exc)[-200:])
 
 

@@ -186,16 +186,17 @@ def main():
     check("draft-first: persisted after the send, notification id returned", (fc.commits, last_id is not None), (1, True))
 
     calls = []
-    op = (AP.generate_post, AP._send_preview_and_store, AP.load_category_config)
+    op = (AP.generate_post, AP._send_preview_and_store, AP.load_category_config, AP.generate_post_with_note)
     AP.generate_post = lambda *a, **k: (calls.append("model") or "FROM THE MODEL")
-    AP._send_preview_and_store = lambda conn, approval_id, channel, category, score, model, text: calls.append(("preview", text))
+    AP.generate_post_with_note = lambda *a, **k: (calls.append("model") or "FROM THE MODEL", None)
+    AP._send_preview_and_store = lambda conn, approval_id, channel, category, score, model, text, header_note=None: calls.append(("preview", text))
     AP.load_category_config = lambda conn, category: {"write_model": "m"}
     try:
         base = {"category": "technique_explainer", "channel": "crypto_notebook", "raw_item_id": 5, "payload": {}, "collected_at": NOW, "score": 80.0, "score_breakdown": {}, "approval_id": 9}
         AP._generate_and_preview(None, dict(base, draft_text="THE DRAFT"))
         AP._generate_and_preview(None, dict(base, draft_text=None))
     finally:
-        AP.generate_post, AP._send_preview_and_store, AP.load_category_config = op
+        AP.generate_post, AP._send_preview_and_store, AP.load_category_config, AP.generate_post_with_note = op
     check("approve: a stored draft is sent as is with NO model call; without one the post is written as before", calls, [("preview", "THE DRAFT"), "model", ("preview", "FROM THE MODEL")])
     check("schema: the draft column exists", "ADD COLUMN IF NOT EXISTS draft_text" in open(os.path.join(root, "db", "schema.sql"), encoding="utf-8").read(), True)
     schema = open(os.path.join(root, "db", "schema.sql"), encoding="utf-8").read()

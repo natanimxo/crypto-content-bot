@@ -314,7 +314,7 @@ def facts_exchange_listings(p: dict) -> str:
 - Background for you, NOT for the post: the record goes back to {record}, so a listing before those dates would not appear in it."""
 
 
-MAX_FACT_STEPS = 3
+MAX_FACT_STEPS = 5
 STRUCTURED_SOURCES = {"superteam", "zindi", "immunefi"}      # platforms whose API gives the amount, token and deadline as fields
 # A participation step (or an eligibility clause) that is about a referral / promo code is never handed to the writer: the operator adds referral
 # links by hand and no one else's code goes out under his name (the guard rejects referral language anyway, so a post built from such a step could
@@ -347,7 +347,7 @@ def facts_earning_opportunities(p: dict) -> str:
     enriched = p.get("enriched") or {}
     steps = [s for s in (enriched.get("steps") or []) if not _REFERRAL_STEP_RE.search(s)]
     extra_steps = max(0, len(steps) - MAX_FACT_STEPS)
-    steps = [_shorten(x, 80).replace(" (more on the page)", "") for x in steps[:MAX_FACT_STEPS]]       # a 400-650 character post cannot carry a paragraph per step
+    steps = [_shorten(x, 170).replace(" (more on the page)", "") for x in steps[:MAX_FACT_STEPS]]       # a step is kept whole (170 characters), never cut mid-sentence
     dropped_referral = len(enriched.get("steps") or []) - len(steps) - extra_steps > 0
     reward = _shorten(enriched.get("reward"), 120)
     def shown(display_key: str, usd: float | None) -> str:
@@ -361,10 +361,10 @@ def facts_earning_opportunities(p: dict) -> str:
         kind = {"worth": "worth", "stated": "stated as"}.get(p.get("payout_kind"), "stated as")
         reward = f"{kind} {shown('payout_display', p['payout_usd'])}"
     elif not reward and p.get("pool_usd"):
-        reward = f"a pool of {shown('pool_display', p['pool_usd'])} shared among participants; what one person receives is not stated"
+        reward = f"a pool of {shown('pool_display', p['pool_usd'])} shared among participants"
     elif not reward and p.get("unclear_usd"):
         reward = f"an amount of {shown('unclear_display', p['unclear_usd'])} is mentioned, but it is not clear whether it is per person or a total shared among winners"
-    what = p.get("title")
+    what = enriched.get("title_en") or p.get("title")          # a Telegram post's own first line is often no headline ("We're live!"): the translated, specific one when the reader made it
     headline = p.get("headline_max_usd")
     from pipeline import prizes as _prizes
     is_comp = _prizes.award_kind(p) == "competition" and _prizes.prize_info(p) is not None
@@ -398,19 +398,24 @@ def facts_earning_opportunities(p: dict) -> str:
             what = re.sub(r"\s*\|?\s*\bup to\s*[$€£]?\s*[\d,.]+\s*[kKmM]?\b[^()|:]*", " ", what or "", flags=re.IGNORECASE)
             what = re.sub(r"\s{2,}", " ", what).replace("| (", "(").strip(" |")
     cap = p.get("capital_usd")
-    cost = enriched.get("cost") or ("nothing is stated as required up front" if cap == 0 else
-                                    (f"about ${cap:,.0f} of your own money is needed" if cap else "not stated"))
+    # A fact the sources do not give is LEFT OUT of the facts (operator 2026-11-22): the writer is never handed "not stated" to repeat. capital_usd == 0 is the collector's DEFAULT when it found no deposit wording, not a statement
+    # that nothing is required, so it is not passed on as one.
+    cost_bits = [enriched.get("cost")] if enriched.get("cost") else ([f"about ${cap:,.0f} of your own money is needed"] if cap and cap > 0 else [])
+    if enriched.get("minimums"):
+        cost_bits.append("minimum to qualify: " + enriched["minimums"])
+    cost = "; ".join(cost_bits)
     # A structured platform's own deadline (an ISO timestamp from its API) is authoritative: the page text shows the same instant in the fetcher's
     # local time ("14 December 07:29" for Dec 13 23:59 UTC), and the guard checks the post against the structured date -- preferring the page made
     # that guard impossible to satisfy (Zindi Dis-Chem, 2026-11-16).
-    deadline = ((day(p.get("deadline")) if p.get("source") in STRUCTURED_SOURCES else None) or enriched.get("deadline") or day(p.get("deadline")) or "not stated")
-    geo = {"worldwide": "open worldwide", "multi": "open in several regions (check the page for which)", "single": "open in ONE country only"}.get(p.get("geo"), "countries not stated")
-    where = _shorten("; ".join(c for c in re.split(r"\s*;\s*", enriched.get("eligibility") or "") if c and not _REFERRAL_STEP_RE.search(c)), 170) or geo
-    reqs = ", ".join(x.replace("_", " ") for x in (p.get("prereqs") or [])) or "none stated"
+    deadline = (day(p.get("deadline")) if p.get("source") in STRUCTURED_SOURCES else None) or enriched.get("deadline") or day(p.get("deadline"))
+    geo = {"worldwide": "open worldwide", "multi": "open in several regions", "single": "open in ONE country only"}.get(p.get("geo"))
+    where = _shorten("; ".join(c for c in re.split(r"\s*;\s*", enriched.get("eligibility") or "") if c and not _REFERRAL_STEP_RE.search(c)), 260) or geo
+    conditions = _shorten("; ".join(c for c in (enriched.get("conditions") or []) if not _REFERRAL_STEP_RE.search(c)), 420).replace(" (more on the page)", "")
+    reqs = ", ".join(x.replace("_", " ") for x in (p.get("prereqs") or []))
     if p.get("skill"):
-        reqs = ("" if reqs == "none stated" else reqs + "; ") + "professional skill needed: " + ", ".join(p["skill"])
+        reqs = (reqs + "; " if reqs else "") + "professional skill needed: " + ", ".join(p["skill"])
     # WHY THIS ONE (operator 2026-11-16: the voice must read as a curated find, not a feed item). Built only from checkable fields, so the "reason it is
-    # worth a look" can never be invented: the writer is told to use ONE or TWO of these and nothing else.
+    # worth the reader's time" can never be invented: the writer is told to use ONE or TWO of these and nothing else.
     stands = []                  # strongest reasons first; a weak one ("open anywhere") only when nothing stronger is true
     regs = p.get("registrations")
     if _prizes.award_kind(p) in ("competition", "raffle") and regs is not None and regs < 30:
@@ -423,29 +428,31 @@ def facts_earning_opportunities(p: dict) -> str:
         pass
     if p.get("payout_kind") in ("stated", "max") and p.get("payout_usd") and p["payout_usd"] >= 50:
         stands.append(f"a stated payout of {shown('payout_display', p['payout_usd'])}")
-    if cap == 0:
-        stands.append("nothing is stated as required up front")
     if p.get("geo") == "worldwide":
         stands.append("open to readers anywhere")
-    stands_line = "; ".join(stands[:4]) if stands else "nothing beyond the reward itself -- then say only what it pays and what it needs"
+    lines = ["Facts about this opportunity (collected automatically; the reader's own checks still apply):",
+             f"- What: {what}", f"- Kind: {(p.get('type') or 'other').replace('_', ' ')}", f"- Posted by: {p.get('source_name')}"]
+    for label, value in (("Reward", reward), ("What it costs or requires", cost), ("Deadline", deadline), ("Who can take part", where), ("Conditions and limits", conditions), ("Other requirements", reqs)):
+        if value:
+            lines.append(f"- {label}: {value}")
+    if stands:
+        lines.append("- Why this one is worth the reader's time (you may use ONE of these, in your own words; never invent a reason): " + "; ".join(stands[:4]))
     if steps:
-        steps_block = "\n".join(f"  {i}. {s}" for i, s in enumerate(steps, 1))
-        if extra_steps or dropped_referral:     # the writer has a 400-650 character budget: a long ladder of steps cannot fit, and a referral step is the operator's to add
-            steps_block += "\n  (the offer has further steps -- say the rest are on the offer's page; never write them yourself)"
-    else:
-        steps_block = "  NOT AVAILABLE -- the offer's own page could not be read. Write NO steps; tell the reader the steps are on the offer's page."
-    return f"""Facts about this opportunity (collected automatically; the reader's own checks still apply):
-- What: {what}
-- Kind: {(p.get('type') or 'other').replace('_', ' ')}
-- Posted by: {p.get('source_name')}
-- Reward: {reward or 'not stated'}
-- What it costs or requires: {cost}
-- Deadline: {deadline}
-- Who can take part: {where}
-- Other requirements: {reqs}
-- What stands out (give ONE or TWO of these as the reason this one is worth a look; use only these, never invent a reason): {stands_line}
-- Participation steps ({'from the offer itself' if steps else 'none available'}):
-{steps_block}"""
+        lines.append("- Participation steps (" + {"landing_page": "from the offer's own page", "official_search": "from the offer's official site", "source_post": "from the offer's own announcement"}.get(enriched.get("steps_from"), "from the offer itself") + "):")
+        lines += [f"  {i}. {x}" for i, x in enumerate(steps, 1)]
+        if extra_steps or dropped_referral:
+            lines.append("  (there are more steps than fit in a short post: give the main ones, and never write one yourself)")
+    # THE SOURCE POST ITSELF (operator 2026-11-22): what the channel or platform actually announced, translated to English when it was not. Its steps, amounts, dates and rules are facts the writer may use.
+    def _norm(t: str) -> str:
+        return re.sub(r"\W+", "", t or "")
+    post_en = enriched.get("post_en")
+    if not post_en:
+        desc = (p.get("description") or "").strip()
+        post_en = desc if len(_norm(desc)) > len(_norm(p.get("title") or "")) * 2 + 20 else None
+    if post_en:
+        lines.append("- The announcement itself (the offer's own words, in English; every amount, date, step and rule in it is a fact you may use):")
+        lines.append("  " + post_en[:2400].replace("\n", "\n  "))
+    return "\n".join(lines)
 
 
 @dataclass(frozen=True)
@@ -709,17 +716,18 @@ FACT_SPECS: dict[str, FactSpec] = {
                   "not a crypto audience, not US-only"),
         facts=facts_earning_opportunities,
         content_brief=(
-            "Say what the reader gets and who can take part (countries, requirements, deadline) exactly as the facts give them. "
-            "Then the steps: ONLY the steps in the facts, numbered, one action each -- if the facts say no steps are available, "
-            "write none and say the steps are on the offer's page. Then the catch: what it costs or requires and any limit the "
-            "facts state. Where a fact is missing, say plainly that it is not stated."
+            "Say what the reader gets and, with it, who can take part, the deadline and any minimum -- but ONLY those the facts give. "
+            "Then the steps: ONLY the steps in the facts, numbered, one action each, each on its own line. Then the catch: the cost, minimum, ID check, "
+            "exclusion or limit the facts state. A fact the facts do not give is LEFT OUT, silently: never write that anything is \"not stated\", \"unknown\" or "
+            "\"on the page\", and never tell the reader to check the page, the offer's page or the link for what is missing."
         ),
         guardrails=(
             "HARD RULES, no exceptions: use only what the facts state -- never invent a step, amount, deadline, country or "
             "requirement. Never promise an outcome ('you will earn', 'guaranteed', 'free money'); say 'up to', 'if selected' or "
             "'eligible' as the facts do, and treat a giveaway as a chance, not a payment. No hype, no urgency, no 'don't miss'. "
             "Never include a URL, a referral link or an invite code (the link is added when the post is forwarded); refer to "
-            "'the link'. Never say whether the offer is safe or legitimate -- say what the facts state. " + _NO_SCORES
+            "'the link'. Never say whether the offer is safe or legitimate -- say what the facts state. Banned filler, never in the post: \"not stated\", \"nothing is stated as required up front\", "
+            "\"worth a look because\", \"check the offer's page\", \"the steps are on the offer's page\". " + _NO_SCORES
         ),
         title_figures=False,
     ),

@@ -235,7 +235,8 @@ def main():
     check("steps run together on one line are rejected", bool(G(post(ok_body, "1. Open the store page. 2. Sign in. 3. Press Get.", "Needs an account."), pl)), True)
     no_steps = dict(pl, enriched={})
     check("numbered steps are rejected when none are available", bool(G(post(ok_body, ok_steps, "Needs an account."), no_steps)), True)
-    check("'the steps are on the page' is fine when none are available", G(post(ok_body, "The steps are on the offer's page.", "Needs an account."), no_steps), [])
+    check("'the steps are on the page' is banned filler even when none are available (a missing fact is left out, never announced)", any("banned filler" in i for i in G(post(ok_body, "The steps are on the offer's page.", "Needs an account."), no_steps)), True)
+    check("with no steps the middle paragraph is simply the conditions, and that passes", G(post(ok_body, "You need an Epic account to claim it.", "Needs an account."), no_steps), [])
 
     # ---- multilingual terms (Russian / Portuguese): a detector gap, not an absence of terms (0 of 34 Russian items scored any)
     for text, want in [
@@ -532,7 +533,7 @@ def main():
         'deadline': '14 December 2026 at 07:29', 'eligibility': 'Must have an account; must use a referral code; open to all', 'reward': '$5 000 USD in prizes: 1st $2,500 USD, 2nd $1,500 USD, 3rd $1,000 USD, plus a lot more detail that does not fit'})
     ff = PF.facts_earning_opportunities(fp)
     check('facts: a referral / promo-code step is never handed to the writer', ('referral' in ff.lower(), 'code: community' in ff.lower()), (False, False))
-    check('facts: at most 3 steps, then a pointer to the page', (ff.count("\n  1. "), ff.count("\n  4. "), 'further steps' in ff), (1, 0, True))
+    check('facts: referral steps are dropped, the others kept whole, and a pointer says more exist', (ff.count("\n  1. "), ff.count("\n  4. "), ff.count("\n  5. "), 'more steps than fit' in ff), (1, 1, 0, True))
     check('facts: a structured platform deadline beats the page text (the page shows the same instant in local time)', ('Deadline: Dec 13' in ff, '14 December' in ff), (True, False))
     check('facts: eligibility clauses about a referral code are dropped', 'must use a referral code' in ff, False)
 
@@ -610,7 +611,7 @@ def main():
           "tiers": [1500.0, 1400.0, 1300.0, 1200.0, 1000.0], "bonus": {"count": 20, "amount": 330.0}, "winners": 25, "entrants": 71}}),
           "Top 5 share $13,000 USDC ($1.5k / $1.4k / $1.3k / $1.2k / $1k, plus 20 x $330) · ~71 entrants · 25 winners")
     check("prize line: structure unknown -> says so, never guesses", PZ.prize_line({"type": "hackathon", "award_kind": "competition", "prize": {"pool": 5000.0, "symbol": "$", "suffix": "USDC", "tiers": [], "winners": None, "entrants": 78}}),
-          "$5,000 USDC shared among the winners (the number of winners is not stated) · ~78 entrants")
+          "$5,000 USDC shared among the winners · ~78 entrants")
     check("prize line: only competitions have one", PZ.prize_line({"type": "giveaway", "award_kind": "raffle", "prize": {"pool": 100.0}}), None)
     check("a competition has NO expected payout and the $10 floor does not apply to it", (E.expected_payout_usd(eur), E.score_earning(eur)["expected_payout_usd"]), (None, None))
     se = E.score_earning(dict(base, **eur))
@@ -651,7 +652,7 @@ def main():
     from pipeline import fallback_card as FB
     from bot import approval_poller as AP
     fc = FB.plain_facts_card(dict(pz, enriched={"steps": ["Join the challenge", "Submit predictions"]}, gate={"reasons": []}), E.score_earning(pz), "Earn Stack")
-    check("fallback card: title, reward, deadline, who, cost, steps and the facts-card note", all(k in fc for k in ("<b>Reward:</b>", "<b>Deadline:</b>", "<b>Who can take part:</b>", "<b>Cost:</b>", "1. Join the challenge", "Plain facts card")), True)
+    check("fallback card: title, reward, deadline and steps, and no filler (the facts-card note moved to the operator's header)", all(k in fc for k in ("<b>Reward:</b>", "<b>Deadline:</b>", "1. Join the challenge")) and not any(k in fc for k in ("not stated", "Plain facts card", "steps are on", "Nothing is stated")), True)
     check("fallback card: no URL and no referral wording (the operator adds his own link)", ("http" in fc, "referral" in fc.lower()), (False, False))
     check("fallback card: a competition shows its prize structure in the ORIGINAL currency", "40,000" in fc and "$" in fc, True)
     gc = FB.plain_facts_card(dict(pz), E.score_earning(dict(pz, referral={"available": True, "amount_usd": None, "multi_level": True})), "Earn Stack", ["connect-wallet-to-claim"])
@@ -707,6 +708,80 @@ def main():
     check("CoinMarketCap announcements stay corroboration-only; OKX and Bybit announcements are campaign sources, filtered to campaign posts", ([h for h in ("CoinMarketCapAnnouncements",) if f"tg:{h}" in C.earning.SOURCES], sorted(C.CAMPAIGN_ONLY_SOURCES)), ([], ["tg:Bybit_Announcements", "tg:OKXAnnouncements"]))
     check("the dead / absent handles are not configured", [h for h in ("AirdropNinja", "airdropalert", "easyprofitcrypto", "CoinMarketCapAirdrops", "Galxe", "AirdropOasis", "top2airdrop", "unfud_crypto", "OKXOfficial_English", "bulka_crypto", "moni_talks", "WWGiveaways", "freestuff_hub", "FREE_UDEMY_COURSES1", "bugbountyplzen", "officialairdropalert", "cryptosale_tg", "2top_airdrop")
                                                          if h in C.earning.TELEGRAM_HANDLES], [])
+
+
+    # ---- the filler ban and the offer reader (operator 2026-11-22: every card was a title plus "not stated" filler)
+    from pipeline import offer_reader as OR
+    from pipeline import write_post as WP
+    filler = ["The deadline and countries are not stated.", "Nothing is stated as required up front.", "Worth a look because it is free.", "Check the offer's page for details.", "The steps are on the offer's page.", "Who can take part is unknown.",
+              "The reward amount isn't specified."]
+    check("filler guard: every banned phrase (and its usual variants) is caught", [bool(WP.earning_filler(t)) for t in filler], [True] * len(filler))
+    clean_texts = ["Open worldwide, ends Dec 1. Trade at least $50 in spot volume.", "A $100 deposit is required up front.", "Click the link to join.", "Nothing here is guaranteed."]
+    check("filler guard: real facts that merely sound similar are not caught", [WP.earning_filler(t) for t in clean_texts], [[]] * len(clean_texts))
+    check("filler guard: a draft with filler comes back from the writer's check as an issue", any("banned filler" in i for i in WP._find_earning_issues({"title": "Get $20", "paragraphs": ["You get $20. Deadline and countries are not stated.", "Join."]}, dict(pl, enriched={"steps": ["Join"]}))), True)
+
+    # facts: a fact nobody gave is ABSENT, never "not stated"; capital_usd 0 is the collector's default, not a statement
+    thin_p = {"title": "Some giveaway", "source_name": "OKX (Telegram)", "type": "giveaway", "capital_usd": 0.0, "enriched": {}}
+    tf = PF.facts_earning_opportunities(thin_p)
+    check("facts: a thin item gives the writer no 'not stated', no 'nothing required up front', no steps line", ("not stated" in tf, "up front" in tf, "steps" in tf.lower(), "Deadline" in tf, "Reward" in tf), (False, False, False, False, False))
+    rich = {"title": "Крутая акция TransferGo", "source_name": "Criptinho (Telegram)", "type": "airdrop", "description": "x" * 400, "capital_usd": 0.0, "referral": {}, "enriched": {"version": 2, "title_en": "Get 20 EUR for your first TransferGo transfer",
+            "steps": ["Register.", "Verify your identity in the documents section.", "Send at least 50 EUR to someone in another country."], "steps_from": "source_post", "reward": "20 EUR for the first transfer", "deadline": "Nov 30",
+            "minimums": "A transfer of at least 50 EUR", "conditions": ["You must be a new user.", "The transfer must be to another country with currency conversion."], "post_en": "Cool promotion from TransferGo: 20 EUR for your first transfer. Send 50 EUR or more to a friend abroad."}}
+    rf = PF.facts_earning_opportunities(rich)
+    check("facts: the translated headline, the reward, the minimum, the conditions, the steps and the FULL announcement all reach the writer",
+          ("What: Get 20 EUR for your first TransferGo transfer" in rf, "Reward: 20 EUR for the first transfer" in rf, "minimum to qualify: A transfer of at least 50 EUR" in rf, "You must be a new user." in rf,
+           "  3. Send at least 50 EUR" in rf, "from the offer's own announcement" in rf, "Cool promotion from TransferGo" in rf, "not stated" in rf), (True, True, True, True, True, True, True, False))
+    check("facts: an English announcement that only repeats the title is not passed twice; a real one is", ("The announcement itself" in PF.facts_earning_opportunities(dict(thin_p, description="Some giveaway. Some giveaway")),
+          "The announcement itself" in PF.facts_earning_opportunities(dict(thin_p, description="Trade eligible tokens on our DEX for a chance to share 180K USDG. Ends Nov 27, 11am UTC. Join now."))), (False, True))
+
+    # the reader: validation, merge order, thinness, the official-domain restriction, the guarded fetch
+    check("reader: a reply is validated and capped, unknown keys dropped, null-ish strings become absent", OR.validate_terms({"steps": ["a" * 300, 5, "Do it"], "reward": "null", "deadline": "Nov 27", "cost": None, "evil": "x", "conditions": ["ok"]}),
+          {"steps": ["a" * 200, "Do it"], "reward": None, "deadline": "Nov 27", "eligibility": None, "cost": None, "minimums": None, "conditions": ["ok"], "title_en": None, "post_en": None})
+    check("reader: a reply that says the page held nothing is None", (OR.validate_terms({"page_found": False}), OR.validate_terms({"steps": [], "reward": None}), OR.validate_terms("text")), (None, None, None))
+    m = OR.merge_terms([{"steps": [], "reward": "page reward", "deadline": None, "conditions": ["a"]}, {"steps": ["source step"], "reward": "post reward", "deadline": "Nov 27", "conditions": ["A", "b"]},
+                        {"steps": ["search step"], "reward": "search reward", "eligibility": "search eligibility"}])
+    check("reader: per field the offer's page wins, then the post, then the search (a search only fills a gap); conditions are the de-duplicated union", (m["reward"], m["steps"], m["deadline"], m["eligibility"], m["conditions"]),
+          ("page reward", ["source step"], "Nov 27", "search eligibility", ["a", "b"]))
+    check("reader: a thin item has nothing but a title and an amount; any single fact makes it not thin", (OR.is_thin({"title": "t", "enriched": {"reward": "20 EUR"}, "capital_usd": 0.0}), OR.is_thin({"title": "t", "enriched": {"deadline": "Nov 27"}}),
+          OR.is_thin({"title": "t", "enriched": {}, "geo": "worldwide"}), OR.is_thin({"title": "t", "enriched": {"steps": ["x"]}}), OR.is_thin({"title": "t", "enriched": {}, "capital_usd": 50.0})), (True, False, False, False, False))
+    check("reader: an official domain is the host a link finally resolves to, never a form, chat or link hub", (OR.official_domain("https://www.transfergo.com/uk"), OR.official_domain("https://web3.okx.com/boost/x"), OR.official_domain("https://docs.google.com/forms/d/e/1"),
+          OR.official_domain("https://t.me/x"), OR.official_domain("https://app.galxe.com/quest/1"), OR.official_domain(None)), ("transfergo.com", "okx.com", None, None, None, None))
+    sent = {"calls": []}
+    real_chat = OR._chat
+
+    def fake_chat(conn, prompt, tools=None, max_tokens=0):
+        sent["calls"].append((prompt[:40], tools))
+        msg = {"annotations": [{"type": "url_citation", "url_citation": {"url": "https://www.transfergo.com/uk/refer-a-friend"}}, {"type": "url_citation", "url_citation": {"url": "https://evil.example/transfergo.com/terms"}}],
+               "server_tool_calls": [{"calls": [{"sources": [{"url": "https://help.transfergo.com/uk/bonus"}, {"url": "https://www.transfergo.com/gb/refer-a-friend"}, {"url": "https://transfergo.com.phish.net/terms"}]}]}]}
+        return '{"urls": ["https://www.transfergo.com/uk/terms", "https://other-site.com/transfergo-terms"]}', {"choices": [{"message": msg}]}
+    OR._chat = fake_chat
+    try:
+        urls = OR.search_official_urls(None, "transfergo.com", "TransferGo bonus", "https://www.transfergo.com/uk")
+    finally:
+        OR._chat = real_chat
+    check("reader: the search is DeepSeek web search, and only URLs on the official domain survive (a look-alike host, another site and another country's page are dropped)", (sent["calls"][0][1], urls),
+          ([{"type": "deepseek_web_search"}], ["https://www.transfergo.com/uk/terms", "https://www.transfergo.com/uk/refer-a-friend", "https://help.transfergo.com/uk/bonus"]))
+    check("reader: private, loopback and link-local hosts are never fetched (no call into Railway's own network)", (OR._public_host("localhost"), OR._public_host("127.0.0.1"), OR._public_host("10.1.2.3"), OR._public_host("169.254.169.254"), OR.safe_get("http://169.254.169.254/latest/")["error"],
+          OR.safe_get("file:///etc/passwd")["error"]), (False, False, False, False, "blocked_host", "blocked_host"))
+    check("reader: the visible text of a page drops scripts and navigation", OR.visible_text("<html><nav>Menu Home</nav><script>var x=1</script><p>Get 20 EUR for your first transfer.</p><footer>Legal</footer></html>"), "Get 20 EUR for your first transfer.")
+    check("reader: a post that only repeats the headline (an API listing) is not sent to the model", OR.extract_source_terms(None, {"title": "KuCoin Giveaway", "description": "KuCoin Giveaway. KuCoin Giveaway"}), None)
+    # the whole chain with the network stubbed: the page gives nothing, the post gives the steps, the search is not needed for what the post covers
+    stub = {"read_page": OR.read_page, "extract": OR.extract_source_terms, "search": OR.search_official_urls, "safe_get": OR.safe_get}
+    OR.extract_source_terms = lambda conn, p: {"steps": ["Register", "Verify your identity", "Send 50 EUR abroad"], "reward": "20 EUR", "deadline": "Nov 30", "eligibility": "New users only", "cost": None, "minimums": "50 EUR transfer", "conditions": [], "title_en": "Get 20 EUR", "post_en": "post"}
+    OR.read_page = lambda conn, url, title: (None, {"reader": "failed", "fetch": "no_text", "final_url": url})
+    OR.search_official_urls = lambda *a, **k: (_ for _ in ()).throw(AssertionError("search must not run when steps, eligibility, deadline and minimums are all known"))
+    try:
+        enr = OR.build_enriched(None, {"title": "x", "landing_url": "https://trgo.co/uk", "url": "https://t.me/c/1", "description": "post"})
+    finally:
+        OR.read_page, OR.extract_source_terms, OR.search_official_urls, OR.safe_get = stub["read_page"], stub["extract"], stub["search"], stub["safe_get"]
+    check("reader: when the landing page fails the source post's steps count as real steps, and the read status is on the record (never a silent {})", (enr["steps"], enr["steps_from"], enr["version"], enr["read"]["landing"]["reader"], enr["read"]["source_post"], enr["read"]["search"]),
+          (["Register", "Verify your identity", "Send 50 EUR abroad"], "source_post", 2, "failed", "ok", "not_needed"))
+    check("write path: the old one-shot landing read is gone from the earning draft; the reader and the thin-card path are in", ("offer_reader.enrich_offer" in open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "pipeline", "write_post.py"), encoding="utf-8").read(),
+          "terms_unverified" in open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "pipeline", "write_post.py"), encoding="utf-8").read(),
+          "enrich_landing.enrich_item" in open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "pipeline", "write_post.py"), encoding="utf-8").read()), (True, True, False))
+    check("fallback card: only the known facts; no 'not stated', no 'steps are on the page', no facts-card note in the forwardable text", (lambda c: ("not stated" in c, "steps are on" in c, "Plain facts" in c, "<b>Reward:</b> 20 EUR" in c, "Who can take part" in c))(FB.plain_facts_card({"title": "t", "source_name": "X", "enriched": {"reward": "20 EUR"}, "capital_usd": 0.0})),
+          (False, False, False, True, False))
+    check("fallback card: nothing but a title and no amount still gives a clean card", FB.reward_text({"title": "t", "enriched": {}}), "")
 
     if FAILS:
         print(f"{len(FAILS)} MISMATCH(ES):")

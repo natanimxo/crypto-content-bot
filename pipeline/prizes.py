@@ -149,7 +149,7 @@ def prize_line(payload: dict, ladder: list[float] | None = None) -> str | None:
     elif winners:
         head = f"{winners} prizes share {pool}"
     else:
-        head = f"{pool} shared among the winners (the number of winners is not stated)"
+        head = f"{pool} shared among the winners"
     parts = [head]
     if pr.get("entrants") is not None:
         parts.append(f"~{pr['entrants']:,} entrants")
