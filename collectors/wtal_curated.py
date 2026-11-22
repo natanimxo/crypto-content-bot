@@ -14,7 +14,7 @@ Every card is the source's EXACT words (pipeline/verbatim.py); this module only 
   Darwin Awards                   the archive: year pages -> entry pages                   unusual deaths; only "Winner ... Confirmed True by Darwin" entries (an unconfirmed one is not a fact, so it is not used)
   Telegram @mistic_history        t.me/s paged back with ?before=                          dark history (a posts-with-links / invite / promo is dropped, the channel's own "Horror History" signature line is cut)
   Strange Company                 blog feed (full text), paged back with start-index       labels "mysterious deaths" / "poisonings" -> unusual deaths; "just plain weird" -> weird facts; ghosts, UFOs, newspaper clippings and link dumps are not routed
-  Skeptoid                        its "Conspiracy Theories" episode guide -> each episode's transcript   conspiracies (absurd ones, debunked); a conservative safety filter drops hate, health, election and 9/11 topics (UNSAFE)
+  Skeptoid                        its "Conspiracy Theories" episode guide -> each episode's transcript   conspiracies (absurd ones, debunked); every topic is kept (operator 2026-11-22: no topic limits on this channel)
   Factinate, HistorySnob          two curated list ARTICLES, one item per numbered entry   Factinate "24 Morbid Facts About Ironic Deaths" -> unusual deaths; HistorySnob's first ten ("conspiracy theories that turned out true") -> conspiracies
   NOT USED, on record             Listverse (dropped 2026-11-22: a card was only a list's intro paragraph). Snopes "freakish fatalities" tag: no article list in the page and an empty tag feed. Ranker: HTTP 401 from Railway. Telegram @SHOCKING_FACTSS: the fact is in the picture, the text is a caption.
 
@@ -126,7 +126,7 @@ FEEDS = {
 DARWIN_ENTRIES_PER_PASS = 80
 DARWIN_YEARS_PER_PASS = 8
 TELEGRAM = {"mistic_history": {"name": "Horror History (Telegram @mistic_history)", "category": "dark_history", "pass_pages": 20}}
-TG_AD = re.compile(r"t\.me/\+|joinchat|money[- ]making|free training|loophole|earn(?:ing)? (?:money|\$)|passive income|crypto|airdrop", re.I)
+TG_AD = re.compile(r"t\.me/\+|joinchat|money[- ]making|free training|loophole|earn(?:ing)? (?:money|\$)|passive income", re.I)       # promotion markers only: a post ABOUT crypto is a post, not an ad (the words crypto / airdrop were removed 2026-11-22: no topic limits)
 TG_SIGNATURE = re.compile(r"^\s*(?:horror history|join and share.*|@\w+|(?:#\w+\s*)+)\s*$", re.I)
 
 
@@ -307,17 +307,6 @@ def read_feed_source(key: str, src: dict, prog: dict, known: set[str], deadline:
     st["items"] = len(items)
     prog["seen"] = sorted(seen)[-SEEN_KEEP:] if len(seen) > SEEN_KEEP else sorted(seen)
     return items, st, prog
-
-
-# ------------------------------------------------------------------------------------------------ the safety filter (operator 2026-11-22: avoid sources that push real misinformation or hate)
-# A card is the opening of a piece, claim first: for a debunking source (Skeptoid) that would put a harmful claim in front of the reader without its rebuttal. So a conspiracy piece that touches hate, health, election, mass-shooting or 9/11 topics is
-# left out whatever its source says. The list is deliberately conservative: a wrongly dropped absurd conspiracy costs one card, a wrongly kept hate trope costs a lot more.
-UNSAFE = re.compile(r"\b(?:qanon|pizzagate|rothschilds?|illuminati|zionis\w*|jews?|jewish|antisemit\w*|blood libel|holocaust|great replacement|white genocide|new world order|nwo|protocols of|vaccin\w*|anti-?vax\w*|covid\w*|coronavirus|pandemic|5g|fluorid\w*|aspartame|autism|hiv|aids|abortion|"
-                    r"election\w*|voter fraud|stolen election|sandy hook|9/11|twin towers|world trade center|wtc|trump|biden|obama|clinton|deep state|fema camps?|north american union|medbeds?)\b", re.I)
-
-
-def unsafe_topic(title: str, body: str) -> bool:
-    return bool(UNSAFE.search(f"{title} {body}"))
 
 
 # ------------------------------------------------------------------------------------------------ an index page -> one item per linked page (Skeptoid)
@@ -634,14 +623,7 @@ def fetch_all(progress: dict, known: set[str], budget: float = BUDGET_SECONDS) -
             logger.exception("curated: telegram %s failed", handle)
             stats[f"telegram_{handle}"] = {"error": str(exc)[:160]}
             new["telegram"][handle] = (progress.get("telegram") or {}).get(handle) or {}
-    safe = []
-    for key, name, it in out:                              # the safety filter: a conspiracy piece on a hate, health, election or 9/11 topic is never a card
-        if it["category"] == "conspiracies" and unsafe_topic(it.get("title") or "", it.get("body") or ""):
-            lo = stats.setdefault(key, {}).setdefault("left_out", {})
-            lo["unsafe_topic"] = lo.get("unsafe_topic", 0) + 1
-            continue
-        safe.append((key, name, it))
-    return safe, stats, new
+    return out, stats, new
 
 
 def store_all(conn, fetched: list[tuple[str, str, dict]], stats: dict) -> dict[str, int]:
