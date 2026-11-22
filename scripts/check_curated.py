@@ -56,6 +56,11 @@ def main():
     check("pick: a one-sentence first paragraph takes the second AND a third while the text is still under two sentences and they fit", C.pick_paragraphs([one_sentence, "Short follow up that is also quite long enough to be kept as one paragraph here.", P3], "T")[0][0], one_sentence)
     check("pick: a print notice and a note about the site are not the story", C.pick_paragraphs(["© 2025 All Rights Reserved. Do not distribute or repurpose this work without written permission.", "Printed from https://www.damninteresting.com/x/ and a long tail to pass the length floor.", P1, P2], "T")[0], [P1, P2])
     check("pick: a sponsor note in the opening is left out (unknown is never coded as clear)", C.pick_paragraphs(["Just before we get into today's topic, a shout out to the sponsor of this episode, thank you very much indeed.", P2], "T"), ([], "promo"))
+    promo_cases = {"story": ["The show began as a podcast in 2009, and by the time its host died, the podcast had been downloaded more than four million times worldwide.", P2], "sponsor in a long story paragraph": [("The race sponsor pulled out in 1998. " + "x" * 420 + "."), P2],
+                   "subscribe": ["Subscribe to our newsletter for the best strange facts every single week, delivered straight to your inbox.", P2], "patreon": ["Support us on Patreon to help keep this blog going for another year.", P2],
+                   "merch": ["Check out our merch store for shirts, mugs and more strange things right now!", P2], "use code": ["Use code STRANGE at checkout for ten percent off your first order today.", P2]}
+    check("promo: only an actual promo line is left out; a story that merely mentions a podcast or a sponsor stays", {k: C.pick_paragraphs(v, "T")[1] for k, v in promo_cases.items()},
+          {"story": None, "sponsor in a long story paragraph": None, "subscribe": None, "patreon": "promo", "merch": "promo", "use code": "promo"})
     check("pick: a feed excerpt cut with [...] is truncated, not a card", C.pick_paragraphs(["Yet the Parisians refused to surrender until the whole city, after many weeks of siege and hunger, finally […]"], "T"), ([], "truncated"))
     check("pick: a paragraph that hands over to a quote or a list ('The author reports:') is not the end of a thought", C.pick_paragraphs(["Some detectives specialize in one thing only. Detectives whose specialty is detecting kissing might benefit from the method described in this study:"], "T"), ([], "ends_mid_thought"))
     check("pick: nothing long enough is 'no_paragraphs'", C.pick_paragraphs(["Short.", "Also short."], "T"), ([], "no_paragraphs"))
@@ -88,8 +93,7 @@ def main():
             f'<A href="/x"><IMG src="i.jpg"></a><p>(26 August 2006, Leicester, England) {P1}\n\n<p>{P2}\n<P>{P3}<P><FONT size="-1"><A href="/slush/x.html">MEDIA REFERENCES</A></FONT><P>Reader Comments: "Shanks for nothing."</article></body></html>')
     d = C.parse_darwin(page, "https://darwinawards.com/darwin/darwin2006-10.html")
     check("darwin: the title, the status line and the story paragraphs (the media references and the reader comments are not part of the story)", (d["title"], d["status"], len(d["paragraphs"]), "Shanks" in " ".join(d["paragraphs"]), d["paragraphs"][0].startswith("(26 August 2006, Leicester, England) In the village")), ("Modern Armor", "2006 Darwin Award Winner Confirmed True by Darwin", 3, False, True))
-    check("darwin: only 'Winner ... Confirmed True' is a fact (unconfirmed, honorable mention, urban legend are not used)", (C.darwin_is_fact("2006 Darwin Award Winner Confirmed True by Darwin"), C.darwin_is_fact("1999 Darwin Award Winner 2DUnconfirmed by Darwin"),
-          C.darwin_is_fact("Honorable Mention Confirmed True"), C.darwin_is_fact("Urban Legend")), (True, False, False, False))
+    check("darwin: every entry is used (the status line is read but no longer a filter)", (hasattr(C, "darwin_is_fact"), C.DARWIN_SCOPE), (False, "all"))
     check("darwin: the index lists the year pages, a year page its entries (de-duplicated, sorted, absolute)", (C.darwin_years('<a href="darwin2020.html">x</a><a href="/darwin/darwin2018.html">y</a><a href="darwin2020.html">'),
           C.darwin_entry_urls('<a href="https://DarwinAwards.com/darwin/darwin2012-02.html">a</a><a href="darwin2012-01.html">b</a><a href="darwin2012-01.html">c</a><a href="darwin2011-03.html">d</a>', 2012)),
           ([2020, 2018], ["https://darwinawards.com/darwin/darwin2012-01.html", "https://darwinawards.com/darwin/darwin2012-02.html"]))
@@ -152,10 +156,11 @@ def main():
 
     # ---- Strange Company, Skeptoid, the two list articles and the safety filter (operator 2026-11-22; Listverse dropped)
     check("Listverse is no longer a source", ("listverse" in C.FEEDS, hasattr(C, "_r_listverse")), (False, False))
-    check("route Strange Company: mysterious deaths / poisonings -> unusual deaths, 'just plain weird' -> weird facts; ghosts, UFOs, newspaper clippings and link dumps are not routed",
+    check("route Strange Company: deaths -> unusual deaths, murder -> dark history, ghosts / UFOs / poltergeists / monsters / fairies / folklore / 'just plain weird' -> weird facts; only clippings and link dumps are not routed",
           (r("strange_company", "A Death in Yosemite", {"evelyn rosemann", "mysterious deaths"}, ""), r("strange_company", "x", {"poisonings", "murder"}, ""), r("strange_company", "x", {"just plain weird"}, ""), r("strange_company", "x", {"ghosts", "mysterious deaths"}, ""),
-           r("strange_company", "x", {"newspaper clippings", "mysterious deaths"}, ""), r("strange_company", "Weekend Link Dump", {"weekend link dump"}, ""), r("strange_company", "x", {"murder"}, "")),
-          ("unusual_deaths", "unusual_deaths", "weird_facts", None, None, None, None))
+           r("strange_company", "x", {"ghosts"}, ""), r("strange_company", "x", {"ufos"}, ""), r("strange_company", "x", {"poltergeists"}, ""), r("strange_company", "x", {"monsters"}, ""), r("strange_company", "x", {"fairies"}, ""), r("strange_company", "x", {"folklore"}, ""),
+           r("strange_company", "x", {"murder"}, ""), r("strange_company", "x", {"newspaper clippings", "mysterious deaths"}, ""), r("strange_company", "Weekend Link Dump", {"weekend link dump"}, ""), r("strange_company", "x", {"wales"}, "")),
+          ("unusual_deaths", "unusual_deaths", "weird_facts", "unusual_deaths", "weird_facts", "weird_facts", "weird_facts", "weird_facts", "weird_facts", "weird_facts", "dark_history", None, None, None))
     check("feed paging: Blogger pages with start-index (50 a page), WordPress with ?paged", (C.feed_page_url(C.FEEDS["strange_company"], 1), C.feed_page_url(C.FEEDS["strange_company"], 3), C.feed_page_url(C.FEEDS["futility_closet"], 2)),
           ("https://strangeco.blogspot.com/feeds/posts/default?max-results=50&start-index=1", "https://strangeco.blogspot.com/feeds/posts/default?max-results=50&start-index=101", "https://www.futilitycloset.com/feed/?paged=2"))
     check("pick: a content-note paragraph ('A word of warning: ...') is not the story's opening", C.pick_paragraphs(["A word of warning: this post discusses a mysterious fatality that is pretty dark, even for this blog and its readers.", P1, P2], "T")[0], [P1, P2])
@@ -163,7 +168,7 @@ def main():
     list_html = ('<html><body><article><h2>24. The Killing Joke</h2><p>' + P1 + '</p><p>' + P2 + '</p><h2>23. Falling</h2><p>' + P3 + '</p><h2>1. Again</h2><p>' + P1 + '</p><h3>More from the site</h3><p>' + P2 + '</p></article></body></html>')
     ents = C.parse_list_article(list_html, "https://x.test/list", 2)
     check("list article: one item per NUMBERED h2 (the number is not part of the title), its paragraphs up to the next heading, and no more than max_entries", ([(e["title"], len(e["paragraphs"])) for e in ents], len(C.parse_list_article(list_html, "u", 10))), ([("The Killing Joke", 2), ("Falling", 1)], 3))
-    check("list article: the other list of a two-list article is not read (HistorySnob's 'still might be' ten)", (C.LIST_ARTICLES["historysnob_true_conspiracies"]["max_entries"], C.LIST_ARTICLES["historysnob_true_conspiracies"]["category"], C.LIST_ARTICLES["factinate_ironic_deaths"]["category"]), (10, "conspiracies", "unusual_deaths"))
+    check("list article: HistorySnob reads BOTH of its lists (20 entries), Factinate its 24", (C.LIST_ARTICLES["historysnob_true_conspiracies"]["max_entries"], C.LIST_ARTICLES["historysnob_true_conspiracies"]["category"], C.LIST_ARTICLES["factinate_ironic_deaths"]["max_entries"], C.LIST_ARTICLES["factinate_ironic_deaths"]["category"]), (20, "conspiracies", 24, "unusual_deaths"))
     real_get2, real_paras = C.http_get, C.page_paragraphs_of
     C.http_get = lambda url, tries=3, timeout=30: Resp(200, text='<a href="/episodes/1013">Medbeds</a><a href="/episodes/1013"></a><a href="/episodes/46">Support Your Local Reptoid</a><a href="/episodes/46"></a><a href="/other/9">x</a>')
     C.page_paragraphs_of = lambda url, selector=None: ([P1, P2], "ok") if url.endswith("/46") else ([], "http_429")

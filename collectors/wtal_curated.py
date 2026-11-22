@@ -11,11 +11,11 @@ Every card is the source's EXACT words (pipeline/verbatim.py); this module only 
   Atlas Obscura                   Places feed (full text) and Articles feed (full text)    places -> weird facts; articles by tag (death / haunted / ghosts ... -> dark history; oddities / legends ... -> weird facts)
   Mental Floss                    feed one-liner -> the article page's opening paragraphs  /crime/ -> dark history; /history/ -> weird facts; its entertainment, maps and rankings are not routed
   Improbable Research             feed excerpt -> the article page's opening paragraphs    weird facts
-  Darwin Awards                   the archive: year pages -> entry pages                   unusual deaths; only "Winner ... Confirmed True by Darwin" entries (an unconfirmed one is not a fact, so it is not used)
+  Darwin Awards                   the archive: year pages -> entry pages                   unusual deaths; EVERY entry (winners, honorable mentions, unconfirmed, urban legends: operator 2026-11-22), not only "Confirmed True"
   Telegram @mistic_history        t.me/s paged back with ?before=                          dark history (a posts-with-links / invite / promo is dropped, the channel's own "Horror History" signature line is cut)
-  Strange Company                 blog feed (full text), paged back with start-index       labels "mysterious deaths" / "poisonings" -> unusual deaths; "just plain weird" -> weird facts; ghosts, UFOs, newspaper clippings and link dumps are not routed
+  Strange Company                 blog feed (full text), paged back with start-index       "mysterious deaths" / "poisonings" -> unusual deaths; "murder" -> dark history; "just plain weird", ghosts, UFOs, poltergeists, monsters, fairies, folklore -> weird facts; only newspaper clippings and link dumps are not routed
   Skeptoid                        its "Conspiracy Theories" episode guide -> each episode's transcript   conspiracies (absurd ones, debunked); every topic is kept (operator 2026-11-22: no topic limits on this channel)
-  Factinate, HistorySnob          two curated list ARTICLES, one item per numbered entry   Factinate "24 Morbid Facts About Ironic Deaths" -> unusual deaths; HistorySnob's first ten ("conspiracy theories that turned out true") -> conspiracies
+  Factinate, HistorySnob          two curated list ARTICLES, one item per numbered entry   Factinate "24 Morbid Facts About Ironic Deaths" -> unusual deaths; HistorySnob BOTH of its lists, the ten that "turned out true" and the ten that "still might be" -> conspiracies
   NOT USED, on record             Listverse (dropped 2026-11-22: a card was only a list's intro paragraph). Snopes "freakish fatalities" tag: no article list in the page and an empty tag feed. Ranker: HTTP 401 from Railway. Telegram @SHOCKING_FACTSS: the fact is in the picture, the text is a caption.
 
 Backfill: a feed is read from page 1 every cycle (new posts) and the older pages continue where the last cycle stopped (progress in the run_logs row `collect_curated`), PASS_PAGES pages a cycle, until the archive ends. An article page is
@@ -51,7 +51,16 @@ DARWIN = "https://darwinawards.com"
 SKIP = "skip"
 
 # a promo / sponsor note is not the source's story: an item whose opening paragraphs carry one is left out (unknown is never coded as clear)
-PROMO = re.compile(r"\b(sponsor(?:ed|s)?|patreon|merch|t-?shirt|shout[- ]out|subscribe|newsletter|podcast|promo code|use code|affiliate|click here|follow us)\b", re.I)
+# A promo / sponsor LINE is not the source's story: an item whose opening paragraph IS one is left out (unknown is never coded as clear). Only intent counts (operator 2026-11-22: a story that merely mentions a podcast, a sponsor or a t-shirt stays):
+# "this video is sponsored by", "subscribe to our newsletter", "support us on Patreon", "use code X", "check it out here". A short paragraph (up to 400 characters) is a promo line when it holds one of those; a longer one only when it STARTS with one.
+_PROMO_INTENT = re.compile(r"(?:sponsored\s+by|brought\s+to\s+you\s+by|(?:our|today'?s|this\s+(?:episode|video|week)'?s?)\s+sponsors?|thanks\s+to\s+(?:our\s+)?sponsors?|this\s+(?:episode|video|article|post|newsletter|podcast)\s+is\s+sponsored|shout[- ]?out\s+(?:to|the|my|our)\b|"
+                           r"subscribe\s+(?:to|now|here|on|for|and)\b|subscribe\b[^.]{0,40}\b(?:newsletter|channel|podcast|youtube)|support\s+(?:us|the\s+(?:show|podcast|channel))\s+on\s+patreon|\bpatreon\b|\bmerch(?:andise)?\b|check\s+it\s+out\s+here|check\s+out\s+our\b|"
+                           r"use\s+(?:the\s+)?(?:promo\s+|discount\s+)?code\b|\bpromo\s+code\b|click\s+here\b|follow\s+us\s+on\b|sign\s+up\s+for\s+(?:our|the)\s+newsletter|affiliate\s+link)", re.I)
+
+
+def is_promo_line(paragraph: str) -> bool:
+    p = (paragraph or "").strip()
+    return bool(_PROMO_INTENT.search(p)) and (len(p) <= 400 or _PROMO_INTENT.match(p) is not None)
 NOISE = re.compile(r"^(?:©|copyright\b|printed from\b|editor.s note\b|a word of warning\b)", re.I)          # a print-only notice or a note about the site, not the story (Damn Interesting prints both above every article)
 TRUNCATED = re.compile(r"\[\s*(?:…|\.\.\.)\s*\]|read more|continue reading|appeared first on", re.I)
 HARD_SKIP_TAGS = {"announcements", "podcast", "podcasts", "videos", "galleries", "quizzes"}
@@ -99,11 +108,15 @@ def _r_atlas_articles(title, tags, link):
 
 
 def _r_strange_company(title, tags, link):
-    if tags & {"weekend link dump", "newspaper clippings", "ghosts", "ufos", "poltergeists", "monsters", "fairies", "folklore"}:
-        return SKIP                                   # link dumps, raw clippings and paranormal claims are not "strange deaths"
+    if tags & {"weekend link dump", "newspaper clippings"}:
+        return SKIP                                   # link dumps and raw clippings (generic titles) are not pieces
     if tags & {"mysterious deaths", "poisonings"}:
         return "unusual_deaths"
-    return "weird_facts" if "just plain weird" in tags else SKIP
+    if "murder" in tags:
+        return "dark_history"
+    if tags & {"just plain weird", "ghosts", "ufos", "poltergeists", "monsters", "fairies", "folklore"}:
+        return "weird_facts"                          # ghosts, UFOs, poltergeists, monsters, fairies and folklore are kept (operator 2026-11-22: no topic limits)
+    return SKIP
 
 
 def _r_mental_floss(title, tags, link):
@@ -123,6 +136,7 @@ FEEDS = {
     "mental_floss": {"name": "Mental Floss", "url": "https://www.mentalfloss.com/feed", "paged": False, "body": "fetch", "fetch_cap": 40, "selector": "div.article-content", "route": _r_mental_floss},
     "improbable_research": {"name": "Improbable Research", "url": "https://www.improbable.com/feed/", "paged": False, "body": "fetch", "fetch_cap": 10, "route": lambda *a: "weird_facts"},
 }
+DARWIN_SCOPE = "all"
 DARWIN_ENTRIES_PER_PASS = 80
 DARWIN_YEARS_PER_PASS = 8
 TELEGRAM = {"mistic_history": {"name": "Horror History (Telegram @mistic_history)", "category": "dark_history", "pass_pages": 20}}
@@ -165,7 +179,7 @@ def pick_paragraphs(paragraphs: list[str], title: str) -> tuple[list[str], str |
     good = [p for p in article.good_paragraphs(paragraphs) if not NOISE.match(p)]
     if not good:
         return [], "no_paragraphs"
-    if any(PROMO.search(p) for p in good[:2]):
+    if any(is_promo_line(p) for p in good[:2]):
         return [], "promo"
     if any(TRUNCATED.search(p) for p in good[:2]):
         return [], "truncated"
@@ -356,13 +370,13 @@ def read_index_source(key: str, src: dict, prog: dict, known: set[str], deadline
 LIST_ARTICLES = {
     "factinate_ironic_deaths": {"name": "Factinate", "url": "https://www.factinate.com/things/24-morbid-facts-ironic-deaths", "category": "unusual_deaths", "max_entries": 24},
     "historysnob_true_conspiracies": {"name": "HistorySnob", "url": "https://www.historysnob.com/war-and-historical-events/10-conspiracy-theories-that-turned-out-true-and-10-that-still-might-be", "category": "conspiracies",
-                                      "max_entries": 10},      # the article's SECOND ten are "still might be": unproven, so not used
+                                      "max_entries": 20},      # BOTH of the article's lists (operator 2026-11-22): the ten that turned out true and the ten that still might be
 }
 _NUMBERED = re.compile(r"^\s*(\d+)\s*[.)]\s*(.+)$")
 
 
 def parse_list_article(page_html: str, url: str, max_entries: int) -> list[dict]:
-    """(title, paragraphs) per NUMBERED h2 entry: the paragraphs between its heading and the next heading. Stops after `max_entries` entries (an article's second list is not read)."""
+    """(title, paragraphs) per NUMBERED h2 entry: the paragraphs between its heading and the next heading. Stops after `max_entries` entries."""
     soup = BeautifulSoup(page_html, "html.parser")
     for t in soup(["script", "style", "noscript", "template", "svg", "nav", "footer", "aside", "form"]):
         t.decompose()
@@ -386,8 +400,8 @@ def parse_list_article(page_html: str, url: str, max_entries: int) -> list[dict]
 
 def read_list_article(key: str, src: dict, prog: dict, known: set[str], deadline: float) -> tuple[list[dict], dict, dict]:
     st = {"entries": 0, "left_out": {}, "items": 0}
-    if prog.get("done"):
-        return [], {**st, "done": True}, prog
+    if prog.get("done") and prog.get("max_entries") == src["max_entries"]:
+        return [], {**st, "done": True}, prog          # a changed max_entries (HistorySnob went from 10 to 20) reads the page again; what is stored is skipped
     r = http_get(src["url"])
     if r.status_code != 200:
         raise RuntimeError(f"{key}: page answered HTTP {r.status_code}")
@@ -404,7 +418,7 @@ def read_list_article(key: str, src: dict, prog: dict, known: set[str], deadline
         if ext not in known:
             items.append({"category": src["category"], "title": e["title"], "body": "\n\n".join(picked), "source_url": src["url"], "ext": ext})
     st["items"] = len(items)
-    return items, st, {"done": bool(entries)}
+    return items, st, {"done": bool(entries), "max_entries": src["max_entries"]}
 
 
 # ------------------------------------------------------------------------------------------------ Darwin Awards
@@ -438,14 +452,11 @@ def parse_darwin(page_html: str, url: str) -> dict | None:
     return {"title": title, "status": status, "paragraphs": [p for p in paras if p], "url": url}
 
 
-def darwin_is_fact(status: str) -> bool:
-    s = status.lower()
-    return "winner" in s and "confirmed true" in s
-
-
 def read_darwin(prog: dict, known: set[str], deadline: float) -> tuple[list[dict], dict, dict]:
-    st = {"years_listed": 0, "entries_read": 0, "not_a_confirmed_winner": 0, "left_out": {}, "page_status": {}, "items": 0}
-    prog = {"years_todo": prog.get("years_todo"), "entries_todo": list(prog.get("entries_todo") or []), "done": bool(prog.get("done"))}
+    st = {"years_listed": 0, "entries_read": 0, "no_story": 0, "left_out": {}, "page_status": {}, "items": 0}
+    if prog.get("scope") != DARWIN_SCOPE:
+        prog = {}               # 2026-11-22: EVERY entry is read now (it was "Confirmed True" winners only): the archive is walked again, and what is already stored is skipped
+    prog = {"years_todo": prog.get("years_todo"), "entries_todo": list(prog.get("entries_todo") or []), "done": bool(prog.get("done")), "scope": DARWIN_SCOPE}
     if prog["done"]:
         return [], {**st, "done": True}, prog
     if prog["years_todo"] is None:
@@ -478,8 +489,8 @@ def read_darwin(prog: dict, known: set[str], deadline: float) -> tuple[list[dict
         r.encoding = r.apparent_encoding or "utf-8"
         e = parse_darwin(r.text, url)
         st["entries_read"] += 1
-        if not e or not darwin_is_fact(e["status"]):
-            st["not_a_confirmed_winner"] += 1
+        if not e:
+            st["no_story"] += 1
             continue
         picked, why = pick_paragraphs(e["paragraphs"], e["title"])
         if why:
