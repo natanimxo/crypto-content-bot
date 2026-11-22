@@ -539,7 +539,7 @@ def build_payload(raw: dict, now: datetime) -> dict:
     geo = extra.get("geo") or earning.geo_breadth(text, SOURCE_GEO_DEFAULT.get(raw["source"]))
     eligibility = earning.has_eligibility(text, geo)
     return {
-        "title": raw["title"] or text[:100], "description": text[:1200], "source": raw["source"], "source_name": src["name"],
+        "title": raw["title"] or text[:100], "description": text[:4000], "source": raw["source"], "source_name": src["name"],
         "source_tier": src["tier"], "kind": src["kind"], "published_at": raw["published_at"], "url": raw["url"],
         "landing_url": landing_norm, "landing_domain": earning.registrable_domain(host), "referral_link": earning.is_referral_link(landing_raw or ""),
         "type": type_, "payout_usd": payout, "payout_kind": payout_kind, "pool_usd": pool_usd, "unclear_usd": unclear_usd,
