@@ -25,12 +25,19 @@ GROUPS = {
         "cron": "0 2-23/4 * * *",
         "service": "collect-earning",
         "channels": ["hustle_to_million", "coincraft", "we_talk_a_lot"],
-        "collectors": ["tool_launches", "startup_jobs", "macro_news", "startup_news", "earning_opportunities", "weird_news", "satire", "jokes",
-                       "dark_history", "unusual_deaths", "world_records", "conspiracies", "weird_facts", "shower_thoughts"],
+        # We Talk A Lot is JOKES ONLY since 2026-11-22 (operator: "I'll feed everything else manually"): the eight other humor collectors are PAUSED (PAUSED_COLLECTORS below), and so is the jokes collector itself
+        # (no monthly refresh, no more Reddit passes: the library is big enough and every pass cost DeepSeek calls). The jokes LIBRARY is still scored each cycle (`score_only`) so it can be drawn from.
+        "collectors": ["tool_launches", "startup_jobs", "macro_news", "startup_news", "earning_opportunities"],
+        "score_only": ["jokes"],
         "notify_job": "notify_group_b",
         "summary_job": "collect_earning_cycle",
     },
 }
+
+
+# Collectors that exist (scripts/collect_cycle.py COLLECTORS keeps them all, their code, libraries and config are untouched) but run in NO group: We Talk A Lot's, paused 2026-11-22. To resume one, add its key back to a group's "collectors"
+# (and to the channel's `active_categories` in config/wtal.yaml, which decides what notify may send).
+PAUSED_COLLECTORS = ["weird_news", "satire", "jokes", "dark_history", "unusual_deaths", "world_records", "conspiracies", "weird_facts", "shower_thoughts"]
 
 
 def group_of_channel(channel: str) -> str | None:

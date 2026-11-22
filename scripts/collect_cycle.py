@@ -181,6 +181,16 @@ def run_cycle(group_key: str, after_notify=None):
                 conn.close()
         guarded(f"score_{category}", score)
 
+    # PAUSED collectors whose library is still drawn from (We Talk A Lot's jokes, 2026-11-22): scored so the library can be selected from, never collected.
+    for category in group.get("score_only", []):
+        def score_only(category=category):
+            conn = get_conn()
+            try:
+                logger.info("Scored %d new %s items (score only, collector paused)", score_new_items(conn, category), category)
+            finally:
+                conn.close()
+        guarded(f"score_{category}", score_only)
+
     logger.info("Running notify for %s: %s", group["label"], ", ".join(group["channels"]))
     guarded(group["notify_job"], lambda: notify.run(only_channels=group["channels"], job_name=group["notify_job"]))  # notify.run() records its own failure and alerts (bot/notify.py)
     if after_notify:

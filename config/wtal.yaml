@@ -34,6 +34,12 @@ hashtags:
 # The "Outlet, 20 Nov:" line under the header on news and satire cards (it names the outlet; set false for a post with nothing source-related in it).
 show_dateline: true
 
+# JOKES ONLY, TWICE A DAY (operator 2026-11-22: "I'll feed everything else manually"). notify sends only `active_categories` for this channel, and only in the runs whose UTC hour is in `send_hours_utc` (the group-B cron fires at
+# 02 06 10 14 18 22 UTC, so 6 and 18 are the 09:00 and 21:00 runs in the operator's time; one card each, at most). The other categories' collectors are paused in pipeline/cycle_groups.py (code, libraries and config untouched). To resume
+# a category: add it to `active_categories` here AND its collector back to a group in pipeline/cycle_groups.py; to send at other hours, edit `send_hours_utc`.
+active_categories: [jokes]
+send_hours_utc: [6, 18]
+
 # MODE (operator 2026-11-21): every category is `mode: raw` = the source's exact words in the source's order; DeepSeek never changes, adds, removes or reorders a word, it only picks paragraph breaks
 # (code does the bold title and spacing), and the exact-words check (pipeline/verbatim.py) sends the unformatted original if any word differs. A `written` mode (pipeline/written.py: DeepSeek writes the whole
 # post, SKIP loop) exists in the code but is OUT of use (operator 2026-11-21, 'in case I change my mind'): it only runs for a category set to `mode: written` AND with `written_live: true`.

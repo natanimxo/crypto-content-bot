@@ -258,13 +258,13 @@ def main():
     finally:
         WJ.requests.get = _real_get
     check("jokes: an id range with no Dark joke (JokeAPI answers HTTP 400, code 106) is skipped, not a failure", [e for e, _ in sweep], ["jokeapi:12"])
-    check("notify: the humor channel is limited to 2 cards per cycle in total", N.CHANNEL_PER_CYCLE_LIMIT.get("we_talk_a_lot"), 2)
+    check("notify: the humor channel is limited to 1 card per cycle (jokes only, 06:00 and 18:00 UTC; was 2 before 2026-11-22)", N.CHANNEL_PER_CYCLE_LIMIT.get("we_talk_a_lot"), 1)
 
     # ---- config
     chans = yaml.safe_load(open(os.path.join(ROOT, "config", "channel_config.yaml"), encoding="utf-8"))
     ch = chans["we_talk_a_lot"]
-    check("channel: id, name, phase 1 + 2 categories, channel cap 9 (operator) below the sum of the categories' own caps (10)", (ch["chat_id"], ch["display_name"], ch["categories"], ch["soft_daily_cap"], sum(w[c]["soft_daily_cap"] for c in ch["categories"])),
-          ("-1004376927203", "We Talk A Lot", ["weird_news", "satire", "jokes", "dark_history", "unusual_deaths", "world_records", "conspiracies", "weird_facts", "shower_thoughts"], 9, 10))
+    check("channel: id, name, phase 1 + 2 categories, channel cap 9 (operator) below the sum of the categories' own caps (12: the jokes cap is 3 since 2026-11-22, two cards a day)", (ch["chat_id"], ch["display_name"], ch["categories"], ch["soft_daily_cap"], sum(w[c]["soft_daily_cap"] for c in ch["categories"])),
+          ("-1004376927203", "We Talk A Lot", ["weird_news", "satire", "jokes", "dark_history", "unusual_deaths", "world_records", "conspiracies", "weird_facts", "shower_thoughts"], 9, 12))
     check("channel: it has no voice profile on purpose (the builder is code, not a voice)", "we_talk_a_lot" in yaml.safe_load(open(os.path.join(ROOT, "config", "channel_voices.yaml"), encoding="utf-8")), False)
     check("triage: every humor category has a card line", all(c in TPL.TEMPLATES for c in ("weird_news", "satire", "jokes")), True)
     check("generate_post routes the humor channel to the builder", 'channel == "we_talk_a_lot"' in open(os.path.join(ROOT, "pipeline", "write_post.py"), encoding="utf-8").read(), True)

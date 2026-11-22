@@ -48,11 +48,13 @@ def main():
           (["alpha_edge_crypto", "crypto_notebook", "crypto_wall_street"], ["coincraft", "hustle_to_million", "we_talk_a_lot"]))
     coll = sorted(CC.COLLECTORS)
     in_coll = sorted(k for g in G.GROUPS.values() for k in g["collectors"])
-    check("every collector is in exactly one group (nothing is dropped, nothing runs twice)", in_coll, coll)
+    check("every collector is in exactly one group OR is paused (nothing is dropped, nothing runs twice)", (sorted(in_coll + G.PAUSED_COLLECTORS), set(in_coll) & set(G.PAUSED_COLLECTORS)), (coll, set()))
+    check("paused (2026-11-22, We Talk A Lot jokes only): the eight other humor categories and the jokes collector itself", sorted(G.PAUSED_COLLECTORS),
+          sorted(["weird_news", "satire", "jokes", "dark_history", "unusual_deaths", "world_records", "conspiracies", "weird_facts", "shower_thoughts"]))
     for gk, g in G.GROUPS.items():
         fed = {CC.SCORED_AS.get(k, k) for k in g["collectors"]}
         need = {cat for ch in g["channels"] for cat in chans[ch]["categories"]}
-        check(f"group {gk}: every category its channels list is collected by this group's own collectors", sorted(need - fed), [])
+        check(f"group {gk}: every category its channels list is collected by this group's own collectors (a paused one excepted)", sorted(need - fed - set(G.PAUSED_COLLECTORS)), [])
     # the Railway file is the source of truth for the schedule
     ts = open(os.path.join(ROOT, ".railway", "railway.ts"), encoding="utf-8").read()
     for gk, g in G.GROUPS.items():
@@ -95,13 +97,29 @@ def main():
             calls[k].clear()
         CC.run_cycle("B", after_notify=lambda guarded: calls.__setitem__("extras", calls["extras"] + 1))
         b_collect, b_notify, b_summary = list(calls["collect"]), list(calls["notify"]), list(calls["summary"])
+        b_score = list(calls["score"])
     finally:
         (CC.COLLECTORS, CC.get_conn, CC.score_new_items, CC.notify.run, CC.run_log, CC.llm_usage.run_checks, CC.check_and_alert, CC.load_dotenv) = real
     check("group A's run collects exactly group A's collectors and notifies exactly group A's channels (job 'notify')", (sorted(a_collect) == sorted(G.GROUPS["A"]["collectors"]), a_notify, a_summary),
           (True, [(sorted(G.GROUPS["A"]["channels"]), "notify")], [("collect_cycle", "A", "success")]))
     check("group B's run collects exactly group B's collectors, notifies exactly group B's channels, runs the extras once", (sorted(b_collect) == sorted(G.GROUPS["B"]["collectors"]), b_notify, b_summary, calls["extras"]),
           (True, [(sorted(G.GROUPS["B"]["channels"]), "notify_group_b")], [("collect_earning_cycle", "B", "success")], 1))
+    check("group B scores the jokes library without collecting it, and runs no paused collector", ("jokes" in b_score, "jokes" in b_collect, [k for k in G.PAUSED_COLLECTORS if k in b_collect], [k for k in G.PAUSED_COLLECTORS if k != "jokes" and k in b_score]),
+          (True, False, [], []))
     check("no collector runs in both groups, and the earning collector is not in group A any more", (set(a_collect) & set(b_collect), "earning_opportunities" in a_collect, "earning_opportunities" in b_collect), (set(), False, True))
+
+    # ---- jokes only, twice a day (operator 2026-11-22): what notify may send for We Talk A Lot, and when
+    from datetime import datetime, timezone
+
+    from bot import notify as N
+    humor = ["weird_news", "satire", "jokes", "dark_history", "unusual_deaths", "world_records", "conspiracies", "weird_facts", "shower_thoughts"]
+    at = lambda h: datetime(2026, 11, 23, h, 5, tzinfo=timezone.utc)
+    check("jokes only: the humor channel sends only jokes, and only in the 06:00 and 18:00 UTC runs of the six group-B runs", {h: N.humor_scope("we_talk_a_lot", humor, at(h)) for h in (2, 6, 10, 14, 18, 22)},
+          {2: None, 6: ["jokes"], 10: None, 14: None, 18: ["jokes"], 22: None})
+    check("jokes only: every other channel is untouched by the scope", (N.humor_scope("coincraft", ["earning_opportunities"], at(14)), N.humor_scope("hustle_to_million", ["tool_launches"], at(6))), (["earning_opportunities"], ["tool_launches"]))
+    check("jokes only: the other categories are paused, not deleted -- they are still in the channel's config and the collectors dict", (all(c in chans["we_talk_a_lot"]["categories"] for c in humor), all(k in CC.COLLECTORS for k in G.PAUSED_COLLECTORS)), (True, True))
+    check("jokes only: one card a run, and the jokes cap lets two a day through (the rolling 24h window needs a third slot)", (N.CHANNEL_PER_CYCLE_LIMIT["we_talk_a_lot"], cat_cfg["jokes"]["soft_daily_cap"] >= 3), (1, True))
+    check("jokes only: the two send hours are group B's 06:00 and 18:00 slots", (sorted(h for h in fire_hours(G.GROUPS["B"]["cron"]) if h in __import__("pipeline.verbatim", fromlist=["x"]).load_config()["send_hours_utc"]), __import__("pipeline.verbatim", fromlist=["x"]).load_config()["active_categories"]), ([6, 18], ["jokes"]))
 
     if FAILS:
         print(f"{len(FAILS)} MISMATCH(ES):")

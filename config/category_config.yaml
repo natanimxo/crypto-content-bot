@@ -669,7 +669,7 @@ jokes:
     quality: 1.0
   review_threshold: 50
   cooldown_hours: 0
-  soft_daily_cap: 1
+  soft_daily_cap: 3          # 2026-11-22: two cards a day (06:00 and 18:00 UTC); the rolling 24h window needs a 3rd slot, or a card sent a minute earlier than yesterday's would still count and the next one would be skipped
   triage_model: template
   write_model: deepseek-v4-flash
   label: "🃏 JOKE"

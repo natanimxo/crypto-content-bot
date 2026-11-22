@@ -2487,3 +2487,6 @@ Group A (Crypto Wall Street, Alpha Edge Crypto, Crypto Notebook) `0 */4 * * *` o
 
 ### We Talk A Lot: editor-curated sources (2026-11-21, operator)
 Built: Futility Closet, Damn Interesting, All That's Interesting, Today I Found Out, Listverse, Atlas Obscura, Mental Floss, Improbable Research, Darwin Awards, Telegram @mistic_history (details in HANDOFF.md). Not usable: Snopes `freakish-fatalities`, Ranker (401), @SHOCKING_FACTSS (captions of pictures). Open: no listed source is a conspiracy-theory source (conspiracies only get items whose own tag / title says so), world records are RecordSetter plus 'world record' titles, a no-model-check library mixes ordinary pieces with weird ones (Mental Floss, Atlas Obscura, TIFO openings), Listverse cards are a list's intro paragraph under a '10 ...' title.
+
+### We Talk A Lot: jokes only, twice a day (2026-11-22, operator)
+All other categories paused (collection and notify), the jokes collector paused too (no refresh, no Reddit passes); one joke card at the 06:00 and one at the 18:00 UTC group-B run. Resume instructions in HANDOFF.md. Open: the Earn Stack voice change and the curated-source work above are unaffected.

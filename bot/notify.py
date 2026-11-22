@@ -146,7 +146,7 @@ def render_candidates(conn, channel: str, all_candidates: list) -> tuple[str, li
 # The text is stored on the approval (approvals.draft_text) and Approve sends exactly that text as the forwardable preview. A candidate whose draft cannot be written (a guard kept
 # failing, a model outage) is NOT lost: it goes out as the ordinary triage card, and Approve writes it then, as before.
 DRAFT_FIRST_CHANNELS = {"crypto_notebook", "we_talk_a_lot"}
-CHANNEL_PER_CYCLE_LIMIT = {"we_talk_a_lot": 2}   # cards per notify run for the whole channel, on top of each category's own per-cycle slot
+CHANNEL_PER_CYCLE_LIMIT = {"we_talk_a_lot": 1}   # cards per notify run for the whole channel, on top of each category's own per-cycle slot (2026-11-22: jokes only, one card at 06:00 and one at 18:00 UTC)
 DRAFT_CARD_MAX_CHARS = 3900
 
 
@@ -329,6 +329,20 @@ def notify_channel(conn, channel: str, categories: list[str], soft_daily_cap: in
     return notification_id
 
 
+def humor_scope(channel: str, categories: list[str], now: datetime | None = None) -> list[str] | None:
+    """Which categories this notify run may send for a channel, or None for "nothing this run". Only We Talk A Lot is scoped (config/wtal.yaml, operator 2026-11-22: jokes only, twice a day): `active_categories`
+    limits it to those categories (the others keep their code, libraries and config) and `send_hours_utc` to the runs whose UTC hour is listed (the 06:00 and 18:00 group-B runs; no other run sends a joke)."""
+    if channel != verbatim.CHANNEL:
+        return categories
+    cfg = verbatim.load_config()
+    hours = cfg.get("send_hours_utc")
+    if hours is not None and (now or datetime.now(timezone.utc)).hour not in hours:
+        return None
+    active = cfg.get("active_categories")
+    scoped = [c for c in categories if c in active] if active is not None else categories
+    return scoped or None
+
+
 def run(only_channels: list[str] | None = None, job_name: str = "notify") -> None:
     """`only_channels` scopes a run to some channels: each of the two staggered cron groups (pipeline/cycle_groups.py) notifies only its own channels; `job_name` keeps that group's
     run_logs row and its 3-consecutive-failures alert separate from the other group's."""
@@ -341,7 +355,10 @@ def run(only_channels: list[str] | None = None, job_name: str = "notify") -> Non
                 channels = [c for c in channels if c["channel"] in only_channels]
             sent = 0
             for ch in channels:
-                nid = notify_channel(conn, ch["channel"], ch["categories"], ch.get("soft_daily_cap"))
+                cats = humor_scope(ch["channel"], ch["categories"])
+                if not cats:
+                    continue
+                nid = notify_channel(conn, ch["channel"], cats, ch.get("soft_daily_cap"))
                 if nid:
                     sent += 1
             state["details"]["notifications_sent"] = sent
