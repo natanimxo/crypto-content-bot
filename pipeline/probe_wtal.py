@@ -59,14 +59,6 @@ WTAL_PROBES = [
     {"id": "s_postillon", "dir": S, "url": "https://www.der-postillon.com/feeds/posts/default"},
     {"id": "s_alhudood", "dir": S, "url": "https://alhudood.net/feed/"},
     # ---- history, unusual deaths, records, facts
-    {"id": "h_wikimedia_onthisday", "dir": H, "url": f"https://api.wikimedia.org/feed/v1/wikipedia/en/onthisday/all/{_MD}"},
-    {"id": "h_wikimedia_featured", "dir": H, "url": f"https://api.wikimedia.org/feed/v1/wikipedia/en/featured/{_YMD}"},
-    {"id": "h_wiki_unusual_deaths", "dir": H, "url": "https://en.wikipedia.org/w/api.php?action=parse&page=List_of_unusual_deaths&prop=sections&format=json"},
-    {"id": "h_wiki_unusual_deaths_hub", "dir": H, "url": "https://en.wikipedia.org/w/api.php?action=parse&page=Lists_of_unusual_deaths&prop=links&format=json"},
-    {"id": "h_wiki_unusual_articles", "dir": H, "url": "https://en.wikipedia.org/w/api.php?action=parse&page=Wikipedia:Unusual_articles&prop=sections&format=json"},
-    {"id": "h_wiki_conspiracy_list", "dir": H, "url": "https://en.wikipedia.org/w/api.php?action=parse&page=List_of_conspiracy_theories&prop=sections&format=json"},
-    {"id": "h_wiki_conspiracy_true", "dir": H, "url": "https://en.wikipedia.org/w/api.php?action=parse&page=List_of_conspiracies_(political)&prop=sections&format=json"},
-    {"id": "t_wiki_pageviews_top", "dir": T, "url": f"https://wikimedia.org/api/rest_v1/metrics/pageviews/top/en.wikipedia/all-access/{_YESTERDAY}"},
     {"id": "h_guinness_news", "dir": H, "url": "https://www.guinnessworldrecords.com/news"},
     {"id": "h_guinness_feed", "dir": H, "url": "https://www.guinnessworldrecords.com/news/rss"},
     {"id": "h_guinness_records", "dir": H, "url": "https://www.guinnessworldrecords.com/records/showcase"},
@@ -97,13 +89,11 @@ WTAL_PROBES = [
     {"id": "l_strangeco", "dir": L, "url": "https://strangeco.blogspot.com/feeds/posts/default"},
     {"id": "l_historycollection", "dir": L, "url": "https://historycollection.com/feed/"},
     {"id": "l_ranker_dark_history", "dir": L, "url": "https://www.ranker.com/list/dark-history/"},
-    {"id": "l_wikihow_none", "dir": L, "url": "https://en.wikipedia.org/w/api.php?action=query&list=random&rnnamespace=0&rnlimit=1&format=json"},
     # ---- trending
     {"id": "t_google_trends_us", "dir": T, "url": "https://trends.google.com/trending/rss?geo=US"},
     {"id": "t_google_trends_old", "dir": T, "url": "https://trends.google.com/trends/trendingsearches/daily/rss?geo=US"},
     {"id": "t_bluesky_search", "dir": T, "url": "https://public.api.bsky.app/xrpc/app.bsky.feed.searchPosts?q=weird&limit=5&sort=top"},
     {"id": "t_bluesky_trends", "dir": T, "url": "https://public.api.bsky.app/xrpc/app.bsky.unspecced.getTrendingTopics?limit=10"},
-    {"id": "t_wikipedia_news_feed", "dir": T, "url": f"https://api.wikimedia.org/feed/v1/wikipedia/en/featured/{_YMD}"},
     # ---- jokes
     {"id": "j_jokeapi_dark", "dir": J, "url": "https://v2.jokeapi.dev/joke/Dark?amount=10"},
     # 2026-11-20 (operator: dark jokes only, "JokeAPI's Dark category and dark-joke sources"): Lemmy's API from Railway, for the two communities that could feed the dark library (each joke would go through the DeepSeek dark check)
@@ -143,14 +133,6 @@ WTAL_PROBES = [
     {"id": "l_lemmy_historymemes", "dir": H, "url": "https://lemmy.world/feeds/c/historymemes.xml?sort=TopMonth"},
     {"id": "l_lemmy_unexpected", "dir": W, "url": "https://lemmy.world/feeds/c/unexpected.xml?sort=TopMonth"},
     # ---- 2026-11-21 phase 2: the exact endpoints the libraries read (collectors/wtal_library.py), so Railway confirms each before the monthly refresh relies on it
-    {"id": "p2_wiki_ud_antiquity", "dir": H, "url": "https://en.wikipedia.org/w/api.php?action=parse&page=List_of_unusual_deaths_in_antiquity&prop=sections&format=json&redirects=1"},
-    {"id": "p2_wiki_ud_20th", "dir": H, "url": "https://en.wikipedia.org/w/api.php?action=parse&page=List_of_unusual_deaths_in_the_20th_century&prop=sections&format=json&redirects=1"},
-    {"id": "p2_wiki_ud_21st", "dir": H, "url": "https://en.wikipedia.org/w/api.php?action=parse&page=List_of_unusual_deaths_in_the_21st_century&prop=sections&format=json&redirects=1"},
-    {"id": "p2_wiki_inventors", "dir": H, "url": "https://en.wikipedia.org/w/api.php?action=parse&page=List_of_inventors_killed_by_their_own_invention&prop=sections&format=json&redirects=1"},
-    {"id": "p2_wiki_unusual_articles_text", "dir": H, "url": "https://en.wikipedia.org/w/api.php?action=parse&page=Wikipedia:Unusual_articles&prop=sections&format=json&redirects=1"},
-    {"id": "p2_wiki_conspiracies_text", "dir": H, "url": "https://en.wikipedia.org/w/api.php?action=parse&page=List_of_conspiracy_theories&prop=sections&format=json&redirects=1"},
-    {"id": "p2_otd_events_wikimedia", "dir": H, "url": "https://api.wikimedia.org/feed/v1/wikipedia/en/onthisday/events/11/21"},
-    {"id": "p2_otd_events_enwiki", "dir": H, "url": "https://en.wikipedia.org/api/rest_v1/feed/onthisday/events/11/21"},
     {"id": "p2_lemmy_showerthoughts_api", "dir": L, "url": "https://lemmy.world/api/v3/post/list?community_name=showerthoughts&sort=TopAll&limit=50&page=2"},
     {"id": "p2_recordsetter_index", "dir": H, "url": "https://recordsetter.com/world-records"},
     {"id": "p2_recordsetter_food", "dir": H, "url": "https://recordsetter.com/food-and-drink-world-records"},

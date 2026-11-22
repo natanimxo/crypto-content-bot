@@ -272,28 +272,7 @@ def main():
 
     # ---- phase 2: the six libraries (collectors/wtal_library.py), parsers on small fixtures
     from collectors import wtal_library as WL
-    from datetime import date
-    ud_html = ('<div class="mw-parser-output"><table class="wikitable sortable"><tbody><tr><th>Name of person</th><th>Image</th><th>Date of death</th><th>Country</th><th>Details</th></tr>'
-               '<tr><th>Jesse William Lazear</th><td></td><td>25 September 1900</td><td>Cuba</td><td>The 34-year-old American physician was convinced that <a>mosquitoes</a> were carriers for yellow fever.<sup class="reference">[3]</sup> He allowed himself to be bitten.</td></tr>'
-               '<tr><th>Short</th><td></td><td>1901</td><td>X</td><td>Too short.</td></tr></tbody></table></div>')
-    ud = WL.parse_unusual_deaths_tables(ud_html, "https://en.wikipedia.org/wiki/X")
-    check("unusual_deaths: a table row -> name = title, details = body (citation mark dropped, words kept), 'date, country:' on top; a stub row is skipped",
-          [(d["title"], d["body"], d["dateline"]) for d in ud], [("Jesse William Lazear", "The 34-year-old American physician was convinced that mosquitoes were carriers for yellow fever. He allowed himself to be bitten.", "25 September 1900, Cuba:")])
-    li_html = ('<div class="mw-parser-output"><h2>List</h2><ul><li>Sylvester H. Roper (1823\u20131896), inventor of the Roper steam velocipede, died of a heart attack or crash in 1896.</li><li>Short one 1900</li></ul>'
-               '<h2>See also</h2><ul><li>Somebody else (1900-1999), a long enough line about something that must not be taken from the closing sections of the page.</li></ul></div>')
-    check("unusual_deaths: a list-style page gives its entries whole as body-only items and stops at 'See also'", [d["body"][:30] for d in WL.parse_li_entries(li_html, "u")], ["Sylvester H. Roper (1823\u20131896)"])
-    ua = WL.parse_unusual_articles('<div class="mw-parser-output"><table class="wikitable"><tr><th>Article</th><th>Description</th></tr><tr><td>Bookland</td><td>The quasi-fictional country all books come from, according to barcodes.</td></tr></table></div>', "u")
-    check("weird_facts: an Unusual articles row -> the article title is the title, the one-line description the body", [(d["title"], d["body"]) for d in ua], [("Bookland", "The quasi-fictional country all books come from, according to barcodes.")])
-    cons_html = ('<div class="mw-parser-output"><h2>Contents</h2><h2>Aviation</h2><p>A group paragraph that is long enough to be kept as text but belongs to a group heading, not to a theory at all.</p><h3>Chemtrails</h3>'
-                 '<p>This theory alleges that water condensation trails from aircraft consist of chemical or biological agents under secret government policies.</p><p>Scientists have repeatedly rejected the claim and found no evidence for it at all.</p><h2>See also</h2><p>Nothing that long enough to count as a paragraph here at all, honestly.</p></div>')
-    cs = WL.parse_conspiracies(cons_html, "https://en.wikipedia.org/wiki/List_of_conspiracy_theories")
-    check("conspiracies: an h3 heading is the title and the paragraph under it the body (a group h2 and the closing sections are not items)", [(c["title"], c["body"].count("\n\n"), c["source_url"].endswith("#Chemtrails")) for c in cs], [("Chemtrails", 1, True)])
-    check("dark_history: an On This Day event -> body = its text, the day as the top line (BC years too), the page link kept", (tuple(WL.parse_otd([{"text": "The Columbine Mine massacre: striking coal miners are attacked with machine guns by state police.", "year": 1927, "pages": [{"content_urls": {"desktop": {"page": "https://en.wikipedia.org/wiki/Columbine_Mine_massacre"}}}]},
-                                                                                                          {"text": "Judas Maccabeus rededicates the Temple in Jerusalem, an event commemorated each year by the festival.", "year": -164}], 11, 21)[i][k] for i, k in ((0, "dateline"), (0, "source_url"), (1, "dateline")))),
-          ("21 November 1927:", "https://en.wikipedia.org/wiki/Columbine_Mine_massacre", "21 November 164 BC:"))
-    check("dark_history: the grim-word prefilter keeps a massacre and drops a treaty", (bool(WL._DARK_CUES.search("Striking miners are killed in a massacre")), bool(WL._DARK_CUES.search("Two countries sign a trade treaty"))), (True, False))
-    check("dark_history: the calendar is read in slices from today's date, skipping the days done", WL.next_days({"11-21", "11-22"}, date(2026, 11, 21), 3), ["11-23", "11-24", "11-25"])
-    check("dark_history: a calendar has 366 days (02-29 included)", len(WL._calendar()), 366)
+    SIX = ["dark_history", "unusual_deaths", "world_records", "conspiracies", "weird_facts", "shower_thoughts"]
     posts = [{"post": {"id": 1, "name": "Brushing your teeth is the only time we clean a part of our own skeleton.", "body": "", "ap_id": "https://lemmy.world/post/1"}, "counts": {"score": 400}},
              {"post": {"id": 2, "name": "A thought with a body text attached to it that goes on", "body": "more", "ap_id": "x"}, "counts": {"score": 400}},
              {"post": {"id": 3, "name": "Low scoring shower thought that nobody upvoted at all", "body": "", "ap_id": "y"}, "counts": {"score": 3}},
@@ -305,11 +284,11 @@ def main():
     recs, topics = WL.parse_recordsetter(rs_html)
     check("world_records: a record -> its title (h2) and the one-sentence description, link without the autoplay query; topic links are collected", ([(r["title"], r["body"], r["source_url"]) for r in recs], topics),
           ([("Most Potatoes Held In Hand", "Peter Durdik held 27 potatoes in his hand at once.", "https://recordsetter.com/world-record/potatoes-held-hand/46606")], ["/eating-world-records"]))
-    check("phase 2: every library has a scorer, a category_config row and a channel slot; the 3-a-week categories have a weekly cap", ([c in SC.SCORERS for c in WL.COLLECTORS], [c in yaml.safe_load(open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config", "category_config.yaml"), encoding="utf-8")) for c in WL.COLLECTORS],
-          [c in yaml.safe_load(open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config", "channel_config.yaml"), encoding="utf-8"))["we_talk_a_lot"]["categories"] for c in WL.COLLECTORS], SEL.WEEKLY_CAPS),
+    check("phase 2: every library has a scorer, a category_config row and a channel slot; the 3-a-week categories have a weekly cap", ([c in SC.SCORERS for c in SIX], [c in yaml.safe_load(open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config", "category_config.yaml"), encoding="utf-8")) for c in SIX],
+          [c in yaml.safe_load(open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config", "channel_config.yaml"), encoding="utf-8"))["we_talk_a_lot"]["categories"] for c in SIX], SEL.WEEKLY_CAPS),
           ([True] * 6, [True] * 6, [True] * 6, {"unusual_deaths": 3, "world_records": 3, "conspiracies": 3}))
-    check("phase 2: all six are library categories (random, no repeats)", all(c in SEL.LIBRARY_CATEGORIES for c in WL.COLLECTORS), True)
-    wl_card = V.build(None, "unusual_deaths", {"raw_item_id": 11, "payload": {"title": ud[0]["title"], "body": ud[0]["body"], "dateline": ud[0]["dateline"], "source_name": "Wikipedia", "source_url": "https://en.wikipedia.org/wiki/X"}}, use_model=False)
+    check("phase 2: all six are library categories (random, no repeats)", all(c in SEL.LIBRARY_CATEGORIES for c in SIX), True)
+    wl_card = V.build(None, "unusual_deaths", {"raw_item_id": 11, "payload": {"title": "Jesse William Lazear", "body": "The 34-year-old American physician was convinced that mosquitoes were carriers for yellow fever. He allowed himself to be bitten.", "dateline": "25 September 1900, Cuba:", "source_name": "Wikipedia", "source_url": "https://en.wikipedia.org/wiki/X"}}, use_model=False)
     wl_lines = wl_card["text"].split("\n")
     check("phase 2 card: the 'date, country:' line first, the bold name, the fixed tags LAST; no header, no source line; the check passed", (wl_lines[0], wl_lines[1], wl_lines[-1], "Wikipedia" in wl_card["text"], wl_card["ok"]), ("25 September 1900, Cuba:", "<b>Jesse William Lazear</b>", "#WeTalkALot #UnusualDeaths", False, True))
     check("phase 2 card: the reference block names the source and links it", ("Wikipedia" in wl_card["original_html"], "https://en.wikipedia.org/wiki/X" in wl_card["original_html"]), (True, True))
@@ -383,8 +362,8 @@ def main():
           [WL.rule_reason("weird_facts", t, "Something long. And then something else that is also long.") for t in ("List of musical works in unusual time signatures", "Lists of unusual deaths", "Index of beliefs", "Category:Weird", "Outline of knowledge", "Timeline of weird years", "Glossary of terms")],
           ["list, index or category page"] * 7)
     check("junk rule: a 'List of...' that opens the body counts too, and a title that merely contains the word list does not", (WL.rule_reason("weird_facts", "", "List of things. More things here."), WL.rule_reason("weird_facts", "The listless prince", "He did nothing at all. Nobody noticed for years.")), ("list, index or category page", None))
-    check("junk rule: weird facts, conspiracies and unusual deaths need two full sentences; a dark-history event, a world record and a shower thought are one sentence by nature and are not held to it",
-          (WL.rule_reason("weird_facts", "Bookland", "The country all books come from, according to barcodes."), WL.rule_reason("unusual_deaths", "A man", "He fell into a vat of something."), WL.rule_reason("dark_history", "", "A blast in the center of Moscow kills six people and wounds several more."),
+    check("junk rule: the curated sources pass a floor of two full sentences (explicit); without it a one-sentence dark-history event, a world record and a shower thought are fine",
+          (WL.rule_reason("weird_facts", "Bookland", "The country all books come from, according to barcodes.", 2), WL.rule_reason("unusual_deaths", "A man", "He fell into a vat of something.", 2), WL.rule_reason("dark_history", "", "A blast in the center of Moscow kills six people and wounds several more."),
            WL.rule_reason("world_records", "Longest spin", "Arjun P. spun a soccer ball on his finger for 46.78 seconds."), WL.rule_reason("shower_thoughts", "", "Brushing your teeth is the only time we clean our skeleton.")),
           ("under 2 full sentences", "under 2 full sentences", None, None, None))
     check("junk rule: mostly a question back to the reader is dropped (the time-signature entry), one question among statements is not", (WL.rule_reason("weird_facts", "Time signatures", q_body), WL.rule_reason("weird_facts", "Odd", "Why does the moon follow you? Because it is far away. It only looks like it follows you.")), ("mostly a question back to the reader", None))
@@ -399,8 +378,8 @@ def main():
     WL.audience_verdicts(None, "dark_history", ["x"])
     WL.audience_verdicts(None, "weird_facts", ["x"])
     WL.yes_no = real_yes_no
-    check("dark history question: 'Is this historical event dark, bizarre, ironic or absurd enough that someone might find it interesting or darkly funny?' for dark_history only; the general question for the others",
-          ("Is this historical event dark, bizarre, ironic or absurd enough that someone might find it interesting or darkly funny?" in seen_prompts[0], "genuinely weird, dark, or funny" in seen_prompts[1], "genuinely weird, dark, or funny" in seen_prompts[0]), (True, True, False))
+    check("audience question: the dark-history question went with the Wikipedia events it was written for; every category that still has a check gets the general one",
+          ("Is this historical event dark, bizarre, ironic or absurd enough that someone might find it interesting or darkly funny?" in seen_prompts[0], "genuinely weird, dark, or funny" in seen_prompts[1], "genuinely weird, dark, or funny" in seen_prompts[0]), (False, True, True))
     check("no spoilers: no category sets a spoiler mode any more, and a card never carries a spoiler tag", (["spoiler" in v for v in V.load_config()["categories"].values()].count(True), "<tg-spoiler>" in V.build(None, "jokes", {"raw_item_id": 1, "payload": {"title": "", "body_parts": ["Why did the chicken cross?", "To get to the other side."], "source_name": "x"}}, use_model=False)["text"]), (0, False))
 
     if FAILS:

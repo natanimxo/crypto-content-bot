@@ -561,8 +561,28 @@ def ensure_pass() -> dict:
 
 
 def collect_for(category: str) -> int:
-    """The curated rows stored live for `category` by this process's pass (the pass itself runs once, on the first category asked)."""
+    """The curated rows stored live for `category` by this process's pass (the pass itself runs once, on the first category asked). Writes no run_logs row of its own (the category's other source logs one)."""
     return ensure_pass()["stored"].get(category, 0)
+
+
+def collect_category(category: str) -> int:
+    """For a category the curated sources FEED ALONE (dark history, unusual deaths, weird facts, conspiracies): the same as collect_for, plus the category's own run_logs row `collect_<category>` (the per-category
+    history and the repeated-failure alert read it). The pass runs BEFORE the database connection is opened: a cloud Postgres closes an idle connection during a long download."""
+    err, res = None, None
+    try:
+        res = ensure_pass()
+    except Exception as exc:
+        err = exc
+    conn = get_conn()
+    try:
+        with run_log(conn, f"collect_{category}") as state:
+            if err:
+                raise err
+            n = res["stored"].get(category, 0)
+            state["details"].update({"source": "curated", "inserted": n, "by_source": {k: v["stored"][category] for k, v in res["by_source"].items() if (v.get("stored") or {}).get(category)}})
+        return n
+    finally:
+        conn.close()
 
 
 if __name__ == "__main__":

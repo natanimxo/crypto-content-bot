@@ -90,12 +90,13 @@ COLLECTORS = {
     "weird_news": wtal_news.collect_weird_news,
     "satire": wtal_news.collect_satire,
     "jokes": wtal_jokes.collect,
-    # We Talk A Lot phase 2 (2026-11-21): six libraries from Wikipedia lists / On This Day, Lemmy c/showerthoughts and RecordSetter (collectors/wtal_library.py); each is a no-op until due (30 days; dark_history reads 40 calendar days a cycle until all 366 are done).
-    "dark_history": _with_curated("dark_history", wtal_library.collect_dark_history),
-    "unusual_deaths": _with_curated("unusual_deaths", wtal_library.collect_unusual_deaths),
-    "world_records": _with_curated("world_records", wtal_library.collect_world_records),
-    "conspiracies": _with_curated("conspiracies", wtal_library.collect_conspiracies),
-    "weird_facts": _with_curated("weird_facts", wtal_library.collect_weird_facts),
+    # We Talk A Lot phase 2 (2026-11-21): six libraries. Dark history, unusual deaths, weird facts and conspiracies come from the editor-curated sources ONLY (collectors/wtal_curated.py: one shared pass per cycle that backfills older pages);
+    # world records are RecordSetter (collectors/wtal_library.py, a no-op until due, 30 days) plus the curated sources' world-record pieces; shower thoughts are Lemmy c/showerthoughts. Wikipedia is no source of anything (removed 2026-11-21).
+    "dark_history": lambda: wtal_curated.collect_category("dark_history"),
+    "unusual_deaths": lambda: wtal_curated.collect_category("unusual_deaths"),
+    "world_records": _with_curated("world_records", wtal_library.collect_world_records),     # RecordSetter + the curated sources' world-record pieces
+    "conspiracies": lambda: wtal_curated.collect_category("conspiracies"),
+    "weird_facts": lambda: wtal_curated.collect_category("weird_facts"),
     "shower_thoughts": wtal_library.collect_shower_thoughts,
     # startup_news (Phase 6, 2026-11-16) -> Hustle to Million: Tech.eu / Sifted / TechCrunch Venture RSS, funding with a stated amount and acquisitions.
     "startup_news": startup_news.collect,
