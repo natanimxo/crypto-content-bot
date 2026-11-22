@@ -8,13 +8,15 @@ Every card is the source's EXACT words (pipeline/verbatim.py); this module only 
   Damn Interesting                feed excerpt -> the article page's opening paragraphs    Tragedy / Disaster / War / Crime -> dark history; every other story tag -> weird facts; announcements and podcasts are not routed
   All That's Interesting          feed (full text), paged back                             macabre / crime / serial killers / scary ... -> dark history; weird / wtf / baffling / curiosities ... -> weird facts; plain history and news are not routed
   Today I Found Out               feed (full text), paged back                             weird facts
-  Listverse                       feed excerpt -> the article page's opening paragraphs    History / Crime / Creepy -> dark history; Weird Stuff / Mysteries / Humans / Our World -> weird facts
   Atlas Obscura                   Places feed (full text) and Articles feed (full text)    places -> weird facts; articles by tag (death / haunted / ghosts ... -> dark history; oddities / legends ... -> weird facts)
   Mental Floss                    feed one-liner -> the article page's opening paragraphs  /crime/ -> dark history; /history/ -> weird facts; its entertainment, maps and rankings are not routed
   Improbable Research             feed excerpt -> the article page's opening paragraphs    weird facts
   Darwin Awards                   the archive: year pages -> entry pages                   unusual deaths; only "Winner ... Confirmed True by Darwin" entries (an unconfirmed one is not a fact, so it is not used)
   Telegram @mistic_history        t.me/s paged back with ?before=                          dark history (a posts-with-links / invite / promo is dropped, the channel's own "Horror History" signature line is cut)
-  NOT USED, on record             Snopes "freakish fatalities" tag: no article list in the page and an empty tag feed. Ranker: HTTP 401 from Railway. Telegram @SHOCKING_FACTSS: the fact is in the picture, the text is a caption.
+  Strange Company                 blog feed (full text), paged back with start-index       labels "mysterious deaths" / "poisonings" -> unusual deaths; "just plain weird" -> weird facts; ghosts, UFOs, newspaper clippings and link dumps are not routed
+  Skeptoid                        its "Conspiracy Theories" episode guide -> each episode's transcript   conspiracies (absurd ones, debunked); a conservative safety filter drops hate, health, election and 9/11 topics (UNSAFE)
+  Factinate, HistorySnob          two curated list ARTICLES, one item per numbered entry   Factinate "24 Morbid Facts About Ironic Deaths" -> unusual deaths; HistorySnob's first ten ("conspiracy theories that turned out true") -> conspiracies
+  NOT USED, on record             Listverse (dropped 2026-11-22: a card was only a list's intro paragraph). Snopes "freakish fatalities" tag: no article list in the page and an empty tag feed. Ranker: HTTP 401 from Railway. Telegram @SHOCKING_FACTSS: the fact is in the picture, the text is a caption.
 
 Backfill: a feed is read from page 1 every cycle (new posts) and the older pages continue where the last cycle stopped (progress in the run_logs row `collect_curated`), PASS_PAGES pages a cycle, until the archive ends. An article page is
 fetched only for an item that is routed AND not stored / seen before. One pass per process (several categories share it); a source that fails is recorded and the others carry on.
@@ -50,7 +52,7 @@ SKIP = "skip"
 
 # a promo / sponsor note is not the source's story: an item whose opening paragraphs carry one is left out (unknown is never coded as clear)
 PROMO = re.compile(r"\b(sponsor(?:ed|s)?|patreon|merch|t-?shirt|shout[- ]out|subscribe|newsletter|podcast|promo code|use code|affiliate|click here|follow us)\b", re.I)
-NOISE = re.compile(r"^(?:©|copyright\b|printed from\b|editor.s note\b)", re.I)          # a print-only notice or a note about the site, not the story (Damn Interesting prints both above every article)
+NOISE = re.compile(r"^(?:©|copyright\b|printed from\b|editor.s note\b|a word of warning\b)", re.I)          # a print-only notice or a note about the site, not the story (Damn Interesting prints both above every article)
 TRUNCATED = re.compile(r"\[\s*(?:…|\.\.\.)\s*\]|read more|continue reading|appeared first on", re.I)
 HARD_SKIP_TAGS = {"announcements", "podcast", "podcasts", "videos", "galleries", "quizzes"}
 
@@ -88,20 +90,20 @@ def _r_ati(title, tags, link):
     return SKIP
 
 
-def _r_listverse(title, tags, link):
-    if tags & {"history", "crime", "creepy"}:
-        return "dark_history"
-    if tags & {"weird stuff", "mysteries", "humans", "our world"}:
-        return "weird_facts"
-    return SKIP
-
-
 def _r_atlas_articles(title, tags, link):
     if tags & {"death", "haunted", "ghosts", "ghost stories", "scary stories", "eerie feeling"}:
         return "dark_history"
     if tags & {"oddities", "architectural oddities", "mystery", "folklore", "legends", "folktales"}:
         return "weird_facts"
     return SKIP
+
+
+def _r_strange_company(title, tags, link):
+    if tags & {"weekend link dump", "newspaper clippings", "ghosts", "ufos", "poltergeists", "monsters", "fairies", "folklore"}:
+        return SKIP                                   # link dumps, raw clippings and paranormal claims are not "strange deaths"
+    if tags & {"mysterious deaths", "poisonings"}:
+        return "unusual_deaths"
+    return "weird_facts" if "just plain weird" in tags else SKIP
 
 
 def _r_mental_floss(title, tags, link):
@@ -114,9 +116,10 @@ FEEDS = {
     "damn_interesting": {"name": "Damn Interesting", "url": "https://www.damninteresting.com/feed", "paged": True, "pass_pages": 6, "max_page": 80, "body": "fetch", "fetch_cap": 60, "route": _r_damn_interesting},
     "all_thats_interesting": {"name": "All That's Interesting", "url": "https://allthatsinteresting.com/feed", "paged": True, "pass_pages": 10, "max_page": 60, "body": "feed", "route": _r_ati},
     "today_i_found_out": {"name": "Today I Found Out", "url": "https://www.todayifoundout.com/index.php/feed/", "paged": True, "pass_pages": 6, "max_page": 120, "body": "feed", "route": lambda *a: "weird_facts"},
-    "listverse": {"name": "Listverse", "url": "https://listverse.com/feed/", "paged": True, "pass_pages": 6, "max_page": 120, "body": "fetch", "fetch_cap": 60, "selector": "#articlecontentonly", "route": _r_listverse},
     "atlas_obscura_places": {"name": "Atlas Obscura", "url": "https://www.atlasobscura.com/feeds/latest", "paged": False, "body": "feed", "route": lambda *a: "weird_facts"},
     "atlas_obscura_articles": {"name": "Atlas Obscura", "url": "https://www.atlasobscura.com/feeds/articles", "paged": False, "body": "feed", "route": _r_atlas_articles},
+    "strange_company": {"name": "Strange Company", "url": "https://strangeco.blogspot.com/feeds/posts/default", "paged": True, "pass_pages": 4, "max_page": 80, "body": "feed", "route": _r_strange_company,
+                        "page_url": lambda n: f"https://strangeco.blogspot.com/feeds/posts/default?max-results=50&start-index={1 + 50 * (n - 1)}"},
     "mental_floss": {"name": "Mental Floss", "url": "https://www.mentalfloss.com/feed", "paged": False, "body": "fetch", "fetch_cap": 40, "selector": "div.article-content", "route": _r_mental_floss},
     "improbable_research": {"name": "Improbable Research", "url": "https://www.improbable.com/feed/", "paged": False, "body": "fetch", "fetch_cap": 10, "route": lambda *a: "weird_facts"},
 }
@@ -198,6 +201,8 @@ def route_item(src_key: str, title: str, tags: set[str], link: str) -> str | Non
 
 # ------------------------------------------------------------------------------------------------ feeds
 def feed_page_url(src: dict, n: int) -> str:
+    if src.get("page_url"):
+        return src["page_url"](n)
     return src["url"] if n == 1 else f"{src['url']}{'&' if '?' in src['url'] else '?'}paged={n}"
 
 
@@ -221,7 +226,7 @@ def page_paragraphs_of(url: str, selector: str | None = None) -> tuple[list[str]
         return [], f"http_{r.status_code}"
     r.encoding = r.encoding if r.encoding and r.encoding.lower() != "iso-8859-1" else (r.apparent_encoding or "utf-8")
     paras = None
-    if selector:                                      # the source's own article container (Listverse's author box and Mental Floss's sidebars sit outside it)
+    if selector:                                      # the source's own article container (Mental Floss's sidebars sit outside it)
         soup = BeautifulSoup(r.text, "html.parser")
         for tag in soup(["script", "style", "noscript", "template", "svg"]):
             tag.decompose()
@@ -302,6 +307,115 @@ def read_feed_source(key: str, src: dict, prog: dict, known: set[str], deadline:
     st["items"] = len(items)
     prog["seen"] = sorted(seen)[-SEEN_KEEP:] if len(seen) > SEEN_KEEP else sorted(seen)
     return items, st, prog
+
+
+# ------------------------------------------------------------------------------------------------ the safety filter (operator 2026-11-22: avoid sources that push real misinformation or hate)
+# A card is the opening of a piece, claim first: for a debunking source (Skeptoid) that would put a harmful claim in front of the reader without its rebuttal. So a conspiracy piece that touches hate, health, election, mass-shooting or 9/11 topics is
+# left out whatever its source says. The list is deliberately conservative: a wrongly dropped absurd conspiracy costs one card, a wrongly kept hate trope costs a lot more.
+UNSAFE = re.compile(r"\b(?:qanon|pizzagate|rothschilds?|illuminati|zionis\w*|jews?|jewish|antisemit\w*|blood libel|holocaust|great replacement|white genocide|new world order|nwo|protocols of|vaccin\w*|anti-?vax\w*|covid\w*|coronavirus|pandemic|5g|fluorid\w*|aspartame|autism|hiv|aids|abortion|"
+                    r"election\w*|voter fraud|stolen election|sandy hook|9/11|twin towers|world trade center|wtc|trump|biden|obama|clinton|deep state|fema camps?|north american union|medbeds?)\b", re.I)
+
+
+def unsafe_topic(title: str, body: str) -> bool:
+    return bool(UNSAFE.search(f"{title} {body}"))
+
+
+# ------------------------------------------------------------------------------------------------ an index page -> one item per linked page (Skeptoid)
+INDEX_SOURCES = {
+    "skeptoid_conspiracies": {"name": "Skeptoid", "index_url": "https://skeptoid.com/episode_guide.php?cat=2", "link_re": r"^/episodes/\d+$", "base": "https://skeptoid.com", "category": "conspiracies", "fetch_cap": 30},
+}
+
+
+def read_index_source(key: str, src: dict, prog: dict, known: set[str], deadline: float) -> tuple[list[dict], dict, dict]:
+    """The index page lists every piece of a category; the pieces not stored or seen yet are fetched, newest first, `fetch_cap` a pass. A throttle or timeout is retried next cycle (not remembered)."""
+    st = {"listed": 0, "opened": 0, "page_status": {}, "left_out": {}, "items": 0}
+    seen = set(prog.get("seen") or [])
+    r = http_get(src["index_url"])
+    if r.status_code != 200:
+        raise RuntimeError(f"{key}: index answered HTTP {r.status_code}")
+    soup = BeautifulSoup(r.text, "html.parser")
+    entries: dict[str, str] = {}
+    for a in soup.find_all("a", href=True):
+        title = clean(a.get_text(" "))
+        if re.match(src["link_re"], a["href"]) and title:
+            entries.setdefault(a["href"], title)
+    st["listed"] = len(entries)
+    todo = [(h, t) for h, t in sorted(entries.items(), key=lambda kv: -int(re.findall(r"\d+", kv[0])[0])) if L.ext_id(key, src["base"] + h) not in known | seen]
+    items = []
+    for href, title in todo[:src["fetch_cap"]]:
+        if time.monotonic() > deadline:
+            st["budget_hit"] = True
+            break
+        url = src["base"] + href
+        paras, status = page_paragraphs_of(url)
+        time.sleep(SLEEP)
+        st["page_status"][status] = st["page_status"].get(status, 0) + 1
+        st["opened"] += 1 if status == "ok" else 0
+        ext = L.ext_id(key, url)
+        if status in ("ok", "no_paragraphs", "http_404", "http_410"):
+            seen.add(ext)
+        picked, why = pick_paragraphs(paras, title)
+        if why:
+            st["left_out"][why] = st["left_out"].get(why, 0) + 1
+            continue
+        items.append({"category": src["category"], "title": title, "body": "\n\n".join(picked), "source_url": url, "ext": ext})
+    st["items"], st["left_to_read"] = len(items), max(0, len(todo) - src["fetch_cap"])
+    return items, st, {"seen": sorted(seen)[-SEEN_KEEP:]}
+
+
+# ------------------------------------------------------------------------------------------------ a curated list ARTICLE -> one item per numbered entry
+LIST_ARTICLES = {
+    "factinate_ironic_deaths": {"name": "Factinate", "url": "https://www.factinate.com/things/24-morbid-facts-ironic-deaths", "category": "unusual_deaths", "max_entries": 24},
+    "historysnob_true_conspiracies": {"name": "HistorySnob", "url": "https://www.historysnob.com/war-and-historical-events/10-conspiracy-theories-that-turned-out-true-and-10-that-still-might-be", "category": "conspiracies",
+                                      "max_entries": 10},      # the article's SECOND ten are "still might be": unproven, so not used
+}
+_NUMBERED = re.compile(r"^\s*(\d+)\s*[.)]\s*(.+)$")
+
+
+def parse_list_article(page_html: str, url: str, max_entries: int) -> list[dict]:
+    """(title, paragraphs) per NUMBERED h2 entry: the paragraphs between its heading and the next heading. Stops after `max_entries` entries (an article's second list is not read)."""
+    soup = BeautifulSoup(page_html, "html.parser")
+    for t in soup(["script", "style", "noscript", "template", "svg", "nav", "footer", "aside", "form"]):
+        t.decompose()
+    root = soup.find("article") or soup.body or soup
+    out = []
+    for h in root.find_all("h2"):
+        m = _NUMBERED.match(clean(h.get_text(" ")))
+        if not m:
+            continue
+        paras = []
+        for el in h.find_all_next(["p", "h2", "h3"]):
+            if el.name in ("h2", "h3"):
+                break
+            if not article._skippable(el):
+                paras.append(article._p_text(el))
+        out.append({"title": m.group(2).strip(), "paragraphs": [p for p in paras if p], "url": url})
+        if len(out) >= max_entries:
+            break
+    return out
+
+
+def read_list_article(key: str, src: dict, prog: dict, known: set[str], deadline: float) -> tuple[list[dict], dict, dict]:
+    st = {"entries": 0, "left_out": {}, "items": 0}
+    if prog.get("done"):
+        return [], {**st, "done": True}, prog
+    r = http_get(src["url"])
+    if r.status_code != 200:
+        raise RuntimeError(f"{key}: page answered HTTP {r.status_code}")
+    r.encoding = r.encoding if r.encoding and r.encoding.lower() != "iso-8859-1" else (r.apparent_encoding or "utf-8")
+    items = []
+    entries = parse_list_article(r.text, src["url"], src["max_entries"])
+    st["entries"] = len(entries)
+    for e in entries:
+        picked, why = pick_paragraphs(e["paragraphs"], e["title"])
+        if why:
+            st["left_out"][why] = st["left_out"].get(why, 0) + 1
+            continue
+        ext = L.ext_id(key, src["url"], e["title"])
+        if ext not in known:
+            items.append({"category": src["category"], "title": e["title"], "body": "\n\n".join(picked), "source_url": src["url"], "ext": ext})
+    st["items"] = len(items)
+    return items, st, {"done": bool(entries)}
 
 
 # ------------------------------------------------------------------------------------------------ Darwin Awards
@@ -481,6 +595,26 @@ def fetch_all(progress: dict, known: set[str], budget: float = BUDGET_SECONDS) -
             logger.exception("curated: %s failed", key)
             stats[key] = {"error": str(exc)[:160]}
             new["feeds"][key] = (progress.get("feeds") or {}).get(key) or {}
+    for key, src in INDEX_SOURCES.items():
+        try:
+            items, st, pr = read_index_source(key, src, (progress.get("index") or {}).get(key) or {}, known, deadline)
+            new.setdefault("index", {})[key] = pr
+            stats[key] = st
+            out.extend((key, src["name"], it) for it in items)
+        except Exception as exc:
+            logger.exception("curated: %s failed", key)
+            stats[key] = {"error": str(exc)[:160]}
+            new.setdefault("index", {})[key] = (progress.get("index") or {}).get(key) or {}
+    for key, src in LIST_ARTICLES.items():
+        try:
+            items, st, pr = read_list_article(key, src, (progress.get("lists") or {}).get(key) or {}, known, deadline)
+            new.setdefault("lists", {})[key] = pr
+            stats[key] = st
+            out.extend((key, src["name"], it) for it in items)
+        except Exception as exc:
+            logger.exception("curated: %s failed", key)
+            stats[key] = {"error": str(exc)[:160]}
+            new.setdefault("lists", {})[key] = (progress.get("lists") or {}).get(key) or {}
     try:
         items, st, pr = read_darwin(progress.get("darwin") or {}, known, deadline)
         new["darwin"] = pr
@@ -500,7 +634,14 @@ def fetch_all(progress: dict, known: set[str], budget: float = BUDGET_SECONDS) -
             logger.exception("curated: telegram %s failed", handle)
             stats[f"telegram_{handle}"] = {"error": str(exc)[:160]}
             new["telegram"][handle] = (progress.get("telegram") or {}).get(handle) or {}
-    return out, stats, new
+    safe = []
+    for key, name, it in out:                              # the safety filter: a conspiracy piece on a hate, health, election or 9/11 topic is never a card
+        if it["category"] == "conspiracies" and unsafe_topic(it.get("title") or "", it.get("body") or ""):
+            lo = stats.setdefault(key, {}).setdefault("left_out", {})
+            lo["unsafe_topic"] = lo.get("unsafe_topic", 0) + 1
+            continue
+        safe.append((key, name, it))
+    return safe, stats, new
 
 
 def store_all(conn, fetched: list[tuple[str, str, dict]], stats: dict) -> dict[str, int]:

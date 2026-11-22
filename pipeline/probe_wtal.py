@@ -71,7 +71,6 @@ WTAL_PROBES = [
     {"id": "h_funfact_asli", "dir": H, "url": "https://asli-fun-fact-api.herokuapp.com/"},
     {"id": "h_catfact_style_factsapi", "dir": H, "url": "https://api.api-ninjas.com/v1/facts"},
     # ---- listicles and evergreen sites (feed paths guessed; the ones that fail are reported dead)
-    {"id": "l_listverse", "dir": L, "url": "https://listverse.com/feed/"},
     {"id": "l_atlasobscura", "dir": L, "url": "https://www.atlasobscura.com/feeds/latest"},
     {"id": "l_mentalfloss", "dir": L, "url": "https://www.mentalfloss.com/feed"},
     {"id": "l_cracked", "dir": L, "url": "https://www.cracked.com/rss"},
@@ -146,8 +145,6 @@ WTAL_PROBES = [
     {"id": "c_ati_feed", "dir": H, "url": "https://allthatsinteresting.com/feed"},
     {"id": "c_ati_feed_p6", "dir": H, "url": "https://allthatsinteresting.com/feed?paged=6"},
     {"id": "c_tifo_feed_p3", "dir": H, "url": "https://www.todayifoundout.com/index.php/feed/?paged=3"},
-    {"id": "c_listverse_feed_p3", "dir": H, "url": "https://listverse.com/feed/?paged=3"},
-    {"id": "c_listverse_article", "dir": H, "url": "https://listverse.com/2026/11/18/10-bizarre-things-that-happened-during-the-siege-of-paris/"},
     {"id": "c_atlas_articles_feed", "dir": H, "url": "https://www.atlasobscura.com/feeds/articles"},
     {"id": "c_mentalfloss_article", "dir": H, "url": "https://www.mentalfloss.com/crime/burke-hare-murders-chilling-facts"},
     {"id": "c_improbable_feed", "dir": H, "url": "https://www.improbable.com/feed/"},
@@ -160,6 +157,24 @@ WTAL_PROBES = [
     {"id": "c_ranker_strange_deaths", "dir": H, "url": "https://www.ranker.com/list/strange-deaths/"},
     {"id": "c_ranker_weirdest_deaths", "dir": H, "url": "https://www.ranker.com/list/weirdest-deaths-in-history/ranker-history"},
     {"id": "c_tg_mistic_history_before", "dir": H, "url": "https://t.me/s/mistic_history?before=1200"},
+    # ---- 2026-11-22: sources for conspiracies and strange deaths (Listverse dropped): the endpoints collectors/wtal_curated.py reads, plus the ones that failed from a dev machine (Reader's Digest 403)
+    {"id": "c2_strangeco_feed", "dir": H, "url": "https://strangeco.blogspot.com/feeds/posts/default?max-results=50&start-index=1"},
+    {"id": "c2_strangeco_feed_p3", "dir": H, "url": "https://strangeco.blogspot.com/feeds/posts/default?max-results=50&start-index=101"},
+    {"id": "c2_skeptoid_conspiracy_guide", "dir": H, "url": "https://skeptoid.com/episode_guide.php?cat=2"},
+    {"id": "c2_skeptoid_episode", "dir": H, "url": "https://skeptoid.com/episodes/1013"},
+    {"id": "c2_factinate_ironic_deaths", "dir": H, "url": "https://www.factinate.com/things/24-morbid-facts-ironic-deaths"},
+    {"id": "c2_historysnob_conspiracies", "dir": H, "url": "https://www.historysnob.com/war-and-historical-events/10-conspiracy-theories-that-turned-out-true-and-10-that-still-might-be"},
+    {"id": "c2_rd_true_conspiracies", "dir": H, "url": "https://www.rd.com/list/conspiracy-theories-that-turned-out-to-be-true/"},
+    {"id": "c2_ati_ironic_deaths", "dir": H, "url": "https://allthatsinteresting.com/ironic-deaths"},
+    {"id": "c2_historycollection_feed", "dir": H, "url": "https://historycollection.com/feed/"},
+    # ---- 2026-11-22 Earn Stack: the landing links the page reader failed on, fetched PLAIN from Railway (what the new fetch fallback does): referral short link, deeplink, KuCoin announcement, JS shells
+    {"id": "es_trgo_short_link", "dir": "earn stack plain fetch", "url": "https://trgo.co/uk"},
+    {"id": "es_okx_deeplink", "dir": "earn stack plain fetch", "url": "https://web3.okx.com/ul/3mkWxk?channelid=ACE505900"},
+    {"id": "es_kucoin_announcement", "dir": "earn stack plain fetch", "url": "https://kucoin.com/announcement/PROOFTisTheSeasonFuturesContest?lang=en_US"},
+    {"id": "es_bybit_short_link", "dir": "earn stack plain fetch", "url": "https://i.bybit.com/10swab23"},
+    {"id": "es_nullmask_app", "dir": "earn stack plain fetch", "url": "https://app.nullmask.io"},
+    {"id": "es_google_form", "dir": "earn stack plain fetch", "url": "https://forms.gle/YwpAjWc6qoNYCL5c7"},
+    {"id": "es_binance_announcement", "dir": "earn stack plain fetch", "url": "https://www.binance.com/en/support/announcement/detail/fb40667e3c714d7f8aa2f1bac2b82aa9"},
 ]
 
 # Telegram: the two content channels the operator named plus the six meme channels (trend signals only -- never reposted).

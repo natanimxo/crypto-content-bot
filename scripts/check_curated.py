@@ -74,14 +74,12 @@ def main():
     check("route All That's Interesting: macabre -> dark history, weird -> weird facts, plain history or news is not routed, a gallery or a video is not routed", (r("all_thats_interesting", "t", {"history", "macabre"}, ""), r("all_thats_interesting", "t", {"weird", "history"}, ""),
           r("all_thats_interesting", "t", {"history", "news"}, ""), r("all_thats_interesting", "t", {"macabre", "galleries"}, ""), r("all_thats_interesting", "t", {"sad", "history"}, "")), ("dark_history", "weird_facts", None, None, "dark_history"))
     check("route: Today I Found Out and Improbable Research -> weird facts; Atlas Obscura places -> weird facts", (r("today_i_found_out", "t", {"history"}, ""), r("improbable_research", "t", set(), ""), r("atlas_obscura_places", "t", {"museums"}, "")), ("weird_facts",) * 3)
-    check("route Listverse: History / Crime / Creepy -> dark history, Weird Stuff / Mysteries -> weird facts, Movies and TV is not routed", (r("listverse", "t", {"history"}, ""), r("listverse", "t", {"creepy"}, ""), r("listverse", "t", {"weird stuff"}, ""), r("listverse", "t", {"movies and tv"}, "")),
-          ("dark_history", "dark_history", "weird_facts", None))
     check("route Atlas Obscura articles: death / haunted -> dark history, oddities / legends -> weird facts, a podcast is not routed", (r("atlas_obscura_articles", "t", {"ghosts", "history"}, ""), r("atlas_obscura_articles", "t", {"oddities"}, ""), r("atlas_obscura_articles", "t", {"podcast", "ghosts"}, ""), r("atlas_obscura_articles", "t", {"history"}, "")),
           ("dark_history", "weird_facts", None, None))
     check("route Mental Floss by the section of its URL: /crime/ -> dark history, /history/ -> weird facts, entertainment / maps / rankings are not routed", (r("mental_floss", "t", set(), "https://www.mentalfloss.com/crime/x"), r("mental_floss", "t", set(), "https://www.mentalfloss.com/history/law/x"),
           r("mental_floss", "t", set(), "https://www.mentalfloss.com/entertainment/movies/x"), r("mental_floss", "t", set(), "https://www.mentalfloss.com/geography/maps/x")), ("dark_history", "weird_facts", None, None))
     check("route: a title or tag that says conspiracy / world record / a strange death overrides the source's own routing", (r("today_i_found_out", "The Strangest Conspiracy Theories", set(), ""), r("all_thats_interesting", "x", {"conspiracies", "history"}, ""),
-          r("listverse", "10 Weird World Records", {"weird stuff"}, ""), r("all_thats_interesting", "The Strange Death Of Albert Dekker", {"history"}, ""), r("listverse", "10 Bizarre Deaths of Roman Emperors", {"history"}, "")),
+          r("today_i_found_out", "10 Weird World Records", {"x"}, ""), r("all_thats_interesting", "The Strange Death Of Albert Dekker", {"history"}, ""), r("today_i_found_out", "10 Bizarre Deaths of Roman Emperors", {"history"}, "")),
           ("conspiracies", "conspiracies", "world_records", "unusual_deaths", "unusual_deaths"))
     check("route: 'Record-Breaking Pilot' is not a world record (only 'world record' / Guinness are)", r("all_thats_interesting", "The Record-Breaking Pilot Who First Exceeded The Speed Of Sound", {"weird"}, ""), "weird_facts")
 
@@ -150,6 +148,33 @@ def main():
         C.http_get, C.time.sleep = real_get, real_sleep
         C.FEEDS.pop("x_test", None)
         C.FEEDS.pop("y_test", None)
+
+
+    # ---- Strange Company, Skeptoid, the two list articles and the safety filter (operator 2026-11-22; Listverse dropped)
+    check("Listverse is no longer a source", ("listverse" in C.FEEDS, hasattr(C, "_r_listverse")), (False, False))
+    check("route Strange Company: mysterious deaths / poisonings -> unusual deaths, 'just plain weird' -> weird facts; ghosts, UFOs, newspaper clippings and link dumps are not routed",
+          (r("strange_company", "A Death in Yosemite", {"evelyn rosemann", "mysterious deaths"}, ""), r("strange_company", "x", {"poisonings", "murder"}, ""), r("strange_company", "x", {"just plain weird"}, ""), r("strange_company", "x", {"ghosts", "mysterious deaths"}, ""),
+           r("strange_company", "x", {"newspaper clippings", "mysterious deaths"}, ""), r("strange_company", "Weekend Link Dump", {"weekend link dump"}, ""), r("strange_company", "x", {"murder"}, "")),
+          ("unusual_deaths", "unusual_deaths", "weird_facts", None, None, None, None))
+    check("feed paging: Blogger pages with start-index (50 a page), WordPress with ?paged", (C.feed_page_url(C.FEEDS["strange_company"], 1), C.feed_page_url(C.FEEDS["strange_company"], 3), C.feed_page_url(C.FEEDS["futility_closet"], 2)),
+          ("https://strangeco.blogspot.com/feeds/posts/default?max-results=50&start-index=1", "https://strangeco.blogspot.com/feeds/posts/default?max-results=50&start-index=101", "https://www.futilitycloset.com/feed/?paged=2"))
+    check("pick: a content-note paragraph ('A word of warning: ...') is not the story's opening", C.pick_paragraphs(["A word of warning: this post discusses a mysterious fatality that is pretty dark, even for this blog and its readers.", P1, P2], "T")[0], [P1, P2])
+    check("safety: a conspiracy piece on a hate, health, election, 9/11 or political topic is unsafe; an absurd one is not", [C.unsafe_topic(t, "") for t in ("The Rothschild Conspiracy", "Vaccine Ingredients", "World Trade Center 7: The Lies Come Crashing Down", "Is the election rigged?", "Support Your Local Reptoid", "The Denver Airport Conspiracy", "Rods: Flying Absurdities", "MKUltra And Secret Mind-Control Experiments")],
+          [True, True, True, True, False, False, False, False])
+    list_html = ('<html><body><article><h2>24. The Killing Joke</h2><p>' + P1 + '</p><p>' + P2 + '</p><h2>23. Falling</h2><p>' + P3 + '</p><h2>1. Again</h2><p>' + P1 + '</p><h3>More from the site</h3><p>' + P2 + '</p></article></body></html>')
+    ents = C.parse_list_article(list_html, "https://x.test/list", 2)
+    check("list article: one item per NUMBERED h2 (the number is not part of the title), its paragraphs up to the next heading, and no more than max_entries", ([(e["title"], len(e["paragraphs"])) for e in ents], len(C.parse_list_article(list_html, "u", 10))), ([("The Killing Joke", 2), ("Falling", 1)], 3))
+    check("list article: the other list of a two-list article is not read (HistorySnob's 'still might be' ten)", (C.LIST_ARTICLES["historysnob_true_conspiracies"]["max_entries"], C.LIST_ARTICLES["historysnob_true_conspiracies"]["category"], C.LIST_ARTICLES["factinate_ironic_deaths"]["category"]), (10, "conspiracies", "unusual_deaths"))
+    real_get2, real_paras = C.http_get, C.page_paragraphs_of
+    C.http_get = lambda url, tries=3, timeout=30: Resp(200, text='<a href="/episodes/1013">Medbeds</a><a href="/episodes/1013"></a><a href="/episodes/46">Support Your Local Reptoid</a><a href="/episodes/46"></a><a href="/other/9">x</a>')
+    C.page_paragraphs_of = lambda url, selector=None: ([P1, P2], "ok") if url.endswith("/46") else ([], "http_429")
+    C.time.sleep = lambda s: None
+    try:
+        isrc = dict(C.INDEX_SOURCES["skeptoid_conspiracies"], fetch_cap=5)
+        iit, ist, ipr = C.read_index_source("skeptoid_conspiracies", isrc, {}, set(), C.time.monotonic() + 100)
+    finally:
+        C.http_get, C.page_paragraphs_of, C.time.sleep = real_get2, real_paras, real_sleep
+    check("index source: every listed page is read newest first; a throttled one is NOT remembered (retried next cycle), a read one is", ([i["title"] for i in iit], ist["listed"], ist["page_status"], len(ipr["seen"])), (["Support Your Local Reptoid"], 2, {"http_429": 1, "ok": 1}, 1))
 
     # ---- the structural filters: the same rules the library uses, with the curated floor of two sentences
     check("rules: a curated item under two full sentences is dropped for EVERY category, a list page too", (L.rule_reason("dark_history", "T", "One long enough sentence only, with nothing after it at all.", C.MIN_SENTENCES), L.rule_reason("weird_facts", "List of odd things", P1 + " " + P2, 2),
