@@ -783,6 +783,63 @@ def main():
           (False, False, False, True, False))
     check("fallback card: nothing but a title and no amount still gives a clean card", FB.reward_text({"title": "t", "enriched": {}}), "")
 
+    # ---- 2026-11-24: the repeated-prompt alert (earning_opportunities, prompt 9916cbdd9381, 8 identical calls). Cause: an announcement that was partly about a REFERRAL program reached the writer whole, the writer repeated
+    # the wording, the guard rejected every draft, and the model sent back the same draft each time, so every retry prompt was identical. Not the reader (it ran once). Two fixes, pinned here.
+    from pipeline import post_facts as PF
+    from pipeline import write_post as W
+    entropy = {"title": "Entropy snapshot", "source": "tg:x", "source_name": "X", "payout_usd": None, "enriched": {
+        "version": 2, "reward": "Self Rebate up to 200%, Referral Reward up to 100%, and Referred-User Benefit up to 100%, depending on tier", "minimums": "Minimum withdrawal threshold is $5",
+        "conditions": ["New accounts pay a base trading fee of 0.05%", "Referral program is two-tier: 15% from direct invites and 5% from second-level referrals"],
+        "steps": ["Go to the Entropy website and connect your wallet", "Share your referral code with friends"],
+        "post_en": "Overnight the team rolled out an update. What changed: new accounts pay 0.05%; Referral program - a two-tier reward system was launched: 15% from direct invites. Go to the website and connect a wallet."}}
+    facts = PF.facts_earning_opportunities(entropy)
+    check("referral: no referral wording reaches the writer (reward, conditions, steps and the announcement are filtered)", [w for w in ("Referral", "referral", "Referred") if w in facts], [])
+    check("referral: what is not about a referral stays (a fee, a minimum, a step, the rest of the announcement)", ("0.05%" in facts, "Minimum withdrawal threshold is $5" in facts, "connect your wallet" in facts, "connect a wallet" in facts), (True, True, True, True))
+    check("referral: a referral-only reward is left out, not replaced by anything", "- Reward:" in facts, False)
+    card = FB.plain_facts_card(entropy)
+    check("fallback card: no referral wording either (its docstring promises none)", [w for w in ("Referral", "referral", "Referred") if w in card], [])
+    check("referral: without_referral on text that is all about referrals is None, on plain text unchanged", (PF.without_referral("Use my referral code. Join the affiliate programme."), PF.without_referral("Trade 50 EUR; get 10 EUR.")), (None, "Trade 50 EUR; get 10 EUR."))
+    calls = []
+    real_gen, real_parse = W.llm.generate_write, W.post_format.parse_llm_json
+    try:
+        W.post_format.parse_llm_json = lambda raw: {"title": "t", "paragraphs": [raw]}
+        # the model returns EXACTLY the draft it was shown as rejected: stop at once instead of sending the same prompt again and again
+        W.llm.generate_write = lambda conn, cat, prompt: (calls.append(prompt), "a draft that is always wrong")[1]
+        err = None
+        try:
+            W._generate_voiced_write(None, "earning_opportunities", "PROMPT", lambda parsed: ["it mentions a referral / invite / promo code"], max_retries=9)
+        except RuntimeError as exc:
+            err = str(exc)
+        check("retry loop: a repeated rejected draft stops the retries (2 calls, not 10) and still reads as a guard failure, so the plain facts card is sent", (len(calls), len(set(calls)) == len(calls), "still failed the voice/guard checks" in (err or "")), (2, True, True))
+        # a model that CHANGES its draft keeps its retries: the 3rd draft passes
+        replies = iter(["draft one", "draft two", "draft three"]); calls.clear()
+        W.llm.generate_write = lambda conn, cat, prompt: (calls.append(prompt), next(replies))[1]
+        parsed, attempts, _ = W._generate_voiced_write(None, "earning_opportunities", "PROMPT", lambda parsed: [] if parsed["paragraphs"][0] == "draft three" else ["too long"], max_retries=9)
+        check("retry loop: a draft that changes each time is still retried until it passes", (attempts, len(calls)), (3, 3))
+    finally:
+        W.llm.generate_write, W.post_format.parse_llm_json = real_gen, real_parse
+
+    # ---- the offer is read when the CARD is created (bot/notify.preread_offers), stored on the item, and never read again at the tap
+    from bot import notify as N
+    from pipeline import offer_reader as ORD
+    read_ids, real_enrich = [], ORD.enrich_offer
+    try:
+        ORD.enrich_offer = lambda conn, raw_item, force=False: (read_ids.append(raw_item["raw_item_id"]), (_ for _ in ()).throw(RuntimeError("reader down")) if raw_item["raw_item_id"] == 2 else {})[1]
+        cands = [("earning_opportunities", {"raw_item_id": 1, "payload": {}, "score": 60}), ("earning_opportunities", {"raw_item_id": 2, "payload": {}, "score": 60}), ("news", {"raw_item_id": 3, "payload": {}, "score": 60}),
+                 ("earning_opportunities", {"raw_item_id": 4, "payload": {}, "score": 60})]
+        n_read = N.preread_offers(type("C", (), {"rollback": lambda self: None})(), cands)
+    finally:
+        ORD.enrich_offer = real_enrich
+    check("pre-read at card creation: only Earn Stack items are read, each once, and a failing read never stops the card or the rest", (read_ids, n_read), ([1, 2, 4], 2))
+    stored = {"title": "t", "enriched": {"version": 2, "steps": ["x"], "read": {}}}
+    boom = ORD.build_enriched
+    ORD.build_enriched = lambda *a, **k: (_ for _ in ()).throw(AssertionError("the reader must not run again for an item whose result is stored"))
+    try:
+        again = ORD.enrich_offer(None, {"raw_item_id": 9, "payload": stored})
+    finally:
+        ORD.build_enriched = boom
+    check("pre-read: at the tap (and on every retry) the stored result is used -- the reader never runs again for the item", again is stored["enriched"], True)
+
     if FAILS:
         print(f"{len(FAILS)} MISMATCH(ES):")
         for f in FAILS:

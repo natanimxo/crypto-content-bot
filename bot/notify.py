@@ -145,7 +145,10 @@ def render_candidates(conn, channel: str, all_candidates: list) -> tuple[str, li
 # approves, edits or skips -- no second wait for a write after the tap. Each draft is its own message (a draft is ~900 characters; a bundle would hit Telegram's 4096 limit).
 # The text is stored on the approval (approvals.draft_text) and Approve sends exactly that text as the forwardable preview. A candidate whose draft cannot be written (a guard kept
 # failing, a model outage) is NOT lost: it goes out as the ordinary triage card, and Approve writes it then, as before.
-DRAFT_FIRST_CHANNELS = {"crypto_notebook", "we_talk_a_lot"}
+#
+# 2026-11-24 (operator): Crypto Notebook is NO LONGER draft-first -- it is back to short triage cards, the post written after the tap. We Talk A Lot stays: its "draft" is the source's exact words built by code (no model call,
+# no wait), and the operator judges the finished text, not a one-line summary of a joke.
+DRAFT_FIRST_CHANNELS = {"we_talk_a_lot"}
 CHANNEL_PER_CYCLE_LIMIT = {"we_talk_a_lot": 1}   # cards per notify run for the whole channel, on top of each category's own per-cycle slot (2026-11-22: jokes only, one card at 06:00 and one at 18:00 UTC)
 DRAFT_CARD_MAX_CHARS = 3900
 
@@ -216,6 +219,30 @@ def _send_draft_cards(conn, channel: str, candidates: list, prebuilt: dict | Non
         conn.commit()
         logger.info("notify: channel=%s sent a finished draft for raw_item_id=%s notification_id=%s", channel, row["raw_item_id"], last_id)
     return rest, last_id
+
+
+def preread_offers(conn, candidates: list) -> int:
+    """Earn Stack (operator 2026-11-24): the offer READER (source-post translation, the landing page, the plain fetch, the official-domain search -- ~5 model calls and several fetches) runs HERE, when the card is created,
+    silently, and its result is stored on the item (payload['enriched']). Nothing extra is sent. Approve then only runs the writer: pipeline.write_post calls offer_reader.enrich_offer, which returns the stored result.
+    It runs BEFORE the card is sent so a tap can never find the read half-done; a failure here never blocks the card (the tap-time write reads it then, as before). The calls are tagged: one pre-read per item is bounded
+    by design (stored once, never repeated) and must not trip the 20-calls-in-15-minutes alert. Returns how many items were read."""
+    from pipeline import llm_usage, offer_reader          # imported here: a notify run with no Earn Stack card never needs the model clients
+    read = 0
+    for category, row in candidates:
+        if category != "earning_opportunities":
+            continue
+        raw_item = {"raw_item_id": row["raw_item_id"], "payload": row["payload"], "collected_at": row.get("collected_at"), "score": row["score"], "score_breakdown": row.get("score_breakdown")}
+        try:
+            with llm_usage.tagged("earn_stack_preread"):
+                offer_reader.enrich_offer(conn, raw_item)
+            read += 1
+        except Exception:
+            logger.exception("notify: the offer pre-read failed for raw_item_id=%s -- the card goes out anyway, the write will read it", row["raw_item_id"])
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+    return read
 
 
 def notify_channel(conn, channel: str, categories: list[str], soft_daily_cap: int | None = None) -> int | None:
@@ -292,6 +319,8 @@ def notify_channel(conn, channel: str, categories: list[str], soft_daily_cap: in
         all_candidates, draft_notification_id = _send_draft_cards(conn, channel, all_candidates, prebuilt)
         if not all_candidates:
             return draft_notification_id
+
+    preread_offers(conn, all_candidates)
 
     # Build the whole message and keyboard BEFORE writing anything to the DB.
     # Buttons reference raw_item_id (not an approval_id) precisely so nothing

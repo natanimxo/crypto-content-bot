@@ -141,7 +141,7 @@ def main():
     from bot import approval_poller as AP
     from bot import notify as N
 
-    check("draft-first: Crypto Notebook and (since 2026-11-20) We Talk A Lot", N.DRAFT_FIRST_CHANNELS, {"crypto_notebook", "we_talk_a_lot"})
+    check("draft-first: only We Talk A Lot (Crypto Notebook went back to short cards, post written after the tap, 2026-11-24)", N.DRAFT_FIRST_CHANNELS, {"we_talk_a_lot"})
     card, kb = N.render_draft_card("Crypto Notebook", "🧭 TECHNIQUE OF THE WEEK", "score 83.7/100", "🧭 <b>How does it work?</b>\n\nBody.", 42)
     check("draft card: the draft is shown unescaped under a header that names the channel", ("Finished draft for Crypto Notebook" in card, "<b>How does it work?</b>" in card, "&lt;" in card), (True, True, False))
     check("draft card: Approve / Edit / Skip use the existing callbacks (no new handler)", [(b["text"], b["callback_data"]) for b in kb], [("✅ Approve", "approve:42"), ("✏️ Edit", "edit:42"), ("❌ Skip", "reject:42")])

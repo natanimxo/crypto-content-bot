@@ -319,7 +319,21 @@ STRUCTURED_SOURCES = {"superteam", "zindi", "immunefi"}      # platforms whose A
 # A participation step (or an eligibility clause) that is about a referral / promo code is never handed to the writer: the operator adds referral
 # links by hand and no one else's code goes out under his name (the guard rejects referral language anyway, so a post built from such a step could
 # only fail). Found on the Superteam "Raenest" bounty, whose own steps say "sign up using code: community" and "include your unique referral code".
-_REFERRAL_STEP_RE = re.compile(r"referral|referrer|refer a |invite (?:code|link)|promo(?:tional)? code|affiliate|(?:using|with|use) (?:the )?code\b|\bcode:", re.IGNORECASE)
+_REFERRAL_STEP_RE = re.compile(r"referral|referrer|referred|refer a |refer(?:ral)? (?:code|link)|invite (?:code|link|friends?)|use (?:my|our) (?:link|code)|promo(?:tional)? code|affiliate|(?:using|with|use) (?:the )?code\b|\bcode:", re.IGNORECASE)
+
+
+def has_referral(text: str | None) -> bool:
+    """True when the text is about a referral / invite / promo code (a superset of what the writer's guard rejects, write_post._EARN_REFERRAL_RE)."""
+    return bool(text) and bool(_REFERRAL_STEP_RE.search(text))
+
+
+def without_referral(text: str | None) -> str | None:
+    """The text with every sentence / clause about a referral program left out (None when nothing is left). 2026-11-24: an announcement that was PARTLY about a referral program (Entropy) reached the writer whole, the
+    writer repeated the wording, the guard rejected every draft, and the model returned the same draft ten times. Such wording is never handed to the writer: the facts are what is left."""
+    if not text:
+        return None
+    kept = [c for c in re.split(r"(?<=[.!?;])\s+", text) if c and not _REFERRAL_STEP_RE.search(c)]
+    return " ".join(kept).strip() or None
 
 
 def _shorten(text: str | None, limit: int) -> str | None:
@@ -349,7 +363,9 @@ def facts_earning_opportunities(p: dict) -> str:
     extra_steps = max(0, len(steps) - MAX_FACT_STEPS)
     steps = [_shorten(x, 170).replace(" (more on the page)", "") for x in steps[:MAX_FACT_STEPS]]       # a step is kept whole (170 characters), never cut mid-sentence
     dropped_referral = len(enriched.get("steps") or []) - len(steps) - extra_steps > 0
-    reward = _shorten(enriched.get("reward"), 120)
+    # a reward / cost / minimum the reader took from a REFERRAL page ("Referral Reward up to 100%") is not this offer's reward: left out, never handed to the writer (whose guard rejects referral wording)
+    page_reward = None if has_referral(enriched.get("reward")) else enriched.get("reward")
+    reward = _shorten(page_reward, 120)
     def shown(display_key: str, usd: float | None) -> str:
         """The amount in its ORIGINAL currency (never converted); only when the original could not be recovered is a dollar equivalent named as such."""
         return p.get(display_key) or (f"about ${usd:,.0f} (a dollar equivalent; the original currency is not recorded)" if usd else "")
@@ -377,7 +393,7 @@ def facts_earning_opportunities(p: dict) -> str:
         base = (f"a prize pool of ${pool:,.0f} shared among the winners only{avg} (this is the reward -- lead with it)" if p.get("pool_usd")
                 else f"${pool:,.0f} (this is the reward -- lead with it)")
         from pipeline import earning as _earning
-        detail = _shorten(enriched.get("reward"), 120)
+        detail = _shorten(page_reward, 120)
         if detail and max(_earning.extract_amounts_usd(detail) or [0.0]) <= pool * 1.05:
             base += f"; the page breaks it down as: {detail}"
         reward = base
@@ -389,7 +405,7 @@ def facts_earning_opportunities(p: dict) -> str:
     if is_comp:
         # A COMPETITION (operator 2026-11-16): ranked / judged prizes. Show the prize STRUCTURE and the ODDS in the ORIGINAL currency -- never an average per
         # entrant (that only describes a raffle), never a converted amount. The page's own ladder fills in the tiers when the API had none.
-        ladder = None if (_prizes.prize_info(p).get("tiers")) else _prizes.parse_ladder(enriched.get("reward") or "")
+        ladder = None if (_prizes.prize_info(p).get("tiers")) else _prizes.parse_ladder(page_reward or "")
         reward = (f"a competition -- only the winners are paid, ranked on merit, not everyone who enters: {_prizes.prize_line(p, ladder=ladder)} "
                   f"(this is the reward -- lead with it; give the prize structure and the number of entrants, never an average per entrant)")
         if headline:
@@ -400,8 +416,9 @@ def facts_earning_opportunities(p: dict) -> str:
     cap = p.get("capital_usd")
     # A fact the sources do not give is LEFT OUT of the facts (operator 2026-11-22): the writer is never handed "not stated" to repeat. capital_usd == 0 is the collector's DEFAULT when it found no deposit wording, not a statement
     # that nothing is required, so it is not passed on as one.
-    cost_bits = [enriched.get("cost")] if enriched.get("cost") else ([f"about ${cap:,.0f} of your own money is needed"] if cap and cap > 0 else [])
-    if enriched.get("minimums"):
+    page_cost = None if has_referral(enriched.get("cost")) else enriched.get("cost")
+    cost_bits = [page_cost] if page_cost else ([f"about ${cap:,.0f} of your own money is needed"] if cap and cap > 0 else [])
+    if enriched.get("minimums") and not has_referral(enriched["minimums"]):
         cost_bits.append("minimum to qualify: " + enriched["minimums"])
     cost = "; ".join(cost_bits)
     # A structured platform's own deadline (an ISO timestamp from its API) is authoritative: the page text shows the same instant in the fetcher's
@@ -449,6 +466,7 @@ def facts_earning_opportunities(p: dict) -> str:
     if not post_en:
         desc = (p.get("description") or "").strip()
         post_en = desc if len(_norm(desc)) > len(_norm(p.get("title") or "")) * 2 + 20 else None
+    post_en = without_referral(post_en)         # the sentences about a referral program stay out of what the writer reads
     if post_en:
         lines.append("- The announcement itself (the offer's own words, in English; every amount, date, step and rule in it is a fact you may use):")
         lines.append("  " + post_en[:2400].replace("\n", "\n  "))

@@ -1920,8 +1920,18 @@ def _generate_voiced_write(conn, category: str, prompt: str, check, *, model_ove
     issues_per_failed_attempt); raises RuntimeError after max_retries."""
     history: list[list[str]] = []
     current = prompt
+    previous_raw = None
     for attempt in range(1, max_retries + 2):
         raw = llm.generate_write(conn, category, current)
+        if previous_raw is not None and str(raw).strip() == previous_raw:
+            # The model sent back EXACTLY the draft it was just shown as rejected: the next retry prompt would be the same prompt again (2026-11-24: ten calls with one prompt hash, the repeated-prompt
+            # alert, ~30 seconds of waiting for a card that was never going to pass). Retrying a deterministic repeat cannot converge, so stop now; the caller's fallback card takes over.
+            logger.warning("write_post: category=%s attempt=%d returned the same rejected draft as the attempt before -- stopping the retries", category, attempt)
+            raise RuntimeError(
+                f"write_post: category={category} still failed the voice/guard checks after {attempt - 1} retries "
+                f"({history[-1]}) -- refusing to publish rather than ship it (the model repeated the rejected draft)"
+            )
+        previous_raw = str(raw).strip()
         try:
             parsed = post_format.parse_llm_json(raw)
             issues = check(parsed)

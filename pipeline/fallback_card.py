@@ -13,7 +13,7 @@ Pure functions of the stored payload and score breakdown.
 import datetime as _dt
 import html
 
-from pipeline import prizes
+from pipeline import post_facts, prizes
 
 _GEO = {"worldwide": "Open worldwide", "multi": "Open in several regions", "single": "Open in ONE country only"}
 
@@ -33,7 +33,7 @@ def reward_text(p: dict) -> str:
     if line:
         return line
     shown = lambda key, usd: p.get(key) or (f"about ${usd:,.0f} (a dollar equivalent)" if usd else "")
-    if e.get("reward"):
+    if e.get("reward") and not post_facts.has_referral(e["reward"]):       # a reward read off a referral page is not this offer's reward
         return e["reward"]
     if p.get("token_reward"):
         t = p["token_reward"]
@@ -61,14 +61,15 @@ def plain_facts_card(payload: dict, breakdown: dict | None = None, display_name:
     deadline = _day(p.get("deadline")) or e.get("deadline")
     if deadline:
         lines.append(f"<b>Deadline:</b> {html.escape(deadline)}")
-    who = e.get("eligibility") or _GEO.get(p.get("geo"))
+    who = "; ".join(c for c in (e.get("eligibility") or "").split("; ") if c and not post_facts.has_referral(c)) or _GEO.get(p.get("geo"))
     if who:
         lines.append(f"<b>Who can take part:</b> {html.escape(who)}")
     cap = p.get("capital_usd")
-    cost = e.get("cost") or (f"About ${cap:,.0f} of your own money is asked for (a deposit)" if cap and cap > 0 else "")
+    page_cost = None if post_facts.has_referral(e.get("cost")) else e.get("cost")
+    cost = page_cost or (f"About ${cap:,.0f} of your own money is asked for (a deposit)" if cap and cap > 0 else "")
     if cost:
         lines.append(f"<b>Cost:</b> {html.escape(cost)}")
-    if e.get("minimums"):
+    if e.get("minimums") and not post_facts.has_referral(e["minimums"]):
         lines.append(f"<b>Minimum:</b> {html.escape(e['minimums'])}")
     reqs = [x.replace("_", " ") for x in (p.get("prereqs") or [])]
     if b.get("kyc") is True and "kyc" not in reqs:
@@ -77,9 +78,9 @@ def plain_facts_card(payload: dict, breakdown: dict | None = None, display_name:
         reqs.append("professional skill: " + ", ".join(p["skill"]))
     if reqs:
         lines.append(f"<b>Requirements:</b> {html.escape(', '.join(reqs))}")
-    for c in (e.get("conditions") or [])[:4]:
+    for c in [c for c in (e.get("conditions") or []) if not post_facts.has_referral(c)][:4]:
         lines.append(f"• {html.escape(c)}")
-    steps = [s for s in (e.get("steps") or [])][:6]
+    steps = [s for s in (e.get("steps") or []) if not post_facts.has_referral(s)][:6]          # "NO referral wording" (module docstring): a step or condition about a referral program stays out
     if steps:
         lines.append("")
         lines += [f"{i}. {html.escape(s)}" for i, s in enumerate(steps, 1)]

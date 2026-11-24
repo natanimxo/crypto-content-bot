@@ -51,6 +51,16 @@ def edit_message_text(chat_id: str, message_id: int, text: str, reply_markup: di
     return resp["result"]
 
 
+def delete_message(chat_id: str, message_id: int) -> bool:
+    """Deletes a message the bot sent (Telegram allows a bot to delete its own messages in a private chat for 48 hours). True when deleted; False (never raises) when Telegram refuses -- too old, already gone."""
+    import requests          # not post_json: a refusal (HTTP 400 "message can't be deleted") is an answer, not a transient failure to retry three times
+    try:
+        resp = requests.post(f"{_base_url()}/deleteMessage", json={"chat_id": chat_id, "message_id": message_id}, timeout=30)
+        return bool(resp.ok and resp.json().get("ok"))
+    except (requests.RequestException, ValueError):
+        return False
+
+
 def send_poll(chat_id: str, question: str, options: list[str], *, is_anonymous: bool = True) -> dict:
     """A native Telegram poll (2-10 options). Options go as InputPollOption objects (Bot API 7.3+)."""
     body = {"chat_id": chat_id, "question": question[:300], "options": [{"text": str(o)[:100]} for o in options], "is_anonymous": is_anonymous}
